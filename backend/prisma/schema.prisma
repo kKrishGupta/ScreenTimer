@@ -51,6 +51,13 @@ model Organization {
   events         ActivityEvent[]
   sessions       ActivitySession[]
   dailySummaries DailySummary[]
+  screenCaptures ScreenCaptureMetadata[]
+  screenShares   ScreenShareSession[]
+  plannerTasks   PlannerTask[]
+  focusSessions  FocusSession[]
+  policies       FamilyPolicy[]
+  violations     PolicyViolation[]
+  auditLogs      AuditLog[]
 
   @@map("organizations")
 }
@@ -66,6 +73,8 @@ model User {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   devices      Device[]
+  plannerTasks PlannerTask[]
+  focusSessions FocusSession[]
 
   @@unique([organizationId, email])
   @@map("users")
@@ -92,6 +101,8 @@ model Device {
   events         ActivityEvent[]
   sessions       ActivitySession[]
   dailySummaries DailySummary[]
+  screenCaptures ScreenCaptureMetadata[]
+  screenShares   ScreenShareSession[]
 
   @@index([organizationId])
   @@index([userId])
@@ -196,5 +207,127 @@ model DailySummary {
   @@unique([deviceId, day])
   @@index([organizationId, day])
   @@map("daily_summaries")
+}
+
+model ScreenCaptureMetadata {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  deviceId        String   @map("device_id") @db.Uuid
+  filePath        String   @map("file_path") @db.VarChar(512)
+  applicationName String   @map("application_name") @db.VarChar(128)
+  sizeBytes       Int      @map("size_bytes")
+  width           Int      @default(1920)
+  height          Int      @default(1080)
+  blurred         Boolean  @default(false)
+  capturedAt      DateTime @default(now()) @map("captured_at") @db.Timestamptz(3)
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  device          Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, capturedAt])
+  @@map("screen_captures")
+}
+
+model ScreenShareSession {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  deviceId        String   @map("device_id") @db.Uuid
+  sessionToken    String   @unique @map("session_token") @db.VarChar(128)
+  active          Boolean  @default(true)
+  durationMinutes Int      @default(15) @map("duration_minutes")
+  startedAt       DateTime @default(now()) @map("started_at") @db.Timestamptz(3)
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz(3)
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  device          Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("screen_share_sessions")
+}
+
+model PlannerTask {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  title          String   @db.VarChar(200)
+  category       String   @default("general") @db.VarChar(64)
+  targetMinutes  Int      @default(30) @map("target_minutes")
+  completed      Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, completed])
+  @@map("planner_tasks")
+}
+
+model FocusSession {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  userId          String?  @map("user_id") @db.Uuid
+  title           String   @db.VarChar(128)
+  durationMinutes Int      @map("duration_minutes")
+  startedAt       DateTime @default(now()) @map("started_at") @db.Timestamptz(3)
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz(3)
+  completed       Boolean  @default(false)
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("focus_sessions")
+}
+
+model FamilyPolicy {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId          String   @map("organization_id") @db.Uuid
+  name                    String   @db.VarChar(128)
+  category                String   @db.VarChar(64)
+  restrictedDomains       String[] @map("restricted_domains")
+  allowedDomains          String[] @map("allowed_domains")
+  maxMinutesPerDay        Int      @default(60) @map("max_minutes_per_day")
+  warningThresholdPercent Int      @default(80) @map("warning_threshold_percent")
+  action                  String   @default("warn") @db.VarChar(32)
+  active                  Boolean  @default(true)
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization            Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  violations              PolicyViolation[]
+
+  @@map("family_policies")
+}
+
+model PolicyViolation {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  policyId       String?  @map("policy_id") @db.Uuid
+  deviceId       String?  @map("device_id") @db.Uuid
+  target         String   @db.VarChar(255)
+  targetType     String   @map("target_type") @db.VarChar(32)
+  severity       String   @default("warning") @db.VarChar(32)
+  warningMessage String   @map("warning_message") @db.VarChar(512)
+  acknowledged   Boolean  @default(false)
+  timestamp      DateTime @default(now()) @db.Timestamptz(3)
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  policy         FamilyPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, acknowledged])
+  @@map("policy_violations")
+}
+
+model AuditLog {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  action         String   @db.VarChar(64)
+  actor          String   @default("local_user") @db.VarChar(128)
+  details        Json?    @db.JsonB
+  timestamp      DateTime @default(now()) @db.Timestamptz(3)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, timestamp])
+  @@map("audit_logs")
 }
 
