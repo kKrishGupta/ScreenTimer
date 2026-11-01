@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+  <title>DigitalPulse</title>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2">
+        <path d="M3 12h4l3-8 4 16 3-8h4"/>
+      </svg>
+      <h1>DigitalPulse</h1>
+    </div>
+    <span id="status-badge" class="badge">Checking...</span>
+  </div>
+
+  <div class="content">
+    <div class="field">
+      <span class="label">Device ID:</span>
+      <span id="device-id" class="value mono">...</span>
+    </div>
+    <div class="field">
+      <span class="label">Backend:</span>
+      <span id="backend-url" class="value mono">http://127.0.0.1:3001</span>
+    </div>
+    <div class="field">
+      <span class="label">Pending Queue:</span>
+      <span id="queue-count" class="value">0 events</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    <button id="sync-btn" class="btn">Sync Now</button>
+  </div>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
+

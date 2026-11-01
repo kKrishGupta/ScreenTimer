@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://digitalpulse.local/contracts/activity-event.v1.schema.json",
+  "title": "ActivityEvent (v1)",
+  "description": "A single, completed activity interval produced by a DigitalPulse collector (desktop agent or browser extension). Events are immutable and idempotent by eventId. All timestamps are RFC 3339 / ISO 8601 in UTC.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "deviceId",
+    "source",
+    "type",
+    "startedAt",
+    "endedAt",
+    "durationSeconds"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Contract version. Incremented on breaking changes.",
+      "type": "integer",
+      "const": 1
+    },
+    "eventId": {
+      "description": "Client-generated UUID. Used as the idempotency key for deduplication.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "deviceId": {
+      "description": "UUID of the collecting installation (desktop agent or browser extension).",
+      "type": "string",
+      "format": "uuid"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["desktop_agent", "browser_extension"]
+    },
+    "type": {
+      "type": "string",
+      "enum": ["app_session", "web_session", "idle_session"]
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "durationSeconds": {
+      "description": "Active duration of the interval in seconds. Must not exceed 24 hours; collectors split longer intervals.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 86400
+    },
+    "app": {
+      "description": "Present for app_session events only. No window content is ever included.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "executable"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "executable": { "type": "string", "minLength": 1, "maxLength": 260 },
+        "processId": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "web": {
+      "description": "Present for web_session events only. Domain-level only: no path, query string or fragment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "browser"],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "^[a-z0-9.-]+$"
+        },
+        "browser": { "type": "string", "enum": ["chrome", "edge"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "app_session" } } },
+      "then": { "required": ["app"], "not": { "required": ["web"] } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "web_session" } } },
+      "then": { "required": ["web"], "not": { "required": ["app"] } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "idle_session" } } },
+      "then": { "not": { "anyOf": [{ "required": ["app"] }, { "required": ["web"] }] } }
+    }
+  ]
+}
+

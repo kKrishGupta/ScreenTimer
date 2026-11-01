@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "eventId": "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a12",
+  "deviceId": "0b7d3b0e-2a52-4d8c-8f3e-6a3f8f3d9c21",
+  "source": "desktop_agent",
+  "type": "idle_session",
+  "startedAt": "2026-11-01T10:07:00.000Z",
+  "endedAt": "2026-11-01T10:12:00.000Z",
+  "durationSeconds": 300
+}
+

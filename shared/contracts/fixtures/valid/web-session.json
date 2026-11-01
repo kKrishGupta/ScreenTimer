@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "eventId": "a8e2a7a4-3c55-4a8e-b1f2-1f0c9b7d6e33",
+  "deviceId": "5c2f8e61-7d0a-4b3c-9e8f-0a1b2c3d4e55",
+  "source": "browser_extension",
+  "type": "web_session",
+  "startedAt": "2026-11-01T10:05:30.000Z",
+  "endedAt": "2026-11-01T10:07:00.000Z",
+  "durationSeconds": 90,
+  "web": {
+    "domain": "developer.mozilla.org",
+    "browser": "edge"
+  }
+}
+

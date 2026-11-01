@@ -1,0 +1,35 @@
+{
+  "name": "@digitalpulse/backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DigitalPulse local backend (Fastify + Prisma + PostgreSQL)",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\"",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed",
+    "db:status": "prisma migrate status"
+  },
+  "dependencies": {
+    "@digitalpulse/contracts": "*",
+    "@fastify/cors": "^11.3.1",
+    "@fastify/helmet": "^13.2.0",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "dotenv": "^18.0.9",
+    "fastify": "^5.12.7",
+    "pg": "^8.13.3"
+  },
+  "devDependencies": {
+    "pino-pretty": "^13.2.0",
+    "prisma": "^7.10.1"
+  }
+}

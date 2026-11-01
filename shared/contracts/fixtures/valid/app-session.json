@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "eventId": "6f1c1a52-6b1e-4f7e-9a39-2a8f0f6f2b11",
+  "deviceId": "0b7d3b0e-2a52-4d8c-8f3e-6a3f8f3d9c21",
+  "source": "desktop_agent",
+  "type": "app_session",
+  "startedAt": "2026-11-01T10:00:00.000Z",
+  "endedAt": "2026-11-01T10:05:30.000Z",
+  "durationSeconds": 330,
+  "app": {
+    "name": "Visual Studio Code",
+    "executable": "Code.exe",
+    "processId": 4242
+  }
+}
+

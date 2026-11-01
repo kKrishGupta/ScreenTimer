@@ -1,0 +1,24 @@
+[package]
+name = "dp-user-agent"
+description = "DigitalPulse user-session agent: collects foreground application and idle activity, shows a tray status."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dp-user-agent"
+path = "src/main.rs"
+
+[dependencies]
+dp-core.workspace = true
+dp-platform-windows.workspace = true
+dp-storage.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
+

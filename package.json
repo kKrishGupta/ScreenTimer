@@ -1,0 +1,33 @@
+{
+  "name": "digitalpulse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DigitalPulse - Windows-first local digital activity monitoring platform (Stage 1 local MVP)",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "workspaces": [
+    "shared/contracts",
+    "backend",
+    "apps/dashboard",
+    "apps/browser-extension"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev -w @digitalpulse/backend",
+    "dev:dashboard": "npm run dev -w @digitalpulse/dashboard",
+    "start:backend": "npm run start -w @digitalpulse/backend",
+    "build:dashboard": "npm run build -w @digitalpulse/dashboard",
+    "db:generate": "npm run db:generate -w @digitalpulse/backend",
+    "db:migrate": "npm run db:migrate -w @digitalpulse/backend",
+    "db:deploy": "npm run db:deploy -w @digitalpulse/backend",
+    "db:seed": "npm run db:seed -w @digitalpulse/backend",
+    "test:contracts": "npm test -w @digitalpulse/contracts",
+    "test:backend": "npm test -w @digitalpulse/backend",
+    "test:extension": "npm test -w @digitalpulse/browser-extension",
+    "test:dashboard": "npm test -w @digitalpulse/dashboard",
+    "test:js": "npm test --workspaces --if-present",
+    "lint:dashboard": "npm run lint -w @digitalpulse/dashboard"
+  }
+}
+

@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dp-core",
+    "crates/dp-platform-windows",
+    "crates/dp-storage",
+    "crates/dp-ipc",
+    "crates/dp-user-agent",
+    "crates/dp-service",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "UNLICENSED"
+publish = false
+authors = ["DigitalPulse Engineering"]
+
+[workspace.dependencies]
+# Internal crates
+dp-core = { path = "crates/dp-core" }
+dp-platform-windows = { path = "crates/dp-platform-windows" }
+dp-storage = { path = "crates/dp-storage" }
+dp-ipc = { path = "crates/dp-ipc" }
+
+# External crates (only what the current milestone needs; more are added per milestone)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi", "std"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+# The user agent must stay small and light: optimise, strip and avoid unwinding tables.
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+

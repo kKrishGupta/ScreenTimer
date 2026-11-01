@@ -1,0 +1,83 @@
+[
+  {
+    "reason": "app_session without app block",
+    "event": {
+      "schemaVersion": 1,
+      "eventId": "6f1c1a52-6b1e-4f7e-9a39-2a8f0f6f2b11",
+      "deviceId": "0b7d3b0e-2a52-4d8c-8f3e-6a3f8f3d9c21",
+      "source": "desktop_agent",
+      "type": "app_session",
+      "startedAt": "2026-11-01T10:00:00.000Z",
+      "endedAt": "2026-11-01T10:05:30.000Z",
+      "durationSeconds": 330
+    }
+  },
+  {
+    "reason": "web domain containing a path (privacy: domain only)",
+    "event": {
+      "schemaVersion": 1,
+      "eventId": "a8e2a7a4-3c55-4a8e-b1f2-1f0c9b7d6e33",
+      "deviceId": "5c2f8e61-7d0a-4b3c-9e8f-0a1b2c3d4e55",
+      "source": "browser_extension",
+      "type": "web_session",
+      "startedAt": "2026-11-01T10:05:30.000Z",
+      "endedAt": "2026-11-01T10:07:00.000Z",
+      "durationSeconds": 90,
+      "web": { "domain": "example.com/search?q=secret", "browser": "chrome" }
+    }
+  },
+  {
+    "reason": "unknown extra property (e.g. window title) is rejected",
+    "event": {
+      "schemaVersion": 1,
+      "eventId": "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a12",
+      "deviceId": "0b7d3b0e-2a52-4d8c-8f3e-6a3f8f3d9c21",
+      "source": "desktop_agent",
+      "type": "idle_session",
+      "startedAt": "2026-11-01T10:07:00.000Z",
+      "endedAt": "2026-11-01T10:12:00.000Z",
+      "durationSeconds": 300,
+      "windowTitle": "Inbox - private"
+    }
+  },
+  {
+    "reason": "eventId is not a UUID",
+    "event": {
+      "schemaVersion": 1,
+      "eventId": "not-a-uuid",
+      "deviceId": "0b7d3b0e-2a52-4d8c-8f3e-6a3f8f3d9c21",
+      "source": "desktop_agent",
+      "type": "idle_session",
+      "startedAt": "2026-11-01T10:07:00.000Z",
+      "endedAt": "2026-11-01T10:12:00.000Z",
+      "durationSeconds": 300
+    }
+  },
+  {
+    "reason": "negative duration",
+    "event": {
+      "schemaVersion": 1,
+      "eventId": "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a12",
+      "deviceId": "0b7d3b0e-2a52-4d8c-8f3e-6a3f8f3d9c21",
+      "source": "desktop_agent",
+      "type": "idle_session",
+      "startedAt": "2026-11-01T10:07:00.000Z",
+      "endedAt": "2026-11-01T10:12:00.000Z",
+      "durationSeconds": -5
+    }
+  },
+  {
+    "reason": "unsupported schema version",
+    "event": {
+      "schemaVersion": 2,
+      "eventId": "c3d4e5f6-0718-4293-a4b5-c6d7e8f90a12",
+      "deviceId": "0b7d3b0e-2a52-4d8c-8f3e-6a3f8f3d9c21",
+      "source": "desktop_agent",
+      "type": "idle_session",
+      "startedAt": "2026-11-01T10:07:00.000Z",
+      "endedAt": "2026-11-01T10:12:00.000Z",
+      "durationSeconds": 300
+    }
+  }
+]
+

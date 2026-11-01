@@ -1,0 +1,15 @@
+[package]
+name = "dp-ipc"
+description = "DigitalPulse IPC between the user agent and the Windows service over secured named pipes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Named pipe implementation is introduced after the user-session collector is verified.
+
+[lints]
+workspace = true
+
