@@ -38,6 +38,22 @@ const defaultRouterFetch = async (url) => {
   if (u.includes('/devices')) {
     return new Response(JSON.stringify({ devices: [], count: 0 }), { status: 200 });
   }
+  if (u.includes('/screen/config')) {
+    return new Response(
+      JSON.stringify({
+        consentGranted: false,
+        status: 'stopped',
+        captureIntervalMinutes: 10,
+        retentionDays: 7,
+        totalCaptures: 0,
+        liveSession: { active: false },
+      }),
+      { status: 200 },
+    );
+  }
+  if (u.includes('/screen/captures')) {
+    return new Response(JSON.stringify({ captures: [], count: 0 }), { status: 200 });
+  }
   return new Response(JSON.stringify(healthBody()), { status: 200 });
 };
 
@@ -47,17 +63,23 @@ beforeEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('dashboard shell', () => {
-  it('renders navigation for all six pages', async () => {
+describe('dashboard shell and navigation', () => {
+  it('renders all 12 navigation sections in the evolved sidebar', async () => {
     mockFetch(defaultRouterFetch);
     renderAt('/');
     for (const label of [
       'Overview',
+      'Family Members',
+      'Device Monitoring',
       'Activity Timeline',
       'Application Usage',
       'Website Usage',
-      'Device Status',
-      'Settings',
+      'Screen Monitoring',
+      'Time Planner',
+      'Digital Wellbeing',
+      'Family Policies',
+      'Alerts & Notifications',
+      'Settings & Privacy',
     ]) {
       expect(screen.getAllByRole('link', { name: label }).length).toBeGreaterThan(0);
     }
@@ -182,5 +204,55 @@ describe('dashboard shell', () => {
     renderAt('/devices');
     expect(await screen.findByText('DESKTOP-TEST')).toBeInTheDocument();
     expect(screen.getByText('Windows Desktop Agent')).toBeInTheDocument();
+  });
+
+  it('renders Milestone 7 screen monitoring consent flow when consent is not yet granted', async () => {
+    mockFetch(defaultRouterFetch);
+    renderAt('/screen-monitoring');
+    expect(await screen.findByText('Explicit User Consent Required')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Grant Consent & Enable' })).toBeInTheDocument();
+  });
+
+  it('renders Milestone 7 active screen monitoring controls and captures when consent is granted', async () => {
+    mockFetch(async (url) => {
+      const u = typeof url === 'string' ? url : url?.url ?? '';
+      if (u.includes('/screen/config')) {
+        return new Response(
+          JSON.stringify({
+            consentGranted: true,
+            status: 'active',
+            captureIntervalMinutes: 10,
+            retentionDays: 7,
+            totalCaptures: 1,
+            liveSession: { active: false },
+          }),
+          { status: 200 },
+        );
+      }
+      if (u.includes('/screen/captures')) {
+        return new Response(
+          JSON.stringify({
+            captures: [
+              {
+                id: 'cap-1',
+                timestamp: '2026-11-01T14:30:00.000Z',
+                applicationName: 'Visual Studio Code',
+                previewUrl: 'data:image/svg+xml;utf8,<svg></svg>',
+                width: 1920,
+                height: 1080,
+                sizeBytes: 85000,
+              },
+            ],
+            count: 1,
+          }),
+          { status: 200 },
+        );
+      }
+      return defaultRouterFetch(url);
+    });
+    renderAt('/screen-monitoring');
+    expect(await screen.findByText(/Status: active/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Capture Now' })).toBeInTheDocument();
+    expect(screen.getByText('Visual Studio Code')).toBeInTheDocument();
   });
 });

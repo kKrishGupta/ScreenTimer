@@ -14,19 +14,23 @@ export class ApiError extends Error {
 }
 
 /**
- * GET a JSON resource. Non-2xx responses with a JSON body are still returned when
- * `acceptStatuses` includes their status (e.g. 503 from /health carries useful data).
+ * Executes an HTTP fetch request with timeout and error wrapping.
  */
-export async function getJson(path, { signal, acceptStatuses = [], timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+async function request(path, { method = 'GET', body, signal, acceptStatuses = [], timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), timeoutMs);
-  const onAbort = () => controller.abort(signal.reason);
+  const onAbort = () => controller.abort(signal?.reason);
   signal?.addEventListener('abort', onAbort, { once: true });
 
   let res;
   try {
     res = await fetch(`${API_BASE}${path}`, {
-      headers: { Accept: 'application/json' },
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
   } catch (err) {
@@ -39,13 +43,25 @@ export async function getJson(path, { signal, acceptStatuses = [], timeoutMs = D
     signal?.removeEventListener('abort', onAbort);
   }
 
-  const body = await res.json().catch(() => null);
-  if (res.ok || acceptStatuses.includes(res.status)) return body;
-  throw new ApiError(body?.error?.message ?? `Request failed with status ${res.status}`, {
+  const resBody = await res.json().catch(() => null);
+  if (res.ok || acceptStatuses.includes(res.status)) return resBody;
+  throw new ApiError(resBody?.error?.message ?? `Request failed with status ${res.status}`, {
     status: res.status,
-    code: body?.error?.code ?? 'HTTP_ERROR',
-    body,
+    code: resBody?.error?.code ?? 'HTTP_ERROR',
+    body: resBody,
   });
+}
+
+export function getJson(path, opts) {
+  return request(path, { ...opts, method: 'GET' });
+}
+
+export function postJson(path, body, opts) {
+  return request(path, { ...opts, method: 'POST', body });
+}
+
+export function deleteJson(path, opts) {
+  return request(path, { ...opts, method: 'DELETE' });
 }
 
 export const api = {
@@ -67,5 +83,18 @@ export const api = {
     return getJson(`/activity/websites${q ? `?${q}` : ''}`, opts);
   },
   devices: (opts = {}) => getJson('/devices', opts),
-};
 
+  // Screen Monitoring (Milestone 7)
+  screenConfig: (opts = {}) => getJson('/screen/config', opts),
+  screenCaptures: (params = {}, opts = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return getJson(`/screen/captures${q ? `?${q}` : ''}`, opts);
+  },
+  postScreenConsent: (consent, opts = {}) => postJson('/screen/consent', { consent }, opts),
+  postScreenState: (action, pauseMinutes, opts = {}) => postJson('/screen/state', { action, pauseMinutes }, opts),
+  postScreenCapture: (applicationName, opts = {}) => postJson('/screen/capture', { applicationName }, opts),
+  deleteScreenCapture: (id, opts = {}) => deleteJson(`/screen/captures/${id}`, opts),
+  purgeScreenCaptures: (olderThanDays, opts = {}) => postJson('/screen/retention/purge', { olderThanDays }, opts),
+  startLiveSession: (durationMinutes, opts = {}) => postJson('/screen/live-session/start', { durationMinutes }, opts),
+  stopLiveSession: (opts = {}) => postJson('/screen/live-session/stop', {}, opts),
+};
