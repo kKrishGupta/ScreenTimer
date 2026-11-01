@@ -10,9 +10,11 @@
 
 pub mod config;
 pub mod contract;
+pub mod session_manager;
 
 pub use config::AgentConfig;
 pub use contract::{ActivityBatch, ActivityEvent, ContractError, EventSource, EventType};
+pub use session_manager::{SessionManager, SessionState};
 
 /// Version of the desktop agent, reported to the backend during synchronisation.
 pub const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
