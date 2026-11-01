@@ -50,5 +50,22 @@ export async function getJson(path, { signal, acceptStatuses = [], timeoutMs = D
 
 export const api = {
   health: (opts) => getJson('/health', { ...opts, acceptStatuses: [503] }),
+  summary: (params = {}, opts = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return getJson(`/activity/summary${q ? `?${q}` : ''}`, opts);
+  },
+  timeline: (params = {}, opts = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return getJson(`/activity/timeline${q ? `?${q}` : ''}`, opts);
+  },
+  apps: (params = {}, opts = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return getJson(`/activity/apps${q ? `?${q}` : ''}`, opts);
+  },
+  websites: (params = {}, opts = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return getJson(`/activity/websites${q ? `?${q}` : ''}`, opts);
+  },
+  devices: (opts = {}) => getJson('/devices', opts),
 };
 
