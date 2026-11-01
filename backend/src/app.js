@@ -4,6 +4,8 @@ import helmet from '@fastify/helmet';
 import { activityEventSchema } from '@digitalpulse/contracts';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 import healthRoutes from './modules/health/health.routes.js';
+import activityRoutes from './modules/activity/activity.routes.js';
+import devicesRoutes from './modules/devices/devices.routes.js';
 
 /**
  * Builds the Fastify application without starting a listener, so tests can use
@@ -41,6 +43,8 @@ export async function buildApp({ config, prisma, logger }) {
   await app.register(
     async (api) => {
       await api.register(healthRoutes);
+      await api.register(activityRoutes);
+      await api.register(devicesRoutes);
     },
     { prefix: '/api/v1' },
   );

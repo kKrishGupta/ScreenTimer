@@ -4,7 +4,7 @@
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
-use dp_core::{ActivityEvent, AgentConfig, EventType, SessionManager, AGENT_VERSION};
+use dp_core::{ActivityEvent, AgentConfig, DeviceInfo, EventSource, EventType, SessionManager, AGENT_VERSION};
 use dp_platform_windows::{
     get_current_foreground_app, get_current_process_metrics, get_system_idle_duration,
     ActivityMonitor, PlatformEvent,
@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
+
+mod sync;
+use sync::sync_pending_events;
 
 fn main() -> Result<()> {
     init_logging();
@@ -35,8 +38,42 @@ fn main() -> Result<()> {
         return run_oneshot();
     }
 
+    if std::env::args().any(|a| a == "--sync-now") {
+        return run_sync_now();
+    }
+
     let run_duration_secs = parse_arg_value("--run-duration").and_then(|s| s.parse::<u64>().ok());
     run_monitor(run_duration_secs)
+}
+
+fn run_sync_now() -> Result<()> {
+    let config = AgentConfig::from_env().context("invalid agent configuration")?;
+    let db_path = get_database_path();
+    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into());
+
+    let device = DeviceInfo {
+        id: device_id,
+        kind: EventSource::DesktopAgent,
+        name: device_name,
+        platform: "windows_11".into(),
+        browser: None,
+        agent_version: Some(AGENT_VERSION.to_string()),
+    };
+
+    let pending_before = storage.count_pending_sync().unwrap_or(0);
+    println!("Pending sync queue size before: {}", pending_before);
+
+    let outcome = sync_pending_events(&mut storage, &config.backend_url, &device, 100)?;
+    println!(
+        "Sync completed: attempted {}, synced {}",
+        outcome.attempted, outcome.synced
+    );
+
+    let pending_after = storage.count_pending_sync().unwrap_or(0);
+    println!("Pending sync queue size after: {}", pending_after);
+    Ok(())
 }
 
 fn run_oneshot() -> Result<()> {
@@ -87,7 +124,18 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
     let mut monitor = ActivityMonitor::new(config.idle_threshold);
     let mut session_manager = SessionManager::new(device_id);
 
+    let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into());
+    let device_info = DeviceInfo {
+        id: device_id,
+        kind: EventSource::DesktopAgent,
+        name: device_name,
+        platform: "windows_11".into(),
+        browser: None,
+        agent_version: Some(AGENT_VERSION.to_string()),
+    };
+
     let start_time = Instant::now();
+    let mut last_sync_time = Instant::now();
     let mut total_ticks: u64 = 0;
     let mut recorded_sessions: u64 = 0;
 
@@ -127,6 +175,20 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
             }
         }
 
+        // Periodic background synchronization to backend
+        if last_sync_time.elapsed() >= config.sync_interval {
+            match sync_pending_events(&mut storage, &config.backend_url, &device_info, 50) {
+                Ok(outcome) if outcome.synced > 0 => {
+                    info!(synced = outcome.synced, "Background sync pushed events to backend");
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    warn!(error = %err, "Periodic sync skipped (offline/unreachable); events buffered in SQLite");
+                }
+            }
+            last_sync_time = Instant::now();
+        }
+
         thread::sleep(sample_interval);
     }
 
@@ -134,6 +196,17 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
     if let Some(final_event) = session_manager.close_active_session(Utc::now()) {
         save_completed_event(&mut storage, &final_event);
         recorded_sessions += 1;
+    }
+
+    // Final synchronization attempt before shutdown
+    match sync_pending_events(&mut storage, &config.backend_url, &device_info, 100) {
+        Ok(outcome) if outcome.synced > 0 => {
+            info!(synced = outcome.synced, "Final flush synchronized remaining events to backend");
+        }
+        Ok(_) => {}
+        Err(err) => {
+            info!(error = %err, "Shutdown sync note: remaining events safely stored in SQLite for next start");
+        }
     }
 
     // Benchmark & summary report

@@ -13,7 +13,7 @@ pub mod contract;
 pub mod session_manager;
 
 pub use config::AgentConfig;
-pub use contract::{ActivityBatch, ActivityEvent, ContractError, EventSource, EventType};
+pub use contract::{ActivityBatch, ActivityEvent, AppInfo, ContractError, DeviceInfo, EventSource, EventType};
 pub use session_manager::{SessionManager, SessionState};
 
 /// Version of the desktop agent, reported to the backend during synchronisation.
