@@ -8,6 +8,8 @@ import activityRoutes from './modules/activity/activity.routes.js';
 import devicesRoutes from './modules/devices/devices.routes.js';
 import screenRoutes from './modules/screen/screen.routes.js';
 import plannerRoutes from './modules/planner/planner.routes.js';
+import familyRoutes from './modules/family/family.routes.js';
+import policyRoutes from './modules/policies/policies.routes.js';
 
 /**
  * Builds the Fastify application without starting a listener, so tests can use
@@ -49,6 +51,8 @@ export async function buildApp({ config, prisma, logger }) {
       await api.register(devicesRoutes);
       await api.register(screenRoutes);
       await api.register(plannerRoutes);
+      await api.register(familyRoutes);
+      await api.register(policyRoutes);
     },
     { prefix: '/api/v1' },
   );

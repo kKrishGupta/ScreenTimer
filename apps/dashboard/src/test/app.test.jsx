@@ -69,6 +69,18 @@ const defaultRouterFetch = async (url) => {
   if (u.includes('/wellbeing/status')) {
     return new Response(JSON.stringify({ breaksCompletedToday: 4, breakIntervalMinutes: 20 }), { status: 200 });
   }
+  if (u.includes('/family/members')) {
+    return new Response(JSON.stringify({ members: [{ id: 'm1', displayName: 'Alex (Owner)', role: 'owner', ageBracket: 'adult', email: 'alex@family.local', assignedDeviceIds: [] }], totalCount: 1 }), { status: 200 });
+  }
+  if (u.includes('/policies/violations')) {
+    return new Response(JSON.stringify({ violations: [{ id: 'v1', policyName: 'Safe Browsing', target: 'tiktok.com', timestamp: '2026-11-01T12:00:00.000Z', warningMessage: 'Test violation', acknowledged: false }], totalCount: 1 }), { status: 200 });
+  }
+  if (u.includes('/policies')) {
+    return new Response(JSON.stringify({ policies: [{ id: 'p1', name: 'Safe Browsing', category: 'social_media', restrictedDomains: ['tiktok.com'], maxMinutesPerDay: 60, action: 'warn', active: true }], totalCount: 1 }), { status: 200 });
+  }
+  if (u.includes('/alerts')) {
+    return new Response(JSON.stringify({ alerts: [{ id: 'a1', title: 'Test Alert', description: 'Sample warning', severity: 'warning', timestamp: '2026-11-01T12:00:00.000Z', type: 'policy_violation' }], count: 1 }), { status: 200 });
+  }
   return new Response(JSON.stringify(healthBody()), { status: 200 });
 };
 
@@ -285,5 +297,30 @@ describe('dashboard shell and navigation', () => {
     expect(await screen.findByText('Digital Wellbeing & Health')).toBeInTheDocument();
     expect(await screen.findByText('The 20-20-20 Eye Strain Rule')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Take a 20s Eye Break Now' })).toBeInTheDocument();
+  });
+
+  it('renders Milestone 9 Family Members page with household profiles', async () => {
+    mockFetch(defaultRouterFetch);
+    renderAt('/family-members');
+    expect(await screen.findByText('Family Members & Household')).toBeInTheDocument();
+    expect(await screen.findByText('Alex (Owner)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add Family Member' })).toBeInTheDocument();
+  });
+
+  it('renders Milestone 9 Family Policies page with policies and simulator', async () => {
+    mockFetch(defaultRouterFetch);
+    renderAt('/family-policies');
+    expect(await screen.findByText('Family Policies & Safety Controls')).toBeInTheDocument();
+    const policyHeaders = await screen.findAllByText('Safe Browsing');
+    expect(policyHeaders.length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Test Evaluation' })).toBeInTheDocument();
+  });
+
+  it('renders Milestone 9 Alerts and Notifications center', async () => {
+    mockFetch(defaultRouterFetch);
+    renderAt('/alerts');
+    expect(await screen.findByText('Alerts & Notification Center')).toBeInTheDocument();
+    expect(await screen.findByText('Test Alert')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
   });
 });

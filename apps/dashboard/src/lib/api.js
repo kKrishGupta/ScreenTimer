@@ -119,4 +119,19 @@ export const api = {
   plannerAnalytics: (opts = {}) => getJson('/planner/analytics', opts),
   wellbeingStatus: (opts = {}) => getJson('/wellbeing/status', opts),
   completeBreak: (opts = {}) => postJson('/wellbeing/break/complete', {}, opts),
+
+  // Family Management & Policy Engine (Milestone 9)
+  familyMembers: (opts = {}) => getJson('/family/members', opts),
+  createFamilyMember: (member, opts = {}) => postJson('/family/members', member, opts),
+  updateFamilyMember: (id, updates, opts = {}) => patchJson(`/family/members/${id}`, updates, opts),
+  deleteFamilyMember: (id, opts = {}) => deleteJson(`/family/members/${id}`, opts),
+  assignFamilyDevice: (id, deviceId, opts = {}) => postJson(`/family/members/${id}/devices`, { deviceId }, opts),
+  policies: (opts = {}) => getJson('/policies', opts),
+  createPolicy: (policy, opts = {}) => postJson('/policies', policy, opts),
+  updatePolicy: (id, updates, opts = {}) => patchJson(`/policies/${id}`, updates, opts),
+  deletePolicy: (id, opts = {}) => deleteJson(`/policies/${id}`, opts),
+  checkPolicy: (target, opts = {}) => postJson('/policies/check', target, opts),
+  policyViolations: (opts = {}) => getJson('/policies/violations', opts),
+  acknowledgeViolation: (id, opts = {}) => postJson(`/policies/violations/${id}/acknowledge`, {}, opts),
+  alerts: (opts = {}) => getJson('/alerts', opts),
 };
