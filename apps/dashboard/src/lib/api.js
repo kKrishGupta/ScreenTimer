@@ -60,6 +60,10 @@ export function postJson(path, body, opts) {
   return request(path, { ...opts, method: 'POST', body });
 }
 
+export function patchJson(path, body, opts) {
+  return request(path, { ...opts, method: 'PATCH', body });
+}
+
 export function deleteJson(path, opts) {
   return request(path, { ...opts, method: 'DELETE' });
 }
@@ -97,4 +101,22 @@ export const api = {
   purgeScreenCaptures: (olderThanDays, opts = {}) => postJson('/screen/retention/purge', { olderThanDays }, opts),
   startLiveSession: (durationMinutes, opts = {}) => postJson('/screen/live-session/start', { durationMinutes }, opts),
   stopLiveSession: (opts = {}) => postJson('/screen/live-session/stop', {}, opts),
+  screenAuditLog: (params = {}, opts = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return getJson(`/screen/audit-log${q ? `?${q}` : ''}`, opts);
+  },
+
+  // Family Planner & Wellbeing (Milestone 8)
+  plannerTasks: (opts = {}) => getJson('/planner/tasks', opts),
+  createPlannerTask: (task, opts = {}) => postJson('/planner/tasks', task, opts),
+  updatePlannerTask: (id, updates, opts = {}) => patchJson(`/planner/tasks/${id}`, updates, opts),
+  deletePlannerTask: (id, opts = {}) => deleteJson(`/planner/tasks/${id}`, opts),
+  plannerGoals: (opts = {}) => getJson('/planner/goals', opts),
+  savePlannerGoal: (goal, opts = {}) => postJson('/planner/goals', goal, opts),
+  focusSessions: (opts = {}) => getJson('/planner/focus-sessions', opts),
+  startFocusSession: (session, opts = {}) => postJson('/planner/focus-sessions/start', session, opts),
+  stopFocusSession: (opts = {}) => postJson('/planner/focus-sessions/stop', {}, opts),
+  plannerAnalytics: (opts = {}) => getJson('/planner/analytics', opts),
+  wellbeingStatus: (opts = {}) => getJson('/wellbeing/status', opts),
+  completeBreak: (opts = {}) => postJson('/wellbeing/break/complete', {}, opts),
 };

@@ -54,6 +54,21 @@ const defaultRouterFetch = async (url) => {
   if (u.includes('/screen/captures')) {
     return new Response(JSON.stringify({ captures: [], count: 0 }), { status: 200 });
   }
+  if (u.includes('/planner/tasks')) {
+    return new Response(JSON.stringify({ tasks: [{ id: '1', title: 'Sample Homework Task', category: 'study', targetMinutes: 30, completed: false }], totalCount: 1, completedCount: 0 }), { status: 200 });
+  }
+  if (u.includes('/planner/goals')) {
+    return new Response(JSON.stringify({ goals: [{ id: 'g1', title: 'Daily Limit', category: 'daily', maxMinutesPerDay: 240, actualMinutes: 60, percentUsed: 25 }], count: 1 }), { status: 200 });
+  }
+  if (u.includes('/planner/focus-sessions')) {
+    return new Response(JSON.stringify({ activeSession: null, history: [] }), { status: 200 });
+  }
+  if (u.includes('/planner/analytics')) {
+    return new Response(JSON.stringify({ plannedTaskMinutes: 30, completedTaskMinutes: 0, realActiveMinutes: 60, taskCount: 1, completedTaskCount: 0, goalComparisons: [{ id: 'g1', title: 'Daily Limit', maxMinutesPerDay: 240, actualMinutes: 60, percentUsed: 25 }] }), { status: 200 });
+  }
+  if (u.includes('/wellbeing/status')) {
+    return new Response(JSON.stringify({ breaksCompletedToday: 4, breakIntervalMinutes: 20 }), { status: 200 });
+  }
   return new Response(JSON.stringify(healthBody()), { status: 200 });
 };
 
@@ -254,5 +269,21 @@ describe('dashboard shell and navigation', () => {
     expect(await screen.findByText(/Status: active/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Capture Now' })).toBeInTheDocument();
     expect(screen.getByText('Visual Studio Code')).toBeInTheDocument();
+  });
+
+  it('renders Milestone 8 Family Time Planner with tasks and screen-time goals', async () => {
+    mockFetch(defaultRouterFetch);
+    renderAt('/time-planner');
+    expect(await screen.findByText('Family Time Planner')).toBeInTheDocument();
+    expect(await screen.findByText('Sample Homework Task')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start 25m Focus Block' })).toBeInTheDocument();
+  });
+
+  it('renders Milestone 8 Digital Wellbeing page with 20-20-20 rule', async () => {
+    mockFetch(defaultRouterFetch);
+    renderAt('/digital-wellbeing');
+    expect(await screen.findByText('Digital Wellbeing & Health')).toBeInTheDocument();
+    expect(await screen.findByText('The 20-20-20 Eye Strain Rule')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Take a 20s Eye Break Now' })).toBeInTheDocument();
   });
 });

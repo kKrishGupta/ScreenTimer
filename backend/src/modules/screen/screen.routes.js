@@ -15,7 +15,21 @@ const screenState = {
     viewerUrl: null,
   },
   captures: [],
+  auditLog: [],
 };
+
+function recordAudit(action, actor = 'local_user', details = {}) {
+  const entry = {
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    action,
+    actor,
+    details,
+  };
+  screenState.auditLog.unshift(entry);
+  if (screenState.auditLog.length > 500) screenState.auditLog.pop();
+  return entry;
+}
 
 // Generates an SVG data URL placeholder for previewing captured windows safely
 function generateSamplePreview(appName, width = 640, height = 360) {
@@ -83,6 +97,10 @@ export default async function screenRoutes(fastify) {
       screenState.status = 'active';
     }
 
+    recordAudit(consent ? 'consent_granted' : 'consent_revoked', 'local_user', {
+      timestamp: screenState.consentGrantedAt,
+    });
+
     return {
       success: true,
       consentGranted: screenState.consentGranted,
@@ -102,13 +120,16 @@ export default async function screenRoutes(fastify) {
     if (action === 'resume') {
       screenState.status = 'active';
       screenState.pauseUntil = null;
+      recordAudit('monitoring_resumed', 'local_user');
     } else if (action === 'pause') {
       screenState.status = 'paused';
       const until = new Date(Date.now() + Math.max(1, Number(pauseMinutes)) * 60 * 1000);
       screenState.pauseUntil = until.toISOString();
+      recordAudit('monitoring_paused', 'local_user', { pauseMinutes, until: screenState.pauseUntil });
     } else if (action === 'stop') {
       screenState.status = 'stopped';
       screenState.pauseUntil = null;
+      recordAudit('monitoring_stopped', 'local_user');
     } else {
       return reply.code(400).send({
         error: { code: 'INVALID_ACTION', message: 'Action must be "resume", "pause", or "stop"' },
@@ -166,6 +187,11 @@ export default async function screenRoutes(fastify) {
       screenState.captures.pop();
     }
 
+    recordAudit('screenshot_captured', 'local_collector', {
+      captureId: capture.id,
+      applicationName: capture.applicationName,
+    });
+
     return { success: true, capture };
   });
 
@@ -181,6 +207,7 @@ export default async function screenRoutes(fastify) {
       });
     }
 
+    recordAudit('screenshot_deleted', 'local_user', { captureId: id });
     return { success: true, deletedId: id };
   });
 
@@ -192,6 +219,7 @@ export default async function screenRoutes(fastify) {
     screenState.captures = screenState.captures.filter((c) => new Date(c.timestamp) >= cutoffTime);
     const purgedCount = beforeCount - screenState.captures.length;
 
+    recordAudit('retention_purged', 'local_user', { olderThanDays, purgedCount });
     return { success: true, purgedCount, remainingCount: screenState.captures.length };
   });
 
@@ -214,6 +242,8 @@ export default async function screenRoutes(fastify) {
       viewerUrl: `http://localhost:5173/screen-monitoring?session=${sessionId}`,
     };
 
+    recordAudit('live_session_started', 'local_user', { sessionId, durationMinutes, expiresAt });
+
     return {
       success: true,
       liveSession: screenState.liveSession,
@@ -222,6 +252,7 @@ export default async function screenRoutes(fastify) {
 
   // POST /api/v1/screen/live-session/stop
   fastify.post('/screen/live-session/stop', async () => {
+    const prevSession = screenState.liveSession.sessionId;
     screenState.liveSession = {
       active: false,
       sessionId: null,
@@ -229,6 +260,19 @@ export default async function screenRoutes(fastify) {
       viewerUrl: null,
     };
 
+    if (prevSession) {
+      recordAudit('live_session_stopped', 'local_user', { sessionId: prevSession });
+    }
+
     return { success: true, active: false };
+  });
+
+  // GET /api/v1/screen/audit-log
+  fastify.get('/screen/audit-log', async (req) => {
+    const limit = Math.min(100, Math.max(1, Number(req.query?.limit ?? 50)));
+    return {
+      auditLog: screenState.auditLog.slice(0, limit),
+      totalCount: screenState.auditLog.length,
+    };
   });
 }
