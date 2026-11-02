@@ -13,14 +13,36 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      '/api': { target: BACKEND_URL, changeOrigin: false },
+      '/api': {
+        target: BACKEND_URL,
+        changeOrigin: false,
+        configure: (proxy) => {
+          proxy.on('error', (err, _req, res) => {
+            if (res && !res.headersSent && typeof res.writeHead === 'function') {
+              res.writeHead(503, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: { code: 'BACKEND_OFFLINE', message: 'Fastify backend is offline on 127.0.0.1:3001' } }));
+            }
+          });
+        },
+      },
     },
   },
   preview: {
     host: 'localhost',
     port: 4173,
     proxy: {
-      '/api': { target: BACKEND_URL, changeOrigin: false },
+      '/api': {
+        target: BACKEND_URL,
+        changeOrigin: false,
+        configure: (proxy) => {
+          proxy.on('error', (err, _req, res) => {
+            if (res && !res.headersSent && typeof res.writeHead === 'function') {
+              res.writeHead(503, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: { code: 'BACKEND_OFFLINE', message: 'Fastify backend is offline on 127.0.0.1:3001' } }));
+            }
+          });
+        },
+      },
     },
   },
   test: {
