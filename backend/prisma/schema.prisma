@@ -31,8 +31,11 @@ enum ActivityType {
 }
 
 enum UserRole {
-  OWNER  @map("owner")
-  MEMBER @map("member")
+  OWNER             @map("owner")
+  MEMBER            @map("member")
+  FAMILY_OWNER      @map("family_owner")
+  ADULT_MEMBER      @map("adult_member")
+  SUPERVISED_MEMBER @map("supervised_member")
 
   @@map("user_role")
 }
@@ -58,6 +61,7 @@ model Organization {
   policies       FamilyPolicy[]
   violations     PolicyViolation[]
   auditLogs      AuditLog[]
+  enrollmentTokens DeviceEnrollmentToken[]
 
   @@map("organizations")
 }
@@ -68,16 +72,55 @@ model User {
   email          String   @db.VarChar(254)
   displayName    String   @map("display_name") @db.VarChar(128)
   role           UserRole @default(MEMBER)
+  passwordHash   String?  @map("password_hash") @db.VarChar(256)
+  passwordSalt   String?  @map("password_salt") @db.VarChar(128)
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  devices      Device[]
-  plannerTasks PlannerTask[]
-  focusSessions FocusSession[]
+  organization    Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  devices         Device[]
+  plannerTasks    PlannerTask[]
+  focusSessions   FocusSession[]
+  sessions        UserSession[]
+  enrollmentTokens DeviceEnrollmentToken[]
 
   @@unique([organizationId, email])
   @@map("users")
+}
+
+model UserSession {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  token      String    @unique @db.VarChar(128)
+  userAgent  String?   @map("user_agent") @db.VarChar(256)
+  ipAddress  String?   @map("ip_address") @db.VarChar(45)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("user_sessions")
+}
+
+model DeviceEnrollmentToken {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token          String        @unique @db.VarChar(128)
+  organizationId String        @map("organization_id") @db.Uuid
+  userId         String?       @map("user_id") @db.Uuid
+  deviceKind     CollectorKind @map("device_kind")
+  expiresAt      DateTime      @map("expires_at") @db.Timestamptz(3)
+  usedAt         DateTime?     @map("used_at") @db.Timestamptz(3)
+  revokedAt      DateTime?     @map("revoked_at") @db.Timestamptz(3)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([token])
+  @@index([organizationId])
+  @@map("device_enrollment_tokens")
 }
 
 model Device {

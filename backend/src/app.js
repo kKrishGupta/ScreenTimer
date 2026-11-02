@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { activityEventSchema } from '@digitalpulse/contracts';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
+import { createRateLimiter } from './middleware/rate-limiter.js';
 import healthRoutes from './modules/health/health.routes.js';
 import activityRoutes from './modules/activity/activity.routes.js';
 import devicesRoutes from './modules/devices/devices.routes.js';
@@ -10,6 +11,10 @@ import screenRoutes from './modules/screen/screen.routes.js';
 import plannerRoutes from './modules/planner/planner.routes.js';
 import familyRoutes from './modules/family/family.routes.js';
 import policyRoutes from './modules/policies/policies.routes.js';
+import authRoutes from './modules/auth/auth.routes.js';
+import notificationRoutes from './modules/notifications/notifications.routes.js';
+import analyticsRoutes from './modules/analytics/analytics.routes.js';
+import privacyRoutes from './modules/privacy/privacy.routes.js';
 
 /**
  * Builds the Fastify application without starting a listener, so tests can use
@@ -38,21 +43,26 @@ export async function buildApp({ config, prisma, logger }) {
   await app.register(helmet, { global: true });
   await app.register(cors, {
     origin: config.corsOrigins,
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
 
   app.setErrorHandler(errorHandler);
   app.setNotFoundHandler(notFoundHandler);
+  app.addHook('onRequest', createRateLimiter({ maxRequests: 200 }));
 
   await app.register(
     async (api) => {
       await api.register(healthRoutes);
+      await api.register(authRoutes);
       await api.register(activityRoutes);
       await api.register(devicesRoutes);
       await api.register(screenRoutes);
       await api.register(plannerRoutes);
       await api.register(familyRoutes);
       await api.register(policyRoutes);
+      await api.register(notificationRoutes);
+      await api.register(analyticsRoutes);
+      await api.register(privacyRoutes);
     },
     { prefix: '/api/v1' },
   );

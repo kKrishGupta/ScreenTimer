@@ -36,6 +36,16 @@ export default async function activityRoutes(app) {
         );
       }
 
+      // Check if device has been revoked
+      if (app.deviceService && !app.deviceService.isDeviceAllowed(devInfo.id)) {
+        return reply.status(403).send({
+          error: {
+            code: 'DEVICE_REVOKED',
+            message: 'This device has been revoked by the family administrator',
+          },
+        });
+      }
+
       // 2. Auto-register or update device metadata
       const collectorKind =
         COLLECTOR_KIND_MAP[devInfo.kind] || 'DESKTOP_AGENT';
