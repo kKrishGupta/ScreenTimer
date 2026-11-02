@@ -291,3 +291,4 @@ export default async function plannerRoutes(fastify) {
     return { success: true, breaksCompletedToday: plannerState.wellbeing.breaksCompletedToday };
   });
 }
+

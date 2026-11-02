@@ -1,0 +1,12 @@
+{
+  "name": "@digitalpulse/apps-container",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DigitalPulse applications container",
+  "scripts": {
+    "dev": "npm run dev --prefix dashboard",
+    "start": "npm run dev --prefix dashboard",
+    "build": "npm run build --prefix dashboard"
+  }
+}
+

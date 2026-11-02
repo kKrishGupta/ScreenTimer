@@ -145,3 +145,4 @@ export default async function familyRoutes(fastify) {
     return { success: true, assignedDeviceIds: member.assignedDeviceIds };
   });
 }
+

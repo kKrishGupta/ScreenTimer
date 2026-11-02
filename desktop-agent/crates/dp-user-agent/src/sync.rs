@@ -10,7 +10,6 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 
 /// Synchronization result metrics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,6 +198,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread;
+    use uuid::Uuid;
 
     #[test]
     fn parse_url_extracts_components_and_enforces_localhost() {

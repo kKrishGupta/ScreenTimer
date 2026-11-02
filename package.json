@@ -14,6 +14,8 @@
     "apps/browser-extension"
   ],
   "scripts": {
+    "dev": "npm run dev:dashboard",
+    "start": "npm run dev:dashboard",
     "dev:backend": "npm run dev -w @digitalpulse/backend",
     "dev:dashboard": "npm run dev -w @digitalpulse/dashboard",
     "start:backend": "npm run start -w @digitalpulse/backend",
