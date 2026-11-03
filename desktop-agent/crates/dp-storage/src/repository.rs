@@ -119,6 +119,7 @@ impl Storage {
             "SELECT id, event_type, payload, created_at, synced_at
              FROM sync_queue
              WHERE synced_at IS NULL
+               AND quarantined_at IS NULL
              ORDER BY created_at ASC
              LIMIT ?1",
         )?;
@@ -198,6 +199,35 @@ impl Storage {
         Ok(())
     }
 
+    /// Retains malformed events for review while preventing them from poisoning later batches.
+    pub fn quarantine_events(&mut self, ids: &[Uuid], reason: &str) -> Result<(), StorageError> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let tx = self.conn.transaction()?;
+        let now = Utc::now().to_rfc3339();
+        let mut stmt = tx.prepare(
+            "UPDATE sync_queue SET quarantined_at = ?1, quarantine_reason = ?2
+             WHERE id = ?3 AND synced_at IS NULL",
+        )?;
+        for id in ids {
+            stmt.execute(params![now, reason, id.to_string()])?;
+        }
+        drop(stmt);
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Returns the number of unsynced rows retained for manual review.
+    pub fn count_quarantined_sync(&self) -> Result<usize, StorageError> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE synced_at IS NULL AND quarantined_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
     /// Prunes already-synced events older than `older_than_days` to enforce bounded storage.
     pub fn prune_synced_events(&mut self, older_than_days: i64) -> Result<usize, StorageError> {
         let cutoff = (Utc::now() - chrono::Duration::days(older_than_days)).to_rfc3339();
@@ -228,6 +258,13 @@ impl Storage {
              VALUES (?1, ?2, ?3)",
             params![key, value, now],
         )?;
+        Ok(())
+    }
+
+    /// Deletes a configuration value after it has been migrated to secure storage.
+    pub fn delete_state(&mut self, key: &str) -> Result<(), StorageError> {
+        self.conn
+            .execute("DELETE FROM agent_state WHERE key = ?1", params![key])?;
         Ok(())
     }
 
@@ -306,5 +343,28 @@ mod tests {
             storage.get_state("device_id").unwrap().as_deref(),
             Some("my-device-uuid")
         );
+    }
+
+    #[test]
+    fn quarantined_queue_rows_are_retained_and_do_not_block_later_valid_events() {
+        let mut storage = Storage::open_in_memory().unwrap();
+        let mut first = sample_session(Uuid::new_v4());
+        let malformed_id = first.id;
+        storage
+            .record_session_with_event(&first, "not-json")
+            .unwrap();
+        first.id = Uuid::new_v4();
+        storage
+            .record_session_with_event(&first, "{\"valid\":true}")
+            .unwrap();
+
+        storage
+            .quarantine_events(&[malformed_id], "MALFORMED_EVENT")
+            .unwrap();
+        let pending = storage.get_pending_sync_items(10).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].payload, "{\"valid\":true}");
+        assert_eq!(storage.count_pending_sync().unwrap(), 2);
+        assert_eq!(storage.count_quarantined_sync().unwrap(), 1);
     }
 }

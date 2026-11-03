@@ -15,6 +15,9 @@ export default async function healthRoutes(app) {
     { schema: { response: { 200: healthResponseSchema, 503: healthResponseSchema } } },
     async (_request, reply) => {
       const database = await probeDatabase(app.prisma);
+      if (database.status === 'down' && app.config.nodeEnv === 'production') {
+        database.error = 'Database connectivity check failed';
+      }
       const healthy = database.status === 'up';
       return reply.status(healthy ? 200 : 503).send({
         status: healthy ? 'ok' : 'degraded',

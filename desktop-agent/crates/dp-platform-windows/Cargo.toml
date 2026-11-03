@@ -16,6 +16,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_SystemInformation",
     "Win32_System_ProcessStatus",
     "Win32_System_Console",
+    "Win32_Security_Credentials",
+    "Win32_Networking_WinHttp",
+    "Win32_System_StationsAndDesktops",
 ] }
 thiserror.workspace = true
 tracing.workspace = true

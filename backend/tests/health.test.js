@@ -39,6 +39,23 @@ test('GET /api/v1/health returns 503 degraded when the database is down', async 
   assert.match(body.database.error, /ECONNREFUSED/);
 });
 
+test('database health errors do not expose credentials or host details', async (t) => {
+  const prisma = {
+    $queryRaw: async () => {
+      const error = new Error('password authentication failed for user "private-user" at private.db.example');
+      error.code = '28P01';
+      throw error;
+    },
+  };
+  const app = await buildApp({ config, prisma, logger: false });
+  t.after(() => app.close());
+
+  const response = await app.inject({ method: 'GET', url: '/api/v1/health' });
+  assert.equal(response.statusCode, 503);
+  assert.match(response.json().database.error, /28P01/);
+  assert.doesNotMatch(response.body, /private-user|private\.db\.example/);
+});
+
 test('unknown routes return the uniform error envelope', async (t) => {
   const app = await buildApp({ config, prisma: fakePrisma(true), logger: false });
   t.after(() => app.close());

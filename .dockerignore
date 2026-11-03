@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+**/dist
+**/coverage
+**/.vite
+backend/storage
+desktop-agent/target
+target
+*.log

@@ -29,3 +29,4 @@ The DigitalPulse platform operates under a transparent, consent-based digital we
 - **No Covert Surveillance**: Monitoring beacons are permanently visible when screen capture or live sharing is active.
 - **Right to Pause**: Adult members retain immediate one-click pause and revocation controls.
 - **Local Storage Quotas**: Screenshots are stored strictly on local protected disk with automatic retention purging (default: 7 days or 2 GB limit).
+

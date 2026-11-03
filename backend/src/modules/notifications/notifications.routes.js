@@ -11,6 +11,8 @@ export default async function notificationRoutes(fastify) {
   fastify.get('/notifications', async (req) => {
     const { unreadOnly, severity, limit } = req.query || {};
     return notifyService.listNotifications({
+      organizationId: req.user?.organizationId,
+      userId: req.user?.id,
       unreadOnly: unreadOnly === 'true',
       severity,
       limit: limit ? Number(limit) : 50,
@@ -18,8 +20,8 @@ export default async function notificationRoutes(fastify) {
   });
 
   // GET /api/v1/notifications/summary
-  fastify.get('/notifications/summary', async () => {
-    return notifyService.getSummary();
+  fastify.get('/notifications/summary', async (req) => {
+    return notifyService.getSummary(req.user?.organizationId);
   });
 
   // POST /api/v1/notifications
@@ -33,6 +35,8 @@ export default async function notificationRoutes(fastify) {
         message,
         target,
         cooldownMinutes,
+        organizationId: req.user?.organizationId,
+        userId: req.user?.id,
       });
       return reply.status(result.suppressed ? 200 : 201).send(result);
     } catch (err) {
@@ -45,7 +49,7 @@ export default async function notificationRoutes(fastify) {
   // PATCH /api/v1/notifications/:id/read
   fastify.patch('/notifications/:id/read', async (req, reply) => {
     const { id } = req.params;
-    const notification = notifyService.markAsRead(id);
+    const notification = await notifyService.markAsRead(id, req.user?.organizationId);
     if (!notification) {
       return reply.status(404).send({
         error: { code: 'NOT_FOUND', message: 'Notification not found' },
@@ -55,14 +59,14 @@ export default async function notificationRoutes(fastify) {
   });
 
   // POST /api/v1/notifications/mark-all-read
-  fastify.post('/notifications/mark-all-read', async () => {
-    return notifyService.markAllAsRead();
+  fastify.post('/notifications/mark-all-read', async (req) => {
+    return notifyService.markAllAsRead(req.user?.organizationId);
   });
 
   // DELETE /api/v1/notifications/:id
   fastify.delete('/notifications/:id', async (req, reply) => {
     const { id } = req.params;
-    const deleted = notifyService.deleteNotification(id);
+    const deleted = await notifyService.deleteNotification(id, req.user?.organizationId);
     if (!deleted) {
       return reply.status(404).send({
         error: { code: 'NOT_FOUND', message: 'Notification not found' },

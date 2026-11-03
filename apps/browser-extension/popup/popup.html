@@ -18,17 +18,40 @@
 
   <div class="content">
     <div class="field">
+      <span class="label">Current Site:</span>
+      <span id="active-domain" class="value" style="color: #38bdf8; font-weight: 600;">Detecting...</span>
+    </div>
+    <div class="field">
       <span class="label">Device ID:</span>
       <span id="device-id" class="value mono">...</span>
     </div>
+    <div class="field"><span class="label">Device status:</span><span id="device-status" class="value">Checking...</span></div>
     <div class="field">
       <span class="label">Backend:</span>
       <span id="backend-url" class="value mono">http://127.0.0.1:3001</span>
     </div>
+    <details>
+      <summary>Backend settings</summary>
+      <label for="backend-input">Trusted backend origin</label>
+      <input id="backend-input" type="url" autocomplete="off" placeholder="http://127.0.0.1:3001" />
+      <button id="save-backend" type="button" class="btn">Save backend</button>
+      <p>Local test build: localhost connects only to this computer. Remote servers require HTTPS and permission for that host.</p>
+      <p id="backend-settings-status" role="status" aria-live="polite"></p>
+    </details>
     <div class="field">
       <span class="label">Pending Queue:</span>
       <span id="queue-count" class="value">0 events</span>
     </div>
+    <div class="field"><span class="label">Queue audit:</span><span id="queue-audit" class="value">Checking…</span></div>
+    <button id="retry-skipped" type="button" hidden>Recheck skipped events</button>
+    <div class="field"><span class="label">Last successful sync:</span><span id="last-sync" class="value">—</span></div>
+    <div class="field"><span class="label">Last heartbeat:</span><span id="last-heartbeat" class="value">—</span></div>
+    <div class="field" id="enrollment-panel" hidden style="margin-top: 8px;">
+      <label class="label" for="enrollment-token">Enrollment:</label>
+      <input id="enrollment-token" type="password" autocomplete="off" disabled placeholder="One-time enrollment token" style="flex: 1; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: monospace;" />
+      <button id="enroll-btn" disabled style="background: #0284c7; color: white; border: none; border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; margin-left: 4px;">Enroll</button>
+    </div>
+    <div id="enrollment-status" role="status" aria-live="polite">Checking enrollment status...</div>
   </div>
 
   <div class="footer">

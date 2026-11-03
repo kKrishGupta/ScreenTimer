@@ -1,28 +1,49 @@
-import { AuthService, Roles, normalizeRole } from '../modules/auth/auth.service.js';
+import { Roles, normalizeRole } from '../modules/auth/auth.service.js';
+import { readSessionToken } from '../modules/auth/session-cookie.js';
 
 /**
- * Decorates request with authenticated user session or returns 401 if missing/invalid.
+ * Decorates request with authenticated user session or device identity,
+ * enforcing tenant isolation and role-based permissions.
  */
-export function createAuthMiddleware(authService) {
+export function createAuthMiddleware(authService, deviceService) {
+  function extractBearerToken(req) {
+    return readSessionToken(req);
+  }
+
+  function extractDeviceSecret(req) {
+    if (req.headers['x-device-secret']) {
+      return req.headers['x-device-secret'];
+    }
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const candidate = authHeader.substring(7).trim();
+      if (candidate.startsWith('dp_sec_')) {
+        return candidate;
+      }
+    }
+    if (req.body?.deviceSecret) {
+      return req.body.deviceSecret;
+    }
+    if (req.body?.device?.secret) {
+      return req.body.device.secret;
+    }
+    if (req.body?.secret) {
+      return req.body.secret;
+    }
+    return null;
+  }
+
   return {
     /**
-     * Enforces active session authentication.
+     * Enforces active user session authentication and tenant isolation.
      */
     async authenticate(req, reply) {
-      const authHeader = req.headers.authorization;
-      let token = null;
-
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7).trim();
-      } else if (req.headers['x-session-token']) {
-        token = req.headers['x-session-token'];
-      }
-
+      const token = extractBearerToken(req);
       if (!token) {
         return reply.status(401).send({
           error: {
             code: 'UNAUTHORIZED',
-            message: 'Authentication token is required. Pass in Authorization: Bearer <token>',
+            message: 'Sign in to continue.',
           },
         });
       }
@@ -39,14 +60,90 @@ export function createAuthMiddleware(authService) {
 
       req.user = session.user;
       req.session = session;
+      req.organizationId = session.user.organizationId;
+
+      // Tenant isolation: client-supplied organizationId must match authenticated session
+      const targetOrg =
+        req.params?.organizationId ||
+        req.query?.organizationId ||
+        (typeof req.body === 'object' && req.body !== null ? req.body.organizationId : null);
+
+      if (
+        targetOrg &&
+        normalizeRole(req.user.role) !== Roles.SUPER_ADMIN &&
+        targetOrg !== req.organizationId
+      ) {
+        return reply.status(403).send({
+          error: {
+            code: 'CROSS_TENANT_FORBIDDEN',
+            message: 'Access to resources outside your organization is prohibited',
+          },
+        });
+      }
     },
 
     /**
-     * Enforces that the authenticated user possesses one of the allowed roles.
-     * @param {...string} allowedRoles
+     * Authenticates an endpoint device submitting telemetry or heartbeats.
+     */
+    async authenticateDevice(req, reply) {
+      const deviceId =
+        req.params?.id ||
+        req.body?.device?.id ||
+        req.body?.deviceId ||
+        req.query?.deviceId;
+
+      if (!deviceId) {
+        return reply.status(400).send({
+          error: {
+            code: 'BAD_REQUEST',
+            message: 'Device ID is required for device authentication',
+          },
+        });
+      }
+
+      const secret = extractDeviceSecret(req);
+      if (!secret) {
+        return reply.status(401).send({
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Device authentication credentials required (X-Device-Secret or Bearer dp_sec_...)',
+          },
+        });
+      }
+
+      if (!deviceService) {
+        return reply.status(500).send({
+          error: { code: 'INTERNAL_ERROR', message: 'Device service unavailable' },
+        });
+      }
+
+      const check = await deviceService.validateDeviceCredentials(deviceId, secret);
+      if (!check.valid) {
+        if (check.code === 'DEVICE_REVOKED') {
+          return reply.status(403).send({
+            error: {
+              code: 'DEVICE_REVOKED',
+              message: 'This device has been revoked by an administrator',
+            },
+          });
+        }
+        return reply.status(check.code === 'STORAGE_UNAVAILABLE' ? 503 : 401).send({
+          error: {
+            code: check.code || 'UNAUTHORIZED',
+            message: check.message || 'Invalid device credentials',
+          },
+        });
+      }
+
+      req.device = check.device;
+      req.organizationId = check.device.organizationId;
+    },
+
+    /**
+     * Enforces role-based permissions (SUPER_ADMIN, ORGANIZATION_ADMIN, MANAGER, EMPLOYEE).
      */
     requireRole(...allowedRoles) {
-      const normalizedAllowed = allowedRoles.map(normalizeRole);
+      const canonicalAllowed = allowedRoles.map(normalizeRole);
       return async (req, reply) => {
         if (!req.user) {
           return reply.status(401).send({
@@ -58,19 +155,25 @@ export function createAuthMiddleware(authService) {
         }
 
         const userRole = normalizeRole(req.user.role);
-        if (!normalizedAllowed.includes(userRole)) {
-          return reply.status(403).send({
-            error: {
-              code: 'FORBIDDEN',
-              message: `Role ${userRole} is not authorized for this operation. Required: ${allowedRoles.join(', ')}`,
-            },
-          });
+        if (
+          userRole === Roles.SUPER_ADMIN ||
+          canonicalAllowed.includes(userRole) ||
+          allowedRoles.includes(req.user.role)
+        ) {
+          return; // Authorized
         }
+
+        return reply.status(403).send({
+          error: {
+            code: 'FORBIDDEN',
+            message: `Role ${req.user.role} is not authorized for this operation. Required: ${allowedRoles.join(', ')}`,
+          },
+        });
       };
     },
 
     /**
-     * Prevents cross-household access by matching target organizationId against authenticated user's organizationId.
+     * Household/Organization boundary check helper.
      */
     requireHousehold(targetOrgParam = 'organizationId') {
       return async (req, reply) => {
@@ -80,12 +183,20 @@ export function createAuthMiddleware(authService) {
           });
         }
 
-        const targetOrg = req.params[targetOrgParam] || req.query[targetOrgParam] || req.body?.[targetOrgParam];
-        if (targetOrg && targetOrg !== req.user.organizationId) {
+        const targetOrg =
+          req.params?.[targetOrgParam] ||
+          req.query?.[targetOrgParam] ||
+          req.body?.[targetOrgParam];
+
+        if (
+          targetOrg &&
+          normalizeRole(req.user.role) !== Roles.SUPER_ADMIN &&
+          targetOrg !== req.user.organizationId
+        ) {
           return reply.status(403).send({
             error: {
               code: 'CROSS_HOUSEHOLD_FORBIDDEN',
-              message: 'Access to resources outside your family household is prohibited',
+              message: 'Access to resources outside your organization is prohibited',
             },
           });
         }

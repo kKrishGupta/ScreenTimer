@@ -7,11 +7,14 @@ describe('Advanced Family Policy Engine (Milestone 4)', () => {
   it('evaluates restricted domains and applications with precedence and temporary bypass', async () => {
     const config = loadConfig({ DATABASE_URL: 'postgresql://x:y@localhost:5433/dp' });
     const app = await buildApp({ config, prisma: {}, logger: false });
+    const auth = await app.authService.createTestSession();
+    const headers = auth.headers;
 
     // 1. Create a member-scoped restricted application policy
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/v1/policies',
+      headers,
       payload: {
         name: 'Teen Gaming Block',
         category: 'gaming',
@@ -29,6 +32,7 @@ describe('Advanced Family Policy Engine (Milestone 4)', () => {
     const checkBlocked = await app.inject({
       method: 'POST',
       url: '/api/v1/policies/check',
+      headers,
       payload: { applicationName: 'minecraft.exe', memberId: 'user-teen-123' },
     });
     assert.equal(checkBlocked.statusCode, 200);
@@ -40,6 +44,7 @@ describe('Advanced Family Policy Engine (Milestone 4)', () => {
     const tempRes = await app.inject({
       method: 'POST',
       url: '/api/v1/policies/temporary-approvals',
+      headers,
       payload: { target: 'minecraft.exe', durationMinutes: 30, approvedBy: 'Mom' },
     });
     assert.equal(tempRes.statusCode, 200);
@@ -49,6 +54,7 @@ describe('Advanced Family Policy Engine (Milestone 4)', () => {
     const checkAllowed = await app.inject({
       method: 'POST',
       url: '/api/v1/policies/check',
+      headers,
       payload: { applicationName: 'minecraft.exe', memberId: 'user-teen-123' },
     });
     assert.equal(checkAllowed.statusCode, 200);
@@ -60,6 +66,7 @@ describe('Advanced Family Policy Engine (Milestone 4)', () => {
     const rulesRes = await app.inject({
       method: 'GET',
       url: '/api/v1/policies/declarative-rules',
+      headers,
     });
     assert.equal(rulesRes.statusCode, 200);
     const rulesData = rulesRes.json();
@@ -67,3 +74,4 @@ describe('Advanced Family Policy Engine (Milestone 4)', () => {
     assert.ok(rulesData.rules.some((r) => r.condition.urlFilter.includes('steampowered.com')));
   });
 });
+

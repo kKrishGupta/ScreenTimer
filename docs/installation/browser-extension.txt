@@ -1,0 +1,55 @@
+DIGITALPULSE __BROWSER__ EXTENSION - LOCAL DEVELOPMENT / INTERNAL TEST BUILD
+
+1. Extract digitalpulse-__SLUG__-extension.zip to a permanent user folder.
+2. Open __EXTENSIONS_PAGE__ in __BROWSER__ and enable Developer mode.
+3. Select Load unpacked and choose the extracted digitalpulse-__SLUG__-extension
+   folder containing manifest.json (not the ZIP or its enclosing downloads folder).
+4. Open the Extensions menu and pin DigitalPulse to the toolbar.
+5. Sign in to DigitalPulse Employee Setup with your own employee account, read
+   the privacy disclosure, and provide explicit consent if you agree. Consent,
+   administrator authorization, an active account, and a valid schedule/time zone
+   are separate server requirements; installation does not enable monitoring.
+6. Choose Browser extension in Employee Setup and generate a one-time token.
+   It expires after four hours and may enroll only one installation. Use a
+   separate token for each Chrome or Edge browser profile. Never share tokens.
+7. Open the DigitalPulse popup. The backend defaults to http://127.0.0.1:3001.
+   This works ONLY when the backend runs on this computer. Paste the token and
+   select Enroll. The token is cleared after success; it is not saved in settings.
+8. Click Sync Now or reopen the popup to check its authenticated heartbeat.
+   Backend Online means the API is reachable. Device Connected requires an
+   authenticated heartbeat. Monitoring can remain paused even while connected.
+9. Return to Employee Setup to see backend device and monitoring status. A
+   download or a locally marked installation start never proves enrollment.
+
+PRIVACY AND CREDENTIALS
+The extension records foreground website domains and active durations only while
+server authorization is valid. It pauses outside assigned hours, without consent
+or administrator approval, or when authorization expires. No page contents,
+keystrokes, clipboard, passwords, messages, screenshots or live screens are part
+of this workflow. The pending queue is retained when sync is denied or offline.
+The device secret is stored in extension-local storage, accessible to trusted
+extension contexts only, and is never displayed in the popup or dashboard.
+Do not export the browser profile or extension storage to another employee.
+
+BACKEND SETTINGS
+Use Backend settings only with an administrator-provided trusted origin.
+HTTP is permitted only for loopback development. Remote origins require HTTPS
+and approval for that exact host. Paths, embedded credentials, queries and
+fragments are rejected. An enrolled device or pending queue cannot be redirected
+to a different backend; ask an administrator to plan migration and revocation.
+The extension never discards the pending queue when saving a backend setting.
+
+TROUBLESHOOTING / REMOVAL
+Offline: check the backend is running on this computer and /api/v1/health is up.
+Token rejected: generate a fresh Browser extension token for this account.
+Paused: review consent, administrator authorization, account status and schedule.
+No activity: verify the current tab is an HTTP(S) site during authorized hours.
+Stop collection by disabling the extension. Before removing it, review pending
+events and revoke the device in DigitalPulse. Removing a browser extension can
+delete its local storage/queue; it does not delete PostgreSQL records.
+
+FUTURE PRODUCTION
+Localhost on a separate employee computer cannot reach a developer machine.
+Deploy an HTTPS backend first, configure trusted dashboard CORS and secure
+cookies, configure the approved backend in this popup, approve the exact HTTPS
+host permission, and rebuild/reverify packages before distributing them.

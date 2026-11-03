@@ -7,6 +7,8 @@ describe('Security Hardening & Privacy Controls (Milestone 9)', () => {
   it('serves privacy disclosure charter and enforces confirmed deletion workflow', async () => {
     const config = loadConfig({ DATABASE_URL: 'postgresql://x:y@localhost:5433/dp' });
     const app = await buildApp({ config, prisma: {}, logger: false });
+    const auth = await app.authService.createTestSession();
+    const headers = auth.headers;
 
     // 1. Privacy overview
     const overviewRes = await app.inject({
@@ -22,6 +24,7 @@ describe('Security Hardening & Privacy Controls (Milestone 9)', () => {
     const unconfirmedDel = await app.inject({
       method: 'POST',
       url: '/api/v1/privacy/delete-data',
+      headers,
       payload: {},
     });
     assert.equal(unconfirmedDel.statusCode, 400);
@@ -30,9 +33,11 @@ describe('Security Hardening & Privacy Controls (Milestone 9)', () => {
     const confirmedDel = await app.inject({
       method: 'POST',
       url: '/api/v1/privacy/delete-data',
+      headers,
       payload: { confirmDelete: true },
     });
     assert.equal(confirmedDel.statusCode, 200);
     assert.equal(confirmedDel.json().success, true);
   });
 });
+

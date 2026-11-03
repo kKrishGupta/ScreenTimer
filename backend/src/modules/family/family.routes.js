@@ -37,10 +37,15 @@ export default async function familyRoutes(fastify) {
     let devices = [];
     try {
       if (prisma?.device?.findMany) {
-        devices = await prisma.device.findMany({ select: { id: true, name: true, kind: true } });
+        devices = await prisma.device.findMany({ select: { id: true, name: true, kind: true, platform: true, lastSeenAt: true } });
       }
     } catch {
       devices = [];
+    }
+
+    // Auto-link registered devices with the primary owner/admin if not explicitly assigned
+    if (devices.length > 0 && familyState.members.length > 0 && familyState.members[0].assignedDeviceIds.length === 0) {
+      familyState.members[0].assignedDeviceIds = devices.map((d) => d.id);
     }
 
     const membersWithDevices = familyState.members.map((m) => {

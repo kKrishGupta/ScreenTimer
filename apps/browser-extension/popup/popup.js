@@ -1,58 +1,209 @@
 import { CONFIG } from '../shared/constants.js';
+import { normalizeBackendUrl, saveBackendUrl } from '../shared/backend-settings.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const statusBadge = document.getElementById('status-badge');
   const deviceIdEl = document.getElementById('device-id');
   const queueCountEl = document.getElementById('queue-count');
+  const queueAuditEl = document.getElementById('queue-audit');
+  const retrySkippedBtn = document.getElementById('retry-skipped');
+  const activeDomainEl = document.getElementById('active-domain');
   const syncBtn = document.getElementById('sync-btn');
+  const enrollBtn = document.getElementById('enroll-btn');
+  const enrollmentToken = document.getElementById('enrollment-token');
+  const enrollmentPanel = document.getElementById('enrollment-panel');
+  const enrollmentStatus = document.getElementById('enrollment-status');
+  const deviceStatus = document.getElementById('device-status');
+  const lastSyncEl = document.getElementById('last-sync');
+  const lastHeartbeatEl = document.getElementById('last-heartbeat');
+  const connectionKeys = [
+    'dp_device_connection_status', 'dp_last_heartbeat_at', 'dp_last_successful_sync_at',
+    'dp_sync_error', 'dp_monitoring_allowed', 'dp_monitoring_allowed_until', 'dp_monitoring_reason',
+  ];
 
-  // Load state
   const stored = await chrome.storage.local.get([
-    CONFIG.DEVICE_STORAGE_KEY,
-    CONFIG.SYNC_QUEUE_STORAGE_KEY,
-    CONFIG.SETTINGS_STORAGE_KEY,
+    CONFIG.DEVICE_STORAGE_KEY, CONFIG.SYNC_QUEUE_STORAGE_KEY, CONFIG.SETTINGS_STORAGE_KEY,
+    'dp_active_domain', 'dp_enrollment_status', ...connectionKeys,
   ]);
+  const enrollmentState = await chrome.runtime.sendMessage({ action: 'get_enrollment_state' }).catch(() => null);
+  let isEnrolled = Boolean(enrollmentState?.enrolled);
+  let deviceId = stored[CONFIG.DEVICE_STORAGE_KEY] || '';
+  if (!deviceId) {
+    const identity = await chrome.runtime.sendMessage({ action: 'get_device_id' }).catch(() => null);
+    deviceId = identity?.deviceId || '';
+  }
+  let enrolling = false;
+  function updateEnrollmentForm() {
+    enrollmentPanel.hidden = !CONFIG.ENROLLMENT_UI_ENABLED || isEnrolled;
+    enrollmentToken.disabled = !CONFIG.ENROLLMENT_UI_ENABLED || isEnrolled || enrolling;
+    enrollBtn.disabled = !CONFIG.ENROLLMENT_UI_ENABLED || isEnrolled || enrolling;
+    if (isEnrolled) enrollmentToken.value = '';
+  }
+  updateEnrollmentForm();
 
-  const deviceId = stored[CONFIG.DEVICE_STORAGE_KEY] || 'Not initialized';
-  deviceIdEl.textContent = deviceId;
-  deviceIdEl.title = deviceId;
+  function renderConnection(state) {
+    updateEnrollmentForm();
+    const heartbeatAge = Date.now() - Date.parse(state.dp_last_heartbeat_at || '');
+    const connected = isEnrolled && state.dp_device_connection_status === 'connected' && heartbeatAge >= 0 && heartbeatAge < 120000;
+    const monitoringActive = state.dp_monitoring_allowed === true && Date.now() < Date.parse(state.dp_monitoring_allowed_until || '');
+    deviceStatus.textContent = connected ? 'Connected' : !isEnrolled ? 'Enrollment Pending' : state.dp_last_heartbeat_at ? 'Offline' : 'Connection Pending';
+    lastHeartbeatEl.textContent = state.dp_last_heartbeat_at ? new Date(state.dp_last_heartbeat_at).toLocaleString() : '—';
+    lastSyncEl.textContent = state.dp_last_successful_sync_at ? new Date(state.dp_last_successful_sync_at).toLocaleString() : '—';
+    if (!isEnrolled) {
+      enrollmentStatus.textContent = 'Enter a one-time enrollment token created for your account. Pending events stay on this device until authorized sync is available.';
+    } else if (connected && !monitoringActive) {
+      enrollmentStatus.textContent = `Monitoring paused: ${monitoringReason(state.dp_monitoring_reason)} Pending events are retained.`;
+    } else if (connected) {
+      enrollmentStatus.textContent = 'Connected. Monitoring pauses when the authorized schedule ends.';
+    } else if (state.dp_sync_error) {
+      enrollmentStatus.textContent = state.dp_sync_error;
+    }
+  }
+
+  enrollBtn.addEventListener('click', async () => {
+    if (isEnrolled || enrolling || !CONFIG.ENROLLMENT_UI_ENABLED) return;
+    const token = enrollmentToken.value.trim();
+    if (!token) {
+      enrollmentStatus.textContent = 'Enter the one-time token created for your account.';
+      return;
+    }
+    enrolling = true;
+    updateEnrollmentForm();
+    enrollmentStatus.textContent = 'Enrolling…';
+    try {
+      if (!deviceId) {
+        const identity = await chrome.runtime.sendMessage({ action: 'get_device_id' });
+        deviceId = identity?.deviceId || '';
+      }
+      if (!deviceId) throw new Error('Could not initialize the browser device identity. Reopen the popup and try again.');
+      const result = await chrome.runtime.sendMessage({ action: 'enroll_browser', token });
+      if (!result?.success || !result.deviceId) throw new Error(result?.error || 'Enrollment failed');
+      deviceId = result.deviceId;
+      isEnrolled = true;
+      enrollmentToken.value = '';
+      enrollmentPanel.hidden = true;
+      deviceIdEl.textContent = result.deviceId;
+      const refreshed = await chrome.runtime.sendMessage({ action: 'refresh_status' }).catch(() => null);
+      const updated = await chrome.storage.local.get(connectionKeys);
+      renderConnection(updated);
+      if (refreshed?.heartbeat?.ok) renderConnection(updated);
+    } catch (error) {
+      enrollmentStatus.textContent = error.message || 'Enrollment could not be completed.';
+    } finally {
+      enrolling = false;
+      updateEnrollmentForm();
+    }
+  });
+
+  deviceIdEl.textContent = isEnrolled ? (deviceId || 'Not initialized') : 'Not assigned';
+  deviceIdEl.title = isEnrolled ? (deviceId || 'Not initialized') : 'Not assigned';
+
+  try {
+    const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (currentTab?.url) {
+      const urlObj = new URL(currentTab.url);
+      activeDomainEl.textContent = ['http:', 'https:'].includes(urlObj.protocol) ? urlObj.hostname : 'System / Browser Page';
+    } else activeDomainEl.textContent = stored.dp_active_domain || 'None';
+  } catch { activeDomainEl.textContent = stored.dp_active_domain || 'Active'; }
 
   const queue = stored[CONFIG.SYNC_QUEUE_STORAGE_KEY] || [];
   queueCountEl.textContent = `${queue.length} events`;
+  const renderAudit = (audit = {}) => {
+    const flags = [];
+    if (audit.malformed) flags.push(`${audit.malformed} malformed`);
+    if (audit.wrongDevice) flags.push(`${audit.wrongDevice} different device`);
+    if (audit.duplicates) flags.push(`${audit.duplicates} duplicate`);
+    if (audit.conflicting) flags.push(`${audit.conflicting} conflicting IDs`);
+    if (audit.rejected) flags.push(`${audit.rejected} skipped by authorization`);
+    queueAuditEl.textContent = flags.length ? flags.join(' · ') : `${audit.eligible ?? queue.length} ready; no local issues found`;
+    retrySkippedBtn.hidden = !audit.rejected;
+  };
+  renderAudit((await chrome.runtime.sendMessage({ action: 'audit_queue' }).catch(() => null)) || {});
+  let backendUrl;
+  try { backendUrl = normalizeBackendUrl(stored[CONFIG.SETTINGS_STORAGE_KEY]?.backendUrl || CONFIG.DEFAULT_BACKEND_URL); }
+  catch (error) { backendUrl = ''; enrollmentStatus.textContent = error.message; }
+  document.getElementById('backend-url').textContent = backendUrl;
+  document.getElementById('backend-input').value = backendUrl;
+  document.getElementById('save-backend').addEventListener('click', async () => {
+    const button = document.getElementById('save-backend');
+    const feedback = document.getElementById('backend-settings-status');
+    button.disabled = true;
+    try {
+      backendUrl = await saveBackendUrl(chrome, document.getElementById('backend-input').value);
+      document.getElementById('backend-url').textContent = backendUrl;
+      document.getElementById('backend-input').value = backendUrl;
+      feedback.textContent = 'Backend saved. Checking connection...';
+      await checkBackend();
+      feedback.textContent = statusBadge.textContent === 'Online' ? 'Backend saved and reachable.' : 'Backend saved; connection is unavailable. Check that the server is running.';
+    } catch (error) { feedback.textContent = error.message || 'Backend settings could not be saved.'; }
+    finally { button.disabled = false; }
+  });
+  renderConnection(stored);
 
-  const backendUrl = stored[CONFIG.SETTINGS_STORAGE_KEY]?.backendUrl || CONFIG.DEFAULT_BACKEND_URL;
-
-  // Test backend connectivity
+  async function checkBackend() {
   try {
-    const res = await fetch(`${backendUrl}/api/v1/health`, { signal: AbortSignal.timeout(2000) });
-    if (res.ok) {
-      statusBadge.textContent = 'Connected';
-      statusBadge.className = 'badge online';
-    } else {
-      statusBadge.textContent = 'Degraded';
-      statusBadge.className = 'badge offline';
-    }
+    if (!backendUrl) throw new Error('Backend URL is invalid.');
+    const response = await fetch(`${backendUrl}/api/v1/health`, { signal: AbortSignal.timeout(2000), redirect: 'error' });
+    const result = await response.json();
+    statusBadge.textContent = response.ok && result.status === 'ok' ? 'Online' : 'Degraded';
+    statusBadge.className = response.ok && result.status === 'ok' ? 'badge online' : 'badge offline';
   } catch {
     statusBadge.textContent = 'Offline';
     statusBadge.className = 'badge offline';
   }
+  }
+  await checkBackend();
+
+  const refresh = await chrome.runtime.sendMessage({ action: 'refresh_status' }).catch(() => null);
+  const current = await chrome.storage.local.get([CONFIG.SYNC_QUEUE_STORAGE_KEY, ...connectionKeys]);
+  renderConnection(current);
+  queueCountEl.textContent = `${(current[CONFIG.SYNC_QUEUE_STORAGE_KEY] || []).length} events`;
+  if (refresh?.heartbeat?.ok) renderConnection(current);
 
   syncBtn.addEventListener('click', async () => {
     syncBtn.disabled = true;
-    syncBtn.textContent = 'Syncing...';
-    try {
-      // Trigger background alarm to sync immediately
-      await chrome.runtime.sendMessage({ action: 'sync_now' });
-    } catch {
-      // ignore
+    syncBtn.textContent = 'Syncing…';
+    if (!isEnrolled) {
+      enrollmentStatus.textContent = 'Enroll this device with a one-time token before requesting a sync.';
+    } else {
+      try {
+        const result = await chrome.runtime.sendMessage({ action: 'sync_now' });
+        if (!result?.success) {
+          enrollmentStatus.textContent = result?.sync?.error || (result?.sync?.monitoringPaused ? `Monitoring is paused: ${monitoringReason(result.sync.reason)} Pending events are retained.` : '') || result?.heartbeat?.error || 'Sync could not be confirmed.';
+        } else enrollmentStatus.textContent = 'Sync completed and device heartbeat confirmed.';
+      } catch (error) {
+        enrollmentStatus.textContent = error.message || 'Could not contact the background worker.';
+      }
     }
-    setTimeout(async () => {
-      const updated = await chrome.storage.local.get([CONFIG.SYNC_QUEUE_STORAGE_KEY]);
-      const updatedQueue = updated[CONFIG.SYNC_QUEUE_STORAGE_KEY] || [];
-      queueCountEl.textContent = `${updatedQueue.length} events`;
-      syncBtn.disabled = false;
-      syncBtn.textContent = 'Sync Now';
-    }, 600);
+    const updated = await chrome.storage.local.get([CONFIG.SYNC_QUEUE_STORAGE_KEY, ...connectionKeys]);
+    queueCountEl.textContent = `${(updated[CONFIG.SYNC_QUEUE_STORAGE_KEY] || []).length} events`;
+    renderAudit((await chrome.runtime.sendMessage({ action: 'audit_queue' }).catch(() => null)) || {});
+    renderConnection(updated);
+    syncBtn.disabled = false;
+    syncBtn.textContent = 'Sync Now';
+  });
+
+  retrySkippedBtn.addEventListener('click', async () => {
+    retrySkippedBtn.disabled = true;
+    await chrome.runtime.sendMessage({ action: 'retry_skipped_events' }).catch(() => {});
+    const result = await chrome.runtime.sendMessage({ action: 'sync_now' }).catch(() => null);
+    if (result?.sync?.error) enrollmentStatus.textContent = result.sync.error;
+    renderAudit((await chrome.runtime.sendMessage({ action: 'audit_queue' }).catch(() => null)) || {});
+    const latest = await chrome.storage.local.get([CONFIG.SYNC_QUEUE_STORAGE_KEY, ...connectionKeys]);
+    queueCountEl.textContent = `${(latest[CONFIG.SYNC_QUEUE_STORAGE_KEY] || []).length} events`;
+    renderConnection(latest);
+    retrySkippedBtn.disabled = false;
   });
 });
 
+function monitoringReason(reason) {
+  return ({
+    USER_CONSENT_REQUIRED: 'your consent has not been recorded.',
+    ADMIN_AUTHORIZATION_REQUIRED: 'administrator authorization is missing.',
+    ORGANIZATION_TIMEZONE_REQUIRED: 'the organization time zone is not configured.',
+    SCHEDULE_NOT_CONFIGURED: 'your work schedule is not configured.',
+    OUTSIDE_SCHEDULE: 'it is outside your scheduled work hours.',
+    ACCOUNT_INACTIVE: 'the account is inactive.',
+    DEVICE_NOT_ENROLLED: 'the device has not been enrolled.',
+  }[reason] || 'the server could not verify authorization.');
+}

@@ -4,7 +4,9 @@
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
-use dp_core::{ActivityEvent, AgentConfig, DeviceInfo, EventSource, EventType, SessionManager, AGENT_VERSION};
+use dp_core::{
+    ActivityEvent, AgentConfig, DeviceInfo, EventSource, EventType, SessionManager, AGENT_VERSION,
+};
 use dp_platform_windows::{
     get_current_foreground_app, get_current_process_metrics, get_system_idle_duration,
     ActivityMonitor, PlatformEvent,
@@ -34,6 +36,20 @@ fn main() -> Result<()> {
         bail!("DigitalPulse user agent only supports Windows 11");
     }
 
+    if let Some(server) = parse_arg_value("--server").or_else(|| parse_arg_value("--backend-url")) {
+        std::env::set_var("DP_BACKEND_URL", server);
+    }
+
+    if std::env::args().nth(1).as_deref() == Some("enroll")
+        || std::env::args().any(|a| a == "--enroll")
+    {
+        return run_enroll();
+    }
+
+    if std::env::args().any(|a| a == "--status" || a == "status") {
+        return run_status();
+    }
+
     if std::env::args().any(|a| a == "--oneshot") {
         return run_oneshot();
     }
@@ -46,11 +62,144 @@ fn main() -> Result<()> {
     run_monitor(run_duration_secs)
 }
 
-fn run_sync_now() -> Result<()> {
-    let config = AgentConfig::from_env().context("invalid agent configuration")?;
-    let db_path = get_database_path();
+fn load_stored_credentials(storage: &mut Storage, device_id: &Uuid) -> Result<Option<String>> {
+    if let Ok(secret) = std::env::var("DP_DEVICE_SECRET") {
+        if !secret.trim().is_empty() {
+            return Ok(Some(secret));
+        }
+    }
+    if let Some(secret) = dp_platform_windows::credential_store::read_device_secret(
+        &device_id.to_string(),
+    )
+    .map_err(|_| {
+        anyhow::anyhow!("Windows Credential Manager could not be read; monitoring is paused")
+    })? {
+        std::env::set_var("DP_DEVICE_SECRET", &secret);
+        if std::env::var("DP_BACKEND_URL").is_err() {
+            if let Ok(Some(url)) = storage.get_state("backend_url") {
+                std::env::set_var("DP_BACKEND_URL", url);
+            }
+        }
+        return Ok(Some(secret));
+    }
+    if let Some(legacy) = storage.get_state("device_secret")? {
+        if !legacy.trim().is_empty() {
+            dp_platform_windows::credential_store::store_device_secret(&device_id.to_string(), &legacy)
+                .map_err(|_| anyhow::anyhow!("Could not migrate the device secret to Windows Credential Manager; monitoring is paused"))?;
+            storage
+                .delete_state("device_secret")
+                .context("failed to remove the migrated device secret from SQLite")?;
+            std::env::set_var("DP_DEVICE_SECRET", &legacy);
+            if std::env::var("DP_BACKEND_URL").is_err() {
+                if let Ok(Some(url)) = storage.get_state("backend_url") {
+                    std::env::set_var("DP_BACKEND_URL", url);
+                }
+            }
+            return Ok(Some(legacy));
+        }
+    }
+    if std::env::var("DP_BACKEND_URL").is_err() {
+        if let Ok(Some(url)) = storage.get_state("backend_url") {
+            if !url.trim().is_empty() {
+                std::env::set_var("DP_BACKEND_URL", url);
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn run_enroll() -> Result<()> {
+    let token = parse_arg_value("--token")
+        .or_else(|| parse_arg_value("-t"))
+        .context(
+            "Missing required --token argument (e.g. dp-user-agent enroll --token dp_enroll_...)",
+        )?;
+
+    let backend_url = parse_arg_value("--server")
+        .or_else(|| parse_arg_value("--backend-url"))
+        .or_else(|| std::env::var("DP_BACKEND_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:3001".to_string());
+
+    let db_path = get_database_path()?;
     let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
     let device_id = get_or_create_device_id(&mut storage)?;
+    let device_name = parse_arg_value("--name")
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .unwrap_or_else(|| "Windows Device".into());
+
+    println!("==================================================");
+    println!("   DIGITALPULSE ENDPOINT AGENT ENROLLMENT         ");
+    println!("==================================================");
+    println!("Target Backend:  {}", backend_url);
+    println!("Device ID:       {}", device_id);
+    println!("Device Name:     {}", device_name);
+    println!("Enrolling with token...");
+
+    let secret = sync::enroll_device_token(&backend_url, &token, &device_id, &device_name)
+        .context("device enrollment failed")?;
+
+    dp_platform_windows::credential_store::store_device_secret(&device_id.to_string(), &secret)
+        .map_err(|_| anyhow::anyhow!("enrollment succeeded but Windows Credential Manager could not store the device secret; do not start monitoring until it is stored securely"))?;
+    storage
+        .delete_state("device_secret")
+        .context("failed to remove a legacy plaintext secret from SQLite")?;
+    storage
+        .set_state("backend_url", &backend_url)
+        .context("failed to store backend URL in local SQLite buffer")?;
+
+    println!("[✓] Device successfully enrolled!");
+    println!("Device Secret:   [PROTECTED AND STORED SECURELY]");
+    println!("Backend URL:     {}", backend_url);
+    println!("Status:          Enrolled; connection requires an authenticated heartbeat.");
+    println!("Run 'dp-user-agent' to connect. Collection stays paused until the server confirms consent, administrator approval, and an active schedule.");
+    println!("==================================================");
+
+    Ok(())
+}
+
+fn run_status() -> Result<()> {
+    let db_path = get_database_path()?;
+    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    let credentials = load_stored_credentials(&mut storage, &device_id)?;
+    let backend_url = storage
+        .get_state("backend_url")
+        .unwrap_or(None)
+        .or_else(|| std::env::var("DP_BACKEND_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:3001".into());
+
+    let pending = storage.count_pending_sync().unwrap_or(0);
+    let total_stored = storage.count_sessions().unwrap_or(0);
+    println!("==================================================");
+    println!("   DIGITALPULSE ENDPOINT AGENT STATUS             ");
+    println!("==================================================");
+    println!("Version:         {}", AGENT_VERSION);
+    println!("Storage:         {}", db_path.display());
+    println!("Device ID:       {}", device_id);
+    println!(
+        "Enrollment:      {}",
+        if credentials.is_some() {
+            "ENROLLED"
+        } else {
+            "NOT ENROLLED (run 'dp-user-agent enroll --token <token>')"
+        }
+    );
+    println!("Backend URL:     {}", backend_url);
+    println!("Pending Queue:   {} sessions", pending);
+    println!("Total Recorded:  {} sessions", total_stored);
+    println!("Live activity:   Read only during authorized monitoring");
+    println!("==================================================");
+    Ok(())
+}
+
+fn run_sync_now() -> Result<()> {
+    let db_path = get_database_path()?;
+    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    if load_stored_credentials(&mut storage, &device_id)?.is_none() {
+        bail!("device is not enrolled; no activity will be synchronized");
+    }
+    let config = AgentConfig::from_env().context("invalid agent configuration")?;
     let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into());
 
     let device = DeviceInfo {
@@ -62,13 +211,21 @@ fn run_sync_now() -> Result<()> {
         agent_version: Some(AGENT_VERSION.to_string()),
     };
 
+    let gate = sync::send_startup_heartbeat(&config.backend_url, &device)?;
+    if !gate_is_active(&gate, Utc::now()) {
+        bail!(
+            "monitoring is paused by server authorization; local queue remains intact ({})",
+            gate.reason.as_deref().unwrap_or("policy unavailable")
+        );
+    }
+
     let pending_before = storage.count_pending_sync().unwrap_or(0);
     println!("Pending sync queue size before: {}", pending_before);
 
     let outcome = sync_pending_events(&mut storage, &config.backend_url, &device, 100)?;
     println!(
-        "Sync completed: attempted {}, synced {}",
-        outcome.attempted, outcome.synced
+        "Sync completed: attempted {}, acknowledged {}, rejected {}, quarantined {}",
+        outcome.attempted, outcome.synced, outcome.rejected, outcome.quarantined
     );
 
     let pending_after = storage.count_pending_sync().unwrap_or(0);
@@ -77,6 +234,27 @@ fn run_sync_now() -> Result<()> {
 }
 
 fn run_oneshot() -> Result<()> {
+    let mut storage =
+        Storage::open(get_database_path()?).context("failed to open SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    if load_stored_credentials(&mut storage, &device_id)?.is_none() {
+        bail!("device is not enrolled; no live activity data was read");
+    }
+    let config = AgentConfig::from_env().context("invalid agent configuration")?;
+    let device = DeviceInfo {
+        id: device_id,
+        kind: EventSource::DesktopAgent,
+        name: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into()),
+        platform: "windows_11".into(),
+        browser: None,
+        agent_version: Some(AGENT_VERSION.to_string()),
+    };
+    let gate = sync::send_startup_heartbeat(&config.backend_url, &device)
+        .context("server authorization could not be verified; no live activity data was read")?;
+    if !gate_is_active(&gate, Utc::now()) {
+        bail!("monitoring is paused by server authorization; no live activity data was read");
+    }
+
     let idle = get_system_idle_duration();
     let app = get_current_foreground_app();
     let metrics = get_current_process_metrics();
@@ -87,10 +265,6 @@ fn run_oneshot() -> Result<()> {
         Ok(a) => {
             println!("Foreground Executable: {}", a.executable_name);
             println!("Foreground PID:        {}", a.process_id);
-            println!(
-                "Executable Path:       {}",
-                a.executable_path.unwrap_or_else(|| "N/A".into())
-            );
         }
         Err(err) => {
             println!("Foreground App:        [Error: {err}]");
@@ -103,12 +277,16 @@ fn run_oneshot() -> Result<()> {
 }
 
 fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
-    let config = AgentConfig::from_env().context("invalid agent configuration")?;
-    let db_path = get_database_path();
+    let db_path = get_database_path()?;
     info!(path = %db_path.display(), "Opening SQLite local storage buffer");
 
     let mut storage = Storage::open(&db_path).context("failed to initialize SQLite storage")?;
     let device_id = get_or_create_device_id(&mut storage)?;
+    if load_stored_credentials(&mut storage, &device_id)?.is_none() {
+        warn!("Device is not enrolled; monitor will not collect activity");
+        return Ok(());
+    }
+    let config = AgentConfig::from_env().context("invalid agent configuration")?;
 
     info!(
         version = AGENT_VERSION,
@@ -139,6 +317,36 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
     let mut total_ticks: u64 = 0;
     let mut recorded_sessions: u64 = 0;
 
+    let mut gate = match sync::send_startup_heartbeat(&config.backend_url, &device_info) {
+        Ok(gate) => gate,
+        Err(err) => {
+            warn!(
+                error = format!("{:#}", err),
+                "Startup heartbeat unavailable; monitoring is paused"
+            );
+            sync::MonitoringGate {
+                allowed: false,
+                allowed_from: None,
+                allowed_until: None,
+                reason: Some("HEARTBEAT_UNAVAILABLE".into()),
+            }
+        }
+    };
+    let mut last_sample_at = Utc::now();
+    if gate_is_active(&gate, Utc::now()) {
+        match sync_pending_events(&mut storage, &config.backend_url, &device_info, 50) {
+            Ok(outcome) if outcome.synced > 0 => info!(
+                synced = outcome.synced,
+                rejected = outcome.rejected,
+                "Flushed acknowledged offline events"
+            ),
+            Ok(_) => {}
+            Err(err) => warn!(error = %err, "Startup sync deferred; pending rows remain in SQLite"),
+        }
+    } else {
+        warn!(reason = gate.reason.as_deref().unwrap_or("MONITORING_CONFIGURATION_UNAVAILABLE"), "Monitoring paused until consent, authorization, organization time zone, and schedule checks pass");
+    }
+
     let sample_interval = config.sample_interval;
 
     while running.load(Ordering::SeqCst) {
@@ -150,7 +358,37 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
         }
 
         total_ticks += 1;
-        let events = monitor.tick();
+        let now = Utc::now();
+        let gap = now - last_sample_at;
+        if gate_is_active(&gate, now)
+            && gap
+                > chrono::Duration::from_std(sample_interval.saturating_mul(3)).unwrap_or_default()
+        {
+            if let Some(event) = session_manager.close_active_session(last_sample_at) {
+                save_completed_event(&mut storage, &event);
+                recorded_sessions += 1;
+            }
+            monitor.reset();
+            warn!(gap_seconds = gap.num_seconds(), "System sleep or agent suspension detected; activity interval closed before the gap");
+        }
+        last_sample_at = now;
+
+        let monitoring_now = gate_is_active(&gate, now);
+        if !monitoring_now {
+            if let Some(event) =
+                session_manager.close_active_session(gate.allowed_until.unwrap_or(now))
+            {
+                save_completed_event(&mut storage, &event);
+                recorded_sessions += 1;
+            }
+            monitor.reset();
+        }
+
+        let events = if monitoring_now {
+            monitor.tick()
+        } else {
+            Vec::new()
+        };
 
         for event in events {
             let now = Utc::now();
@@ -162,10 +400,23 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
                     now,
                 ),
                 PlatformEvent::IdleStarted { idle_duration } => {
-                    session_manager.handle_idle_start(idle_duration, now)
+                    let authorized_idle = gate
+                        .allowed_from
+                        .and_then(|since| (now - since).to_std().ok())
+                        .map(|elapsed| elapsed.min(idle_duration))
+                        .unwrap_or(Duration::ZERO);
+                    session_manager.handle_idle_start(authorized_idle, now)
                 }
                 PlatformEvent::UserResumed { total_idle } => {
                     session_manager.handle_idle_return(total_idle, now)
+                }
+                PlatformEvent::SessionLocked => {
+                    info!("Windows session is locked; foreground collection paused");
+                    session_manager.close_active_session(now)
+                }
+                PlatformEvent::SessionUnlocked => {
+                    info!("Windows session unlocked; foreground collection resumed");
+                    None
                 }
             };
 
@@ -177,14 +428,55 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
 
         // Periodic background synchronization to backend
         if last_sync_time.elapsed() >= config.sync_interval {
-            match sync_pending_events(&mut storage, &config.backend_url, &device_info, 50) {
-                Ok(outcome) if outcome.synced > 0 => {
-                    info!(synced = outcome.synced, "Background sync pushed events to backend");
-                }
-                Ok(_) => {}
+            let previous_gate = gate.clone();
+            gate = match sync::send_startup_heartbeat(&config.backend_url, &device_info) {
+                Ok(value) => value,
                 Err(err) => {
-                    warn!(error = %err, "Periodic sync skipped (offline/unreachable); events buffered in SQLite");
+                    warn!(
+                        error = format!("{:#}", err),
+                        "Periodic heartbeat unavailable; monitoring paused"
+                    );
+                    sync::MonitoringGate {
+                        allowed: false,
+                        allowed_from: None,
+                        allowed_until: None,
+                        reason: Some("HEARTBEAT_UNAVAILABLE".into()),
+                    }
                 }
+            };
+            if !gate_is_active(&gate, Utc::now()) && previous_gate.allowed {
+                let end = if gate.reason.as_deref() == Some("OUTSIDE_SCHEDULE") {
+                    previous_gate.allowed_until.unwrap_or_else(Utc::now)
+                } else {
+                    Utc::now()
+                };
+                if let Some(event) = session_manager.close_active_session(end) {
+                    save_completed_event(&mut storage, &event);
+                    recorded_sessions += 1;
+                }
+                monitor.reset();
+            }
+            if gate_is_active(&gate, Utc::now()) {
+                match sync_pending_events(&mut storage, &config.backend_url, &device_info, 50) {
+                    Ok(outcome) if outcome.synced > 0 => info!(
+                        synced = outcome.synced,
+                        rejected = outcome.rejected,
+                        "Background sync processed acknowledged events"
+                    ),
+                    Ok(_) => {}
+                    Err(err) => warn!(
+                        error = format!("{:#}", err),
+                        "Periodic sync deferred; pending records remain in SQLite"
+                    ),
+                }
+            } else {
+                warn!(
+                    reason = gate
+                        .reason
+                        .as_deref()
+                        .unwrap_or("MONITORING_CONFIGURATION_UNAVAILABLE"),
+                    "Sync paused; local queue preserved"
+                );
             }
             last_sync_time = Instant::now();
         }
@@ -193,15 +485,34 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
     }
 
     // Flush any pending active session on shutdown
-    if let Some(final_event) = session_manager.close_active_session(Utc::now()) {
+    let shutdown_time = Utc::now();
+    let final_end = if gate_is_active(&gate, shutdown_time) {
+        shutdown_time
+    } else {
+        gate.allowed_until.unwrap_or(shutdown_time)
+    };
+    if let Some(final_event) = session_manager.close_active_session(final_end) {
         save_completed_event(&mut storage, &final_event);
         recorded_sessions += 1;
     }
 
     // Final synchronization attempt before shutdown
-    match sync_pending_events(&mut storage, &config.backend_url, &device_info, 100) {
+    match if gate_is_active(&gate, shutdown_time) {
+        sync_pending_events(&mut storage, &config.backend_url, &device_info, 100)
+    } else {
+        Ok(sync::SyncOutcome {
+            attempted: 0,
+            synced: 0,
+            rejected: 0,
+            quarantined: 0,
+        })
+    } {
         Ok(outcome) if outcome.synced > 0 => {
-            info!(synced = outcome.synced, "Final flush synchronized remaining events to backend");
+            info!(
+                synced = outcome.synced,
+                rejected = outcome.rejected,
+                "Final flush synchronized acknowledged events"
+            );
         }
         Ok(_) => {}
         Err(err) => {
@@ -214,6 +525,7 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
     let metrics = get_current_process_metrics();
     let total_stored = storage.count_sessions().unwrap_or(0);
     let pending_sync = storage.count_pending_sync().unwrap_or(0);
+    let quarantined_sync = storage.count_quarantined_sync().unwrap_or(0);
 
     info!("=== Performance & Profile Summary ===");
     info!(
@@ -222,6 +534,7 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
         sessions_recorded_this_run = recorded_sessions,
         total_stored_sessions = total_stored,
         pending_sync_queue = pending_sync,
+        quarantined_sync_queue = quarantined_sync,
         "Session accounting & storage status"
     );
 
@@ -247,6 +560,12 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn gate_is_active(gate: &sync::MonitoringGate, now: chrono::DateTime<Utc>) -> bool {
+    gate.allowed
+        && gate.allowed_from.is_some_and(|start| now >= start)
+        && gate.allowed_until.is_some_and(|end| now < end)
 }
 
 fn save_completed_event(storage: &mut Storage, event: &ActivityEvent) {
@@ -316,14 +635,27 @@ fn get_or_create_device_id(storage: &mut Storage) -> Result<Uuid> {
     Ok(new_id)
 }
 
-fn get_database_path() -> PathBuf {
-    if let Ok(custom) = std::env::var("DP_DB_PATH") {
-        return PathBuf::from(custom);
+fn get_database_path() -> Result<PathBuf> {
+    let custom = std::env::var_os("DP_DB_PATH").map(PathBuf::from);
+    #[cfg(windows)]
+    let path = dp_storage::paths::database_path(
+        custom.as_deref(),
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from).as_deref(),
+    ).context("could not resolve persistent agent storage")?;
+    #[cfg(not(windows))]
+    let path = custom.clone().unwrap_or(std::env::current_dir()?.join("agent_storage.db"));
+
+    let mut legacy = Vec::new();
+    if custom.is_none() {
+        legacy.push(std::env::current_dir()?.join("agent_storage.db"));
+        if let Some(parent) = std::env::current_exe()?.parent() {
+            legacy.push(parent.join("agent_storage.db"));
+        }
+        legacy.retain(|candidate| candidate != &path);
     }
-    // Local dev: place agent_storage.db in current working directory or user AppData
-    let mut path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    path.push("agent_storage.db");
-    path
+    dp_storage::paths::prepare_database_path(&path, &legacy)
+        .map_err(|error| anyhow::anyhow!("Persistent agent storage is unavailable: {error}"))?;
+    Ok(path)
 }
 
 fn parse_arg_value(flag: &str) -> Option<String> {

@@ -12,7 +12,10 @@
 //! screen pixels.
 
 pub mod diagnostics;
+pub mod credential_store;
 pub mod foreground;
+pub mod http;
+pub mod session_state;
 pub mod idle;
 pub mod monitor;
 
@@ -23,6 +26,7 @@ pub use foreground::{
 };
 pub use idle::{get_system_idle_duration, IdleState, IdleTracker, IdleTransition};
 pub use monitor::{ActivityMonitor, PlatformEvent};
+pub use session_state::is_workstation_locked;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

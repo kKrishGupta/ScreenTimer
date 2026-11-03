@@ -23,12 +23,15 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
     PORT: '3001',
   });
   const app = await buildApp({ config, prisma: createMockPrisma(), logger: false });
+  const auth = await app.authService.createTestSession();
+  const headers = auth.headers;
 
   let createdMemberId;
-  await t.test('POST /api/v1/family/members creates family member', async () => {
+  await t.test('refuses fake family member creation when employee storage is unavailable', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/family/members',
+      headers,
       payload: {
         displayName: 'Taylor (Teen)',
         email: 'taylor@family.local',
@@ -37,38 +40,27 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
         consentGranted: true,
       },
     });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.equal(body.success, true);
-    assert.equal(body.member.displayName, 'Taylor (Teen)');
-    assert.equal(body.member.ageBracket, 'teen');
-    createdMemberId = body.member.id;
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().error.code, 'INVITATION_FAILED');
   });
 
-  await t.test('POST /api/v1/family/members/:id/devices assigns device to member', async () => {
+  await t.test('device assignment reports unavailable employee storage', async () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/v1/family/members/${createdMemberId}/devices`,
+      headers,
       payload: { deviceId: 'dev-1' },
     });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.equal(body.success, true);
-    assert.ok(body.assignedDeviceIds.includes('dev-1'));
+    assert.equal(res.statusCode, 503);
   });
 
-  await t.test('GET /api/v1/family/members lists members with assigned devices', async () => {
+  await t.test('GET /api/v1/family/members does not return fake people', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/family/members',
+      headers,
     });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.ok(body.totalCount >= 1);
-    const found = body.members.find((m) => m.id === createdMemberId);
-    assert.ok(found);
-    assert.equal(found.devices.length, 1);
-    assert.equal(found.devices[0].name, 'Child Laptop');
+    assert.equal(res.statusCode, 503);
   });
 
   let createdPolicyId;
@@ -76,6 +68,7 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/policies',
+      headers,
       payload: {
         name: 'Video Streaming Restrictions',
         category: 'streaming',
@@ -97,6 +90,7 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
     const safeRes = await app.inject({
       method: 'POST',
       url: '/api/v1/policies/check',
+      headers,
       payload: { domain: 'wikipedia.org' },
     });
     assert.equal(safeRes.statusCode, 200);
@@ -106,6 +100,7 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
     const restrictedRes = await app.inject({
       method: 'POST',
       url: '/api/v1/policies/check',
+      headers,
       payload: { domain: 'youtube.com' },
     });
     assert.equal(restrictedRes.statusCode, 200);
@@ -120,6 +115,7 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/policies/violations',
+      headers,
     });
     assert.equal(res.statusCode, 200);
     const body = res.json();
@@ -132,6 +128,7 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
     const ackRes = await app.inject({
       method: 'POST',
       url: `/api/v1/policies/violations/${youtubeViolation.id}/acknowledge`,
+      headers,
     });
     assert.equal(ackRes.statusCode, 200);
     assert.equal(ackRes.json().violation.acknowledged, true);
@@ -141,6 +138,7 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/alerts',
+      headers,
     });
     assert.equal(res.statusCode, 200);
     const body = res.json();
@@ -148,16 +146,18 @@ test('Family Management & Policy Engine API (Milestone 9)', async (t) => {
     assert.ok(body.alerts.some((a) => a.type === 'system_notice'));
   });
 
-  await t.test('DELETE /api/v1/family/members/:id and /api/v1/policies/:id cleans up', async () => {
+  await t.test('deactivation reports unavailable employee storage and policy cleanup still works', async () => {
     const delMember = await app.inject({
       method: 'DELETE',
       url: `/api/v1/family/members/${createdMemberId}`,
+      headers,
     });
-    assert.equal(delMember.statusCode, 200);
+    assert.equal(delMember.statusCode, 503);
 
     const delPolicy = await app.inject({
       method: 'DELETE',
       url: `/api/v1/policies/${createdPolicyId}`,
+      headers,
     });
     assert.equal(delPolicy.statusCode, 200);
   });

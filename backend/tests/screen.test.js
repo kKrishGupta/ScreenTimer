@@ -18,11 +18,14 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     PORT: '3001',
   });
   const app = await buildApp({ config, prisma: createMockPrisma(), logger: false });
+  const auth = await app.authService.createTestSession();
+  const headers = auth.headers;
 
   await t.test('GET /api/v1/screen/config returns initial state requiring consent', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/screen/config',
+      headers,
     });
     assert.equal(res.statusCode, 200);
     const body = res.json();
@@ -34,6 +37,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/capture',
+      headers,
       payload: { applicationName: 'Test App' },
     });
     assert.equal(res.statusCode, 403);
@@ -45,6 +49,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/consent',
+      headers,
       payload: { consent: true },
     });
     assert.equal(res.statusCode, 200);
@@ -59,6 +64,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/capture',
+      headers,
       payload: { applicationName: 'Notepad' },
     });
     assert.equal(res.statusCode, 200);
@@ -73,6 +79,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/screen/captures',
+      headers,
     });
     assert.equal(res.statusCode, 200);
     const body = res.json();
@@ -86,6 +93,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const pauseRes = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/state',
+      headers,
       payload: { action: 'pause', pauseMinutes: 15 },
     });
     assert.equal(pauseRes.statusCode, 200);
@@ -95,6 +103,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const captureWhilePaused = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/capture',
+      headers,
       payload: { applicationName: 'Notepad' },
     });
     assert.equal(captureWhilePaused.statusCode, 409);
@@ -103,6 +112,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const resumeRes = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/state',
+      headers,
       payload: { action: 'resume' },
     });
     assert.equal(resumeRes.statusCode, 200);
@@ -113,6 +123,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const startRes = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/live-session/start',
+      headers,
       payload: { durationMinutes: 10 },
     });
     assert.equal(startRes.statusCode, 200);
@@ -123,6 +134,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const stopRes = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/live-session/stop',
+      headers,
     });
     assert.equal(stopRes.statusCode, 200);
     assert.equal(stopRes.json().active, false);
@@ -132,6 +144,7 @@ test('Screen Monitoring API (Milestone 7)', async (t) => {
     const delRes = await app.inject({
       method: 'DELETE',
       url: `/api/v1/screen/captures/${captureId}`,
+      headers,
     });
     assert.equal(delRes.statusCode, 200);
     assert.equal(delRes.json().deletedId, captureId);

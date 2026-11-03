@@ -29,7 +29,11 @@
     "test:extension": "npm test -w @digitalpulse/browser-extension",
     "test:dashboard": "npm test -w @digitalpulse/dashboard",
     "test:js": "npm test --workspaces --if-present",
-    "lint:dashboard": "npm run lint -w @digitalpulse/dashboard"
+    "lint:dashboard": "npm run lint -w @digitalpulse/dashboard",
+    "package:exe": "powershell -ExecutionPolicy Bypass -File scripts/build-exe-package.ps1",
+    "package:employees": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-employee-downloads.ps1",
+    "verify:employee-downloads": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-employee-downloads.ps1",
+    "verify:employee-download-http": "node scripts/verify-employee-download-http.mjs"
   }
 }
 

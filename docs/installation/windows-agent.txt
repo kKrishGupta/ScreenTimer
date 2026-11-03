@@ -1,0 +1,76 @@
+DIGITALPULSE WINDOWS AGENT - LOCAL DEVELOPMENT / INTERNAL TEST BUILD
+
+Requirements: Windows 11 x64, an active DigitalPulse employee account, the
+organization's approved package, and the backend running on THIS computer.
+This portable ZIP is not a signed MSI and does not install a Windows service.
+
+1. Extract digitalpulse-windows-agent.zip to a permanent user folder, for example
+   Documents\DigitalPulseAgent. Keep dp-user-agent.exe and this README together.
+2. Open the extracted digitalpulse-windows-agent folder in File Explorer.
+   Right-click inside the folder and select Open in Terminal / PowerShell.
+3. Sign in to DigitalPulse and open Employee Setup. Read the privacy disclosure.
+   Consent is voluntary and can be revoked. Request administrator approval and
+   a valid organization time zone and work schedule as appropriate.
+4. In Employee Setup, choose Windows desktop agent and generate a one-time token.
+   It expires in four hours. Copy it; do not share it, commit it, or save it in a
+   script. Each device needs its own token. Installation alone does not enroll.
+5. Enroll from PowerShell. Read-Host keeps the real token out of command history:
+   $enrollmentToken = Read-Host 'Paste your one-time token'
+   .\dp-user-agent.exe enroll --token $enrollmentToken --server http://127.0.0.1:3001
+   Remove-Variable enrollmentToken
+   Example syntax only (replace placeholder, never include it literally):
+   .\dp-user-agent.exe enroll --token "YOUR_ONE_TIME_TOKEN" --server http://127.0.0.1:3001
+6. Run .\dp-user-agent.exe --status to inspect local enrollment and pending queue.
+   This is local status, not proof that the backend has received a heartbeat.
+7. When ready to connect, run .\dp-user-agent.exe in this interactive user session.
+   It checks server authorization before reading activity. Enrollment is NOT
+   consent or administrator approval. Collection remains paused until all gates
+   pass and stops when authorization expires, is revoked, or the shift ends.
+8. Open Employee Setup and select Check installation status. Connected requires
+   an authenticated heartbeat. Monitoring authorization is shown separately.
+9. Stop with Ctrl+C and wait for the process to finish. Leave the SQLite buffer
+   intact so unsynchronized events survive restarts. No auto-start task is added.
+
+DATA AND PRIVACY
+The default database is %LOCALAPPDATA%\DigitalPulse\agent_storage.db.
+DP_DB_PATH overrides the location for recovery or an existing deployment.
+On first upgrade, one legacy database from the working/executable directory is
+copied consistently, including WAL contents. The original is preserved. If more
+than one database is found, choose the intended file with DP_DB_PATH; no merge or
+record deletion happens. Stop older agents before upgrading. Copying one database
+does not discover old files elsewhere: use DP_DB_PATH for those installations.
+Device secrets stay in Windows Credential Manager under DigitalPulse/DeviceSecret.
+Never export or distribute those credentials. SQLite is a local activity buffer,
+not encrypted storage; protect your Windows account and disk using OS controls.
+Collection includes foreground app names, active/idle intervals and heartbeats.
+No default screenshots, live screens, keystrokes, clipboard, passwords, page
+contents or private messages are collected by this installation workflow.
+
+TROUBLESHOOTING
+- Backend unavailable: start the local backend and check /api/v1/health. Offline
+  or unauthorized sync retains the pending queue; it is not reported as synced.
+- Invalid/expired/used token: generate a new token for the correct device type.
+- Already enrolled: keep existing credentials; ask the administrator to revoke a
+  device before deliberate replacement. Do not delete data to bypass an error.
+- Monitoring paused: check consent, administrator authorization, account status,
+  organization time zone and scheduled hours in the dashboard.
+- Storage inaccessible: choose an accessible persistent DP_DB_PATH, preserving
+  your existing database. Do not use a temporary folder.
+- Credential Manager failure: monitoring stays paused. Contact your administrator;
+  never paste a device secret into SQLite or a configuration file.
+
+UNINSTALL
+Stop the agent, revoke this device from DigitalPulse, then remove the extracted
+program folder. Keep %LOCALAPPDATA%\DigitalPulse and any legacy database until
+your administrator has reviewed unsynchronized records and retention requirements.
+Remove the matching Windows Credential Manager entry only after revocation.
+Uninstalling does not delete PostgreSQL records or grant permission to erase them.
+
+LOCALHOST LIMITATION AND FUTURE PRODUCTION
+127.0.0.1 reaches only this computer. A separate employee computer cannot reach
+the developer's backend using localhost. There is no public backend in this build.
+For future production, an administrator must deploy HTTPS, supply the trusted
+backend origin, explicitly enable remote access for the agent process only with
+DP_ALLOW_REMOTE_BACKEND=true, and rebuild/reverify the packages and instructions.
+Never enable remote HTTP, disable certificate checks, or set remote permission
+globally. The agent also accepts --server or DP_BACKEND_URL for the chosen backend.

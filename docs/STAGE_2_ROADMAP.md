@@ -42,3 +42,4 @@
 8. **Milestone 8 — Reliability & Resilience**: Bounded queues, structured logging with pino, graceful shutdown, and database connection handling.
 9. **Milestone 9 — Security Hardening & Privacy Controls**: Dedicated Privacy & Permissions dashboard, audit export, data deletion workflows.
 10. **Milestone 10 — Release Readiness & Final QA**: Build release artifacts, verify all Stage 1 + Stage 2 test suites, prepare installation guides.
+

@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 
-// In-memory notifications store and cooldown tracker
-const notifications = [];
-const cooldowns = new Map(); // key: deduplicationKey -> timestamp
+const fallbackNotifications = [];
+const fallbackCooldowns = new Map();
+const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000000';
 
 export const NotificationSeverity = {
   INFO: 'info',
@@ -24,6 +24,7 @@ export const NotificationTypes = {
   LIVE_SHARE_STARTED: 'live_screen_sharing_started',
   LIVE_SHARE_ENDED: 'live_screen_sharing_ended',
   DEVICE_ENROLLED: 'device_enrollment',
+  EMPLOYEE_SETUP_REMINDER: 'employee_setup_reminder',
   POLICY_MODIFIED: 'policy_modification',
 };
 
@@ -33,41 +34,75 @@ export class NotificationService {
     this.logger = logger || console;
   }
 
-  /**
-   * Generates a notification with automatic deduplication and cooldown.
-   */
+  persistent() {
+    return Boolean(this.prisma?.notification?.findMany);
+  }
+
+  requirePersistentStorage() {
+    if (process.env.NODE_ENV === 'production' && !this.persistent()) {
+      const error = new Error('Persistent notification storage is unavailable');
+      error.statusCode = 503;
+      throw error;
+    }
+  }
+
   async createNotification({
     type,
     severity = NotificationSeverity.INFO,
     title,
     message,
     target = null,
-    organizationId = '00000000-0000-0000-0000-000000000000',
+    organizationId = DEFAULT_ORGANIZATION_ID,
     userId = null,
     cooldownMinutes = 5,
   }) {
-    if (!title || !message) {
-      throw new Error('Title and message are required for notifications');
+    this.requirePersistentStorage();
+    if (!title || !message) throw new Error('Title and message are required for notifications');
+    const normalizedType = type || NotificationTypes.RESTRICTED_WEBSITE;
+    const normalizedSeverity = Object.values(NotificationSeverity).includes(severity)
+      ? severity
+      : NotificationSeverity.INFO;
+    const now = new Date();
+    const since = new Date(now.getTime() - cooldownMinutes * 60 * 1000);
+
+    if (this.persistent()) {
+      const recent = await this.prisma.notification.findFirst({
+        where: {
+          organizationId,
+          type: normalizedType,
+          target,
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (recent) {
+        return { suppressed: true, reason: 'Cooldown active', dedupKey: `${normalizedType}:${target || 'global'}:${organizationId}` };
+      }
+
+      const notification = await this.prisma.notification.create({
+        data: {
+          organizationId,
+          userId,
+          type: normalizedType,
+          severity: normalizedSeverity,
+          title: title.slice(0, 120),
+          message: message.slice(0, 500),
+          target: target ? target.slice(0, 100) : null,
+        },
+      });
+      return { suppressed: false, notification };
     }
 
-    // Deduplication key: type + target
-    const dedupKey = `${type}:${target || 'global'}:${organizationId}`;
-    const now = Date.now();
-    const lastTriggered = cooldowns.get(dedupKey);
-
-    if (lastTriggered && now - lastTriggered < cooldownMinutes * 60 * 1000) {
-      // Cooldown active, suppress duplicate notification
+    const dedupKey = `${normalizedType}:${target || 'global'}:${organizationId}`;
+    const lastTriggered = fallbackCooldowns.get(dedupKey);
+    if (lastTriggered && Date.now() - lastTriggered < cooldownMinutes * 60 * 1000) {
       return { suppressed: true, reason: 'Cooldown active', dedupKey };
     }
-
-    cooldowns.set(dedupKey, now);
-
+    fallbackCooldowns.set(dedupKey, Date.now());
     const notification = {
       id: crypto.randomUUID(),
-      type: type || NotificationTypes.RESTRICTED_WEBSITE,
-      severity: [NotificationSeverity.INFO, NotificationSeverity.WARNING, NotificationSeverity.CRITICAL].includes(severity)
-        ? severity
-        : NotificationSeverity.INFO,
+      type: normalizedType,
+      severity: normalizedSeverity,
       title: title.slice(0, 120),
       message: message.slice(0, 500),
       target: target ? target.slice(0, 100) : null,
@@ -75,76 +110,85 @@ export class NotificationService {
       userId,
       read: false,
       readAt: null,
-      createdAt: new Date().toISOString(),
+      createdAt: now.toISOString(),
     };
-
-    notifications.unshift(notification);
-    if (notifications.length > 500) notifications.pop();
-
+    fallbackNotifications.unshift(notification);
+    if (fallbackNotifications.length > 500) fallbackNotifications.pop();
     return { suppressed: false, notification };
   }
 
-  /**
-   * Lists notifications with filters.
-   */
-  listNotifications({ unreadOnly = false, severity = null, limit = 50 }) {
-    let result = [...notifications];
-
-    if (unreadOnly) {
-      result = result.filter((n) => !n.read);
+  async listNotifications({ organizationId = DEFAULT_ORGANIZATION_ID, userId = null, unreadOnly = false, severity = null, limit = 50 }) {
+    this.requirePersistentStorage();
+    const take = Math.max(1, Math.min(Number(limit) || 50, 100));
+    if (this.persistent()) {
+      const where = { organizationId };
+      if (userId) where.OR = [{ userId }, { userId: null }];
+      if (unreadOnly) where.read = false;
+      if (severity) where.severity = severity;
+      const [notifications, totalCount, unreadCount] = await Promise.all([
+        this.prisma.notification.findMany({ where, orderBy: { createdAt: 'desc' }, take }),
+        this.prisma.notification.count({ where }),
+        this.prisma.notification.count({ where: { ...where, read: false } }),
+      ]);
+      return { notifications, totalCount, unreadCount };
     }
-    if (severity) {
-      result = result.filter((n) => n.severity === severity);
-    }
-
+    let result = fallbackNotifications.filter((n) => n.organizationId === organizationId);
+    if (userId) result = result.filter((n) => n.userId === userId || !n.userId);
+    if (unreadOnly) result = result.filter((n) => !n.read);
+    if (severity) result = result.filter((n) => n.severity === severity);
     return {
-      notifications: result.slice(0, limit),
-      totalCount: notifications.length,
-      unreadCount: notifications.filter((n) => !n.read).length,
+      notifications: result.slice(0, take),
+      totalCount: result.length,
+      unreadCount: result.filter((n) => !n.read).length,
     };
   }
 
-  /**
-   * Marks a notification as read.
-   */
-  markAsRead(id) {
-    const item = notifications.find((n) => n.id === id);
+  async markAsRead(id, organizationId = DEFAULT_ORGANIZATION_ID) {
+    this.requirePersistentStorage();
+    if (this.persistent()) {
+      const result = await this.prisma.notification.updateMany({
+        where: { id, organizationId },
+        data: { read: true, readAt: new Date() },
+      });
+      if (result.count === 0) return null;
+      return this.prisma.notification.findUnique({ where: { id } });
+    }
+    const item = fallbackNotifications.find((n) => n.id === id && n.organizationId === organizationId);
     if (!item) return null;
     item.read = true;
     item.readAt = new Date().toISOString();
     return item;
   }
 
-  /**
-   * Marks all notifications as read.
-   */
-  markAllAsRead() {
+  async markAllAsRead(organizationId = DEFAULT_ORGANIZATION_ID) {
+    this.requirePersistentStorage();
+    if (this.persistent()) {
+      const result = await this.prisma.notification.updateMany({
+        where: { organizationId, read: false },
+        data: { read: true, readAt: new Date() },
+      });
+      return { success: true, updatedCount: result.count };
+    }
     const now = new Date().toISOString();
-    let updatedCount = 0;
-    notifications.forEach((n) => {
-      if (!n.read) {
-        n.read = true;
-        n.readAt = now;
-        updatedCount++;
-      }
-    });
+    const updatedCount = fallbackNotifications.filter((n) => n.organizationId === organizationId && !n.read)
+      .reduce((count, n) => { n.read = true; n.readAt = now; return count + 1; }, 0);
     return { success: true, updatedCount };
   }
 
-  /**
-   * Deletes a notification.
-   */
-  deleteNotification(id) {
-    const index = notifications.findIndex((n) => n.id === id);
+  async deleteNotification(id, organizationId = DEFAULT_ORGANIZATION_ID) {
+    this.requirePersistentStorage();
+    if (this.persistent()) {
+      const result = await this.prisma.notification.deleteMany({ where: { id, organizationId } });
+      return result.count > 0;
+    }
+    const index = fallbackNotifications.findIndex((n) => n.id === id && n.organizationId === organizationId);
     if (index === -1) return false;
-    notifications.splice(index, 1);
+    fallbackNotifications.splice(index, 1);
     return true;
   }
 
-  /**
-   * Returns a breakdown summary of unread alerts.
-   */
-  getSummary() {
+  async getSummary(organizationId = DEFAULT_ORGANIZATION_ID) {
+    const { notifications } = await this.listNotifications({ organizationId, limit: 100 });
     const unread = notifications.filter((n) => !n.read);
     return {
       totalUnread: unread.length,

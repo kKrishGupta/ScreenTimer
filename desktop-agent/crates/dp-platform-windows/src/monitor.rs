@@ -8,6 +8,7 @@ use tracing::{debug, info};
 
 use crate::foreground::{get_current_foreground_app, ForegroundApplication};
 use crate::idle::{get_system_idle_duration, IdleTracker, IdleTransition};
+use crate::session_state::is_workstation_locked;
 
 /// Observations emitted during monitoring ticks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,9 +19,15 @@ pub enum PlatformEvent {
         current: ForegroundApplication,
     },
     /// Inactivity crossed the idle threshold.
-    IdleStarted { idle_duration: Duration },
+    IdleStarted {
+        idle_duration: Duration,
+    },
     /// User returned from idle state.
-    UserResumed { total_idle: Duration },
+    UserResumed {
+        total_idle: Duration,
+    },
+    SessionLocked,
+    SessionUnlocked,
 }
 
 /// Activity monitor keeping state across polling intervals.
@@ -28,6 +35,7 @@ pub enum PlatformEvent {
 pub struct ActivityMonitor {
     current_app: Option<ForegroundApplication>,
     idle_tracker: IdleTracker,
+    is_locked: bool,
 }
 
 impl ActivityMonitor {
@@ -36,6 +44,7 @@ impl ActivityMonitor {
         Self {
             current_app: None,
             idle_tracker: IdleTracker::new(idle_threshold),
+            is_locked: false,
         }
     }
 
@@ -44,11 +53,35 @@ impl ActivityMonitor {
         self.current_app.as_ref()
     }
 
+    /// Clears cached state after sleep, a monitoring pause, or schedule boundary.
+    pub fn reset(&mut self) {
+        let threshold = self.idle_tracker.threshold();
+        self.current_app = None;
+        self.idle_tracker = IdleTracker::new(threshold);
+        self.is_locked = false;
+    }
+
     /// Evaluates the current system state (both foreground window and input inactivity).
     ///
     /// Returns any new platform events that occurred during this tick.
     pub fn tick(&mut self) -> Vec<PlatformEvent> {
         let mut events = Vec::new();
+
+        let locked = is_workstation_locked();
+        if locked != self.is_locked {
+            self.is_locked = locked;
+            self.current_app = None;
+            let threshold = self.idle_tracker.threshold();
+            self.idle_tracker = IdleTracker::new(threshold);
+            events.push(if locked {
+                PlatformEvent::SessionLocked
+            } else {
+                PlatformEvent::SessionUnlocked
+            });
+        }
+        if locked {
+            return events;
+        }
 
         // 1. Check idle state
         let current_idle = get_system_idle_duration();

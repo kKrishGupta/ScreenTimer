@@ -3,7 +3,7 @@
 use rusqlite::{Connection, Result};
 use tracing::info;
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 1;
+pub const CURRENT_SCHEMA_VERSION: i32 = 2;
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     conn.execute_batch(
@@ -62,6 +62,18 @@ pub fn run_migrations(conn: &mut Connection) -> Result<()> {
         )?;
         tx.commit()?;
         info!("Applied SQLite storage migration v1");
+    }
+
+    if version < 2 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            "ALTER TABLE sync_queue ADD COLUMN quarantined_at TEXT;
+            ALTER TABLE sync_queue ADD COLUMN quarantine_reason TEXT;
+            INSERT INTO schema_migrations (version, applied_at)
+            VALUES (2, datetime('now'));",
+        )?;
+        tx.commit()?;
+        info!("Applied SQLite storage migration v2");
     }
 
     Ok(())

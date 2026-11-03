@@ -9,9 +9,10 @@ function createMockPrisma() {
     $disconnect: async () => {},
     $queryRaw: async () => [{ '?column?': 1 }],
     activitySession: {
-      aggregate: async () => ({
-        _sum: { durationSeconds: 3600 },
-      }),
+      findMany: async ({ where }) => [{
+        startedAt: new Date(where.startedAt.lt.getTime() - 3600000),
+        endedAt: where.startedAt.lt,
+      }],
     },
   };
 }
@@ -23,12 +24,15 @@ test('Family Planner & Digital Wellbeing API (Milestone 8)', async (t) => {
     PORT: '3001',
   });
   const app = await buildApp({ config, prisma: createMockPrisma(), logger: false });
+  const auth = await app.authService.createTestSession();
+  const headers = auth.headers;
 
   let createdTaskId;
   await t.test('POST /api/v1/planner/tasks creates a task', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/v1/planner/tasks',
+      headers,
       payload: {
         title: 'Study History Exam',
         category: 'study',
@@ -47,6 +51,7 @@ test('Family Planner & Digital Wellbeing API (Milestone 8)', async (t) => {
     const res = await app.inject({
       method: 'PATCH',
       url: `/api/v1/planner/tasks/${createdTaskId}`,
+      headers,
       payload: { completed: true },
     });
     assert.equal(res.statusCode, 200);
@@ -59,6 +64,7 @@ test('Family Planner & Digital Wellbeing API (Milestone 8)', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/planner/tasks',
+      headers,
     });
     assert.equal(res.statusCode, 200);
     const body = res.json();
@@ -70,13 +76,15 @@ test('Family Planner & Digital Wellbeing API (Milestone 8)', async (t) => {
     const listRes = await app.inject({
       method: 'GET',
       url: '/api/v1/planner/goals',
+      headers,
     });
     assert.equal(listRes.statusCode, 200);
-    assert.ok(listRes.json().count >= 1);
+    assert.equal(listRes.json().count, 0, 'no screen goals are invented for a new organization');
 
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/v1/planner/goals',
+      headers,
       payload: {
         title: 'Creative Coding Goal',
         category: 'coding',
@@ -91,6 +99,7 @@ test('Family Planner & Digital Wellbeing API (Milestone 8)', async (t) => {
     const startRes = await app.inject({
       method: 'POST',
       url: '/api/v1/planner/focus-sessions/start',
+      headers,
       payload: {
         title: 'Math Sprint',
         durationMinutes: 20,
@@ -104,6 +113,7 @@ test('Family Planner & Digital Wellbeing API (Milestone 8)', async (t) => {
     const stopRes = await app.inject({
       method: 'POST',
       url: '/api/v1/planner/focus-sessions/stop',
+      headers,
     });
     assert.equal(stopRes.statusCode, 200);
     assert.equal(stopRes.json().session.status, 'stopped_early');
@@ -113,18 +123,21 @@ test('Family Planner & Digital Wellbeing API (Milestone 8)', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/planner/analytics',
+      headers,
     });
     assert.equal(res.statusCode, 200);
     const body = res.json();
-    assert.ok(body.plannedTaskMinutes > 0);
+    assert.equal(body.plannedTaskMinutes, 45);
     assert.equal(body.realActiveMinutes, 60); // 3600 seconds aggregated from mock
-    assert.ok(body.goalComparisons.length > 0);
+    assert.deepEqual(body.goalComparisons, []);
+    assert.equal(body.actualProductiveMinutes, null);
   });
 
   await t.test('GET /api/v1/wellbeing/status returns break intervals', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/v1/wellbeing/status',
+      headers,
     });
     assert.equal(res.statusCode, 200);
     const body = res.json();
@@ -136,6 +149,7 @@ test('Family Planner & Digital Wellbeing API (Milestone 8)', async (t) => {
     const delRes = await app.inject({
       method: 'DELETE',
       url: `/api/v1/planner/tasks/${createdTaskId}`,
+      headers,
     });
     assert.equal(delRes.statusCode, 200);
     assert.equal(delRes.json().deletedId, createdTaskId);

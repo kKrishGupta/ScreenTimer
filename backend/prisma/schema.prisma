@@ -36,62 +36,159 @@ enum UserRole {
   FAMILY_OWNER      @map("family_owner")
   ADULT_MEMBER      @map("adult_member")
   SUPERVISED_MEMBER @map("supervised_member")
+  SUPER_ADMIN       @map("super_admin")
+  ORG_ADMIN         @map("org_admin")
+  MANAGER           @map("manager")
+  EMPLOYEE          @map("employee")
 
   @@map("user_role")
+}
+
+enum GraceStatus {
+  NOT_VISITED  @map("not_visited")
+  GRACE_ACTIVE @map("grace_active")
+  BLOCKED      @map("blocked")
+  ADMIN_RESET  @map("admin_reset")
+
+  @@map("grace_status")
 }
 
 model Organization {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String   @db.VarChar(128)
   slug      String   @unique @db.VarChar(64)
+  timezone  String?  @db.VarChar(64)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  users          User[]
-  devices        Device[]
-  applications   Application[]
-  websites       Website[]
-  events         ActivityEvent[]
-  sessions       ActivitySession[]
-  dailySummaries DailySummary[]
-  screenCaptures ScreenCaptureMetadata[]
-  screenShares   ScreenShareSession[]
-  plannerTasks   PlannerTask[]
-  focusSessions  FocusSession[]
-  policies       FamilyPolicy[]
-  violations     PolicyViolation[]
-  auditLogs      AuditLog[]
+  users            User[]
+  sites            Site[]
+  departments      Department[]
+  graceGrants      GraceGrant[]
+  devices          Device[]
+  applications     Application[]
+  websites         Website[]
+  events           ActivityEvent[]
+  sessions         ActivitySession[]
+  dailySummaries   DailySummary[]
+  screenCaptures   ScreenCaptureMetadata[]
+  screenShares     ScreenShareSession[]
+  plannerTasks     PlannerTask[]
+  focusSessions    FocusSession[]
+  policies         FamilyPolicy[]
+  violations       PolicyViolation[]
+  auditLogs        AuditLog[]
   enrollmentTokens DeviceEnrollmentToken[]
+  invitations      Invitation[]
+  notifications    Notification[]
+  usageCategories  UsageCategory[]
 
   @@map("organizations")
 }
 
-model User {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  email          String   @db.VarChar(254)
-  displayName    String   @map("display_name") @db.VarChar(128)
-  role           UserRole @default(MEMBER)
-  passwordHash   String?  @map("password_hash") @db.VarChar(256)
-  passwordSalt   String?  @map("password_salt") @db.VarChar(128)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+model Site {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  name           String       @db.VarChar(128)
+  location       String?      @db.VarChar(256)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  organization    Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  devices         Device[]
-  plannerTasks    PlannerTask[]
-  focusSessions   FocusSession[]
-  sessions        UserSession[]
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  departments    Department[]
+
+  @@unique([organizationId, name])
+  @@map("sites")
+}
+
+model Department {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  siteId         String?      @map("site_id") @db.Uuid
+  name           String       @db.VarChar(128)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  site           Site?        @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  users          User[]
+
+  @@unique([organizationId, name])
+  @@map("departments")
+}
+
+model User {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  departmentId   String?     @map("department_id") @db.Uuid
+  email          String      @db.VarChar(254)
+  displayName    String      @map("display_name") @db.VarChar(128)
+  role           UserRole    @default(EMPLOYEE)
+  passwordHash   String?     @map("password_hash") @db.VarChar(256)
+  passwordSalt   String?     @map("password_salt") @db.VarChar(128)
+  employeeNumber String?     @map("employee_number") @db.VarChar(64)
+  managerId      String?     @map("manager_id") @db.Uuid
+  designation    String?     @db.VarChar(128)
+  workLocation   String?     @map("work_location") @db.VarChar(128)
+  shiftStart     String?     @map("shift_start") @db.VarChar(16)
+  shiftEnd       String?     @map("shift_end") @db.VarChar(16)
+  shiftTimezone  String?     @map("shift_timezone") @db.VarChar(64)
+  workingDays    String[]    @default(["Mon", "Tue", "Wed", "Thu", "Fri"]) @map("working_days")
+  employmentStatus String    @default("active") @map("employment_status") @db.VarChar(32)
+  monitoringAuthorized Boolean @default(false) @map("monitoring_authorized")
+  monitoringConsentAt DateTime? @map("monitoring_consent_at") @db.Timestamptz(3)
+  monitoringConsentRevokedAt DateTime? @map("monitoring_consent_revoked_at") @db.Timestamptz(3)
+  monitoringConsentVersion String? @map("monitoring_consent_version") @db.VarChar(64)
+  metadata       Json?       @db.JsonB
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department       Department?             @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  manager          User?                   @relation("ManagerEmployees", fields: [managerId], references: [id], onDelete: SetNull)
+  subordinates     User[]                  @relation("ManagerEmployees")
+  devices          Device[]
+  plannerTasks     PlannerTask[]
+  focusSessions    FocusSession[]
+  sessions         UserSession[]
   enrollmentTokens DeviceEnrollmentToken[]
+  graceGrants      GraceGrant[]
+  resetTokens      PasswordResetToken[]
+  violations       PolicyViolation[]
+  notifications    Notification[]
 
   @@unique([organizationId, email])
   @@map("users")
 }
 
+model GraceGrant {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  userId         String?     @map("user_id") @db.Uuid
+  deviceId       String?     @map("device_id") @db.Uuid
+  domain         String      @db.VarChar(253)
+  status         GraceStatus @default(NOT_VISITED)
+  graceMinutes   Int         @default(15) @map("grace_minutes")
+  firstVisitedAt DateTime?   @map("first_visited_at") @db.Timestamptz(3)
+  expiresAt      DateTime?   @map("expires_at") @db.Timestamptz(3)
+  calendarDate   DateTime    @default(now()) @map("calendar_date") @db.Date
+  resetBy        String?     @map("reset_by") @db.VarChar(128)
+  resetAt        DateTime?   @map("reset_at") @db.Timestamptz(3)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, domain, calendarDate])
+  @@index([organizationId, status])
+  @@map("grace_grants")
+}
+
 model UserSession {
   id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId     String    @map("user_id") @db.Uuid
-  token      String    @unique @db.VarChar(128)
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
   userAgent  String?   @map("user_agent") @db.VarChar(256)
   ipAddress  String?   @map("ip_address") @db.VarChar(45)
   expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
@@ -104,9 +201,21 @@ model UserSession {
   @@map("user_sessions")
 }
 
+model LoginAttempt {
+  identifierHash String   @id @map("identifier_hash") @db.VarChar(64)
+  failureCount   Int      @default(0) @map("failure_count")
+  firstFailedAt  DateTime @map("first_failed_at") @db.Timestamptz(3)
+  lockedUntil    DateTime? @map("locked_until") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([updatedAt])
+  @@map("login_attempts")
+}
+
 model DeviceEnrollmentToken {
   id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  token          String        @unique @db.VarChar(128)
+  token          String?       @unique @db.VarChar(128)
+  tokenHash      String?       @unique @map("token_hash") @db.VarChar(64)
   organizationId String        @map("organization_id") @db.Uuid
   userId         String?       @map("user_id") @db.Uuid
   deviceKind     CollectorKind @map("device_kind")
@@ -134,6 +243,10 @@ model Device {
   platform       String        @db.VarChar(64)
   browser        String?       @db.VarChar(16)
   agentVersion   String?       @map("agent_version") @db.VarChar(32)
+  secretHash     String?       @map("secret_hash") @db.VarChar(256)
+  secretSalt     String?       @map("secret_salt") @db.VarChar(128)
+  isRevoked      Boolean       @default(false) @map("is_revoked")
+  revokedAt      DateTime?     @map("revoked_at") @db.Timestamptz(3)
   lastSeenAt     DateTime?     @map("last_seen_at") @db.Timestamptz(3)
   lastSyncAt     DateTime?     @map("last_sync_at") @db.Timestamptz(3)
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -146,6 +259,7 @@ model Device {
   dailySummaries DailySummary[]
   screenCaptures ScreenCaptureMetadata[]
   screenShares   ScreenShareSession[]
+  violations     PolicyViolation[]
 
   @@index([organizationId])
   @@index([userId])
@@ -327,6 +441,7 @@ model FamilyPolicy {
   name                    String   @db.VarChar(128)
   category                String   @db.VarChar(64)
   restrictedDomains       String[] @map("restricted_domains")
+  restrictedApps          String[] @default([]) @map("restricted_apps")
   allowedDomains          String[] @map("allowed_domains")
   maxMinutesPerDay        Int      @default(60) @map("max_minutes_per_day")
   warningThresholdPercent Int      @default(80) @map("warning_threshold_percent")
@@ -346,18 +461,62 @@ model PolicyViolation {
   organizationId String   @map("organization_id") @db.Uuid
   policyId       String?  @map("policy_id") @db.Uuid
   deviceId       String?  @map("device_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
   target         String   @db.VarChar(255)
   targetType     String   @map("target_type") @db.VarChar(32)
   severity       String   @default("warning") @db.VarChar(32)
   warningMessage String   @map("warning_message") @db.VarChar(512)
+  actionTaken    String?  @map("action_taken") @db.VarChar(64)
   acknowledged   Boolean  @default(false)
   timestamp      DateTime @default(now()) @db.Timestamptz(3)
 
   organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   policy         FamilyPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  device         Device?       @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, acknowledged])
   @@map("policy_violations")
+}
+
+model Invitation {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  token          String?      @unique @db.VarChar(128)
+  tokenHash      String?      @unique @map("token_hash") @db.VarChar(256)
+  organizationId String       @map("organization_id") @db.Uuid
+  email          String       @db.VarChar(254)
+  role           UserRole     @default(EMPLOYEE)
+  departmentId   String?      @map("department_id") @db.Uuid
+  displayName    String?      @map("display_name") @db.VarChar(128)
+  shiftStart     String?      @map("shift_start") @db.VarChar(16)
+  shiftEnd       String?      @map("shift_end") @db.VarChar(16)
+  workingDays    String[]     @default(["Mon", "Tue", "Wed", "Thu", "Fri"]) @map("working_days")
+  shiftTimezone  String?      @map("shift_timezone") @db.VarChar(64)
+  invitedBy      String?      @map("invited_by") @db.VarChar(128)
+  expiresAt      DateTime     @map("expires_at") @db.Timestamptz(3)
+  acceptedAt     DateTime?    @map("accepted_at") @db.Timestamptz(3)
+  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(3)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([token])
+  @@map("invitations")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(256)
+  userId    String    @map("user_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 model AuditLog {
@@ -374,3 +533,39 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+model Notification {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  userId         String?   @map("user_id") @db.Uuid
+  type           String    @db.VarChar(64)
+  severity       String    @default("info") @db.VarChar(16)
+  title          String    @db.VarChar(120)
+  message        String    @db.VarChar(500)
+  target         String?   @db.VarChar(100)
+  read           Boolean   @default(false)
+  readAt         DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, read, createdAt])
+  @@index([organizationId, userId, createdAt])
+  @@map("notifications")
+}
+
+model UsageCategory {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  target         String   @db.VarChar(253)
+  targetType     String   @map("target_type") @db.VarChar(16)
+  category       String   @db.VarChar(16)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, target, targetType])
+  @@index([organizationId, category])
+  @@map("usage_categories")
+}

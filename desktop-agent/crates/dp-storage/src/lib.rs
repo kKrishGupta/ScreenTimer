@@ -4,6 +4,7 @@
 //! bounded queue retention, and idempotent replay until backend acknowledgement.
 
 pub mod migrations;
+pub mod paths;
 pub mod repository;
 
 pub use migrations::CURRENT_SCHEMA_VERSION;

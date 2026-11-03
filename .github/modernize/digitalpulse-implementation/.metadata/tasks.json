@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Executable implementation tasks for evidence-based DigitalPulse workflow completion.",
+  "tasks": [
+    {
+      "type": "setupBaseline",
+      "id": "001-setup-repository-baseline-and-product-contract",
+      "description": "Establish a reproducible DigitalPulse baseline and reconcile the product contract with repository evidence.",
+      "reason": "Existing documents contain conflicting completion claims; implementation must start from the source tree, current tests, and explicit privacy constraints.",
+      "requirements": "Record working-tree state, workspace structure, available scripts, current test/build results, runtime prerequisites, and authoritative Stage 1/Stage 2 scope. Create or update docs/DIGITALPULSE_PRODUCT_CONTRACT.md, docs/DIGITALPULSE_IMPLEMENTATION_TRACKER.md, and docs/DIGITALPULSE_IMPLEMENTATION_REPORT.md with evidence-based statuses. Do not overwrite unrelated uncommitted work or claim unavailable runtime verification.",
+      "snapshotFolder": ".",
+      "dependencies": [],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "false",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "transform",
+      "id": "002-transform-authentication-and-tenant-isolation",
+      "description": "Make authentication, authorization, and tenant boundaries reliable across the real API workflows.",
+      "reason": "The project-wide audit marks registration, sessions, role handling, and cross-tenant enforcement as partial or unverified.",
+      "requirements": "Inspect and improve login/session lifecycle, role validation, protected routes, organization/site/department/user scoping, and negative cross-tenant access cases. Preserve existing roles and privacy guarantees. Add focused regression tests for unauthorized, expired/invalid, malformed-role, and cross-organization reads and mutations. Keep behavior evidence-based and avoid broad redesign.",
+      "dependencies": [
+        "001-setup-repository-baseline-and-product-contract"
+      ],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "true",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "transform",
+      "id": "003-transform-device-enrollment-and-activity-synchronization",
+      "description": "Complete the authenticated device, desktop-agent, and browser-extension synchronization workflows.",
+      "reason": "Enrollment, heartbeat, offline buffering, idempotency, and loaded-browser behavior are not proven end to end.",
+      "requirements": "Verify and improve one-time device enrollment, device secret handling, assignment and revocation, heartbeat freshness, batched activity ingestion, retry/offline queue behavior, duplicate suppression, and browser-extension policy/activity synchronization. Preserve domain-only collection and exclude URL parameters, page content, keystrokes, clipboard data, and screenshots. Add focused tests for replay, revoked devices, malformed batches, restart recovery, and extension/backend contract compatibility.",
+      "dependencies": [
+        "002-transform-authentication-and-tenant-isolation"
+      ],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "true",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "transform",
+      "id": "004-transform-dashboard-real-data-and-governance-workflows",
+      "description": "Wire the dashboard to real API data and complete the highest-value analytics and governance workflows.",
+      "reason": "The audit reports mocked or incomplete end-to-end evidence for dashboard, analytics, policies, notifications, audit, and employee/device administration.",
+      "requirements": "Inspect API contracts and dashboard fetch/state/error/empty flows for overview, timeline, applications, websites, wellbeing analytics, policies, planner, notifications, audit/privacy, employees, and devices. Replace only stale or fabricated wiring with real API-backed behavior, preserve existing UI functionality, and ensure tenant/user scope is reflected in displayed data. Add focused UI/API tests for loading, empty, error, authorization, policy transitions, notification read/unread, audit visibility, and analytics date/category handling.",
+      "dependencies": [
+        "003-transform-device-enrollment-and-activity-synchronization"
+      ],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "true",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "security",
+      "id": "005-security-dependency-and-runtime-guardrails",
+      "description": "Check dependency and runtime security risks introduced or exposed by the integrated workflows.",
+      "reason": "Authentication, device credentials, privacy boundaries, and local deployment guardrails are security-sensitive and require explicit evidence.",
+      "requirements": "Run the repository's available dependency/security checks, remediate actionable vulnerabilities only when compatible with the current workspace, verify secret/configuration handling, localhost binding, rate limits, audit behavior, and privacy restrictions, and document accepted limitations. Do not introduce cloud credentials or weaken existing protections.",
+      "dependencies": [
+        "004-transform-dashboard-real-data-and-governance-workflows"
+      ],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "true",
+        "passUnitTests": "true"
+      }
+    },
+    {
+      "type": "transform",
+      "id": "006-transform-release-validation-and-implementation-report",
+      "description": "Run focused validation and publish exact implementation evidence and remaining limitations.",
+      "reason": "The requested outcome requires a trustworthy report, not unsupported claims of full runtime completion.",
+      "requirements": "Run focused contract, backend, dashboard, extension, and Rust tests plus the dashboard build when prerequisites exist. Capture exact commands, pass/fail/skip results, changed files, and unavailable infrastructure. Review startup/package/deployment scripts only where needed for the validated local workflow. Update docs/DIGITALPULSE_IMPLEMENTATION_TRACKER.md and docs/DIGITALPULSE_IMPLEMENTATION_REPORT.md with final statuses and limitations; distinguish static, unit, integration, browser, database, and Windows runtime evidence.",
+      "dependencies": [
+        "005-security-dependency-and-runtime-guardrails"
+      ],
+      "successCriteria": {
+        "passBuild": "true",
+        "generateNewUnitTests": "false",
+        "passUnitTests": "true"
+      }
+    }
+  ],
+  "metadata": {
+    "planName": "digitalpulse-implementation",
+    "projectName": "DigitalPulse",
+    "language": "typescript",
+    "createdAt": "2026-11-03T03:10:41.286+05:30",
+    "version": "1.0"
+  }
+}

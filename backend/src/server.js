@@ -1,10 +1,17 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './shared/config.js';
-import { createPrismaClient } from './database/prisma.js';
+import { createPrismaClient, probeDatabase } from './database/prisma.js';
 
 async function main() {
   const config = loadConfig();
   const prisma = createPrismaClient(config);
+  if (config.nodeEnv === 'production') {
+    const database = await probeDatabase(prisma);
+    if (database.status !== 'up') {
+      await prisma.$disconnect().catch(() => {});
+      throw new Error(`Required PostgreSQL connection is unavailable: ${database.error}`);
+    }
+  }
   const app = await buildApp({ config, prisma });
 
   let shuttingDown = false;

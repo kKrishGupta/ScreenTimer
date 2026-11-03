@@ -7,11 +7,14 @@ describe('Advanced Notifications & Alert Management (Milestone 5)', () => {
   it('creates notifications, applies cooldown deduplication, and manages read status', async () => {
     const config = loadConfig({ DATABASE_URL: 'postgresql://x:y@localhost:5433/dp' });
     const app = await buildApp({ config, prisma: {}, logger: false });
+    const auth = await app.authService.createTestSession();
+    const headers = auth.headers;
 
     // 1. Create a notification
     const res1 = await app.inject({
       method: 'POST',
       url: '/api/v1/notifications',
+      headers,
       payload: {
         type: 'restricted_website_warning',
         severity: 'warning',
@@ -31,6 +34,7 @@ describe('Advanced Notifications & Alert Management (Milestone 5)', () => {
     const res2 = await app.inject({
       method: 'POST',
       url: '/api/v1/notifications',
+      headers,
       payload: {
         type: 'restricted_website_warning',
         severity: 'warning',
@@ -47,6 +51,7 @@ describe('Advanced Notifications & Alert Management (Milestone 5)', () => {
     const sumRes = await app.inject({
       method: 'GET',
       url: '/api/v1/notifications/summary',
+      headers,
     });
     assert.equal(sumRes.statusCode, 200);
     assert.ok(sumRes.json().totalUnread >= 1);
@@ -55,6 +60,7 @@ describe('Advanced Notifications & Alert Management (Milestone 5)', () => {
     const markRes = await app.inject({
       method: 'PATCH',
       url: `/api/v1/notifications/${notifId}/read`,
+      headers,
     });
     assert.equal(markRes.statusCode, 200);
     assert.equal(markRes.json().notification.read, true);
@@ -63,8 +69,10 @@ describe('Advanced Notifications & Alert Management (Milestone 5)', () => {
     const delRes = await app.inject({
       method: 'DELETE',
       url: `/api/v1/notifications/${notifId}`,
+      headers,
     });
     assert.equal(delRes.statusCode, 200);
     assert.equal(delRes.json().success, true);
   });
 });
+

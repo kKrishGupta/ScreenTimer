@@ -1,0 +1,57 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: ${DATABASE_URL:-${DATABASE:?Set DATABASE_URL (or legacy DATABASE) to the production PostgreSQL connection string}}
+      PUBLIC_APP_DOMAIN: ${PUBLIC_APP_DOMAIN:?Set PUBLIC_APP_DOMAIN to the dashboard DNS name}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL to the HTTPS dashboard origin}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to the HTTPS dashboard origin}
+      INVITATION_ACCEPT_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL to the HTTPS dashboard origin}/accept-invitation
+      PASSWORD_RESET_URL: ${PUBLIC_APP_URL:?Set PUBLIC_APP_URL to the HTTPS dashboard origin}/reset-password
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASS:-}
+      SMTP_FROM: ${EMAIL_FROM:-}
+    expose:
+      - "3001"
+    volumes:
+      - digitalpulse-storage:/app/backend/storage
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    restart: unless-stopped
+    environment:
+      PUBLIC_APP_DOMAIN: ${PUBLIC_APP_DOMAIN:?Set PUBLIC_APP_DOMAIN to the DNS name pointing at this server}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  digitalpulse-storage:
+  caddy-data:
+  caddy-config:

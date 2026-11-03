@@ -77,7 +77,10 @@ impl AgentConfig {
         let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
             .iter()
             .any(|prefix| self.backend_url.starts_with(prefix));
-        if !local {
+        let allow_remote = std::env::var("DP_ALLOW_REMOTE_BACKEND")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if !local && !allow_remote {
             return Err(ConfigError::NonLocalBackend(self.backend_url.clone()));
         }
         Ok(())

@@ -5,11 +5,12 @@ import tailwindcss from '@tailwindcss/vite';
 // The dashboard talks to the local backend through the dev-server proxy so the browser
 // only ever sees same-origin requests. Everything binds to loopback (Stage 1).
 const BACKEND_URL = process.env.DP_BACKEND_URL ?? 'http://127.0.0.1:3001';
+const DASHBOARD_HOST = process.env.DP_DASHBOARD_HOST ?? 'localhost';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    host: 'localhost',
+    host: DASHBOARD_HOST,
     port: 5173,
     strictPort: true,
     proxy: {
@@ -28,7 +29,7 @@ export default defineConfig({
     },
   },
   preview: {
-    host: 'localhost',
+    host: DASHBOARD_HOST,
     port: 4173,
     proxy: {
       '/api': {
@@ -51,4 +52,3 @@ export default defineConfig({
     css: false,
   },
 });
-

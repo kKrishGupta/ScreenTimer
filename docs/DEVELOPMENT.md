@@ -23,25 +23,47 @@ Run the automated database configuration script from the repository root:
 cd d:\desktop\task2\DigitalPulse
 .\scripts\setup-database.ps1
 ```
-This script ensures:
-- Role `digitalpulse` is created with password `dev_password_pulse_2026`.
-- Database `digitalpulse` exists.
-- The `uuid-ossp` extension is enabled.
+This script provisions the local PostgreSQL role and database. Keep the database password local and use a URL-encoded password in the connection string.
 
-Verify `backend/.env` contains:
+Copy `backend/.env.example` to `backend/.env` and set the canonical `DATABASE_URL`:
 ```env
-DATABASE_URL="postgresql://digitalpulse:dev_password_pulse_2026@127.0.0.1:5433/digitalpulse?schema=public"
+DATABASE_URL="postgresql://DB_USER:URL_ENCODED_PASSWORD@127.0.0.1:5433/DB_NAME?schema=public"
 PORT=3001
 HOST=127.0.0.1
 LOG_LEVEL=info
 NODE_ENV=development
 ```
 
+`DATABASE_URL` is the canonical variable used by Prisma 7 and the backend. `DATABASE` remains a compatibility alias when `DATABASE_URL` is absent; if both exist, `DATABASE_URL` wins. The current Prisma config does not use `DIRECT_URL`. For hosted PostgreSQL, preserve TLS by adding `sslmode=require` (or a stricter supported mode) to the URL.
+
 ### 2.2 Migrations and Seeds
 ```powershell
-npm run db:deploy
-npm run db:seed
+Push-Location backend
+npx.cmd prisma validate
+npx.cmd prisma generate
+npx.cmd prisma migrate status
+Pop-Location
+
+npm.cmd run db:deploy --workspace @digitalpulse/backend
+npm.cmd run db:seed --workspace @digitalpulse/backend
 ```
+
+Review pending migrations before applying them. `db:status` is read-only; `db:deploy` applies committed migrations and does not reset tables. Never run `migrate reset` against a configured application database.
+
+The backend health endpoint runs a harmless PostgreSQL `SELECT 1`. After starting the backend, verify it with:
+```powershell
+Invoke-RestMethod http://127.0.0.1:3001/api/v1/health
+```
+The response must report `status: ok` and `database.status: up`. Production startup performs this connectivity check before listening and exits with a sanitized error if PostgreSQL is unavailable.
+
+### 2.3 PostgreSQL Integration Tests
+Use a dedicated disposable database in `TEST_DATABASE_URL`, separate from both `DATABASE_URL` and legacy `DATABASE`. Never point it at a production or development application database. Set `RUN_INTEGRATION_TESTS=true` only after applying the reviewed migrations to that isolated test database:
+```powershell
+$env:TEST_DATABASE_URL = 'postgresql://TEST_USER:URL_ENCODED_PASSWORD@TEST_HOST:5432/DB_TEST?sslmode=require'
+$env:RUN_INTEGRATION_TESTS = 'true'
+npm.cmd test --workspace @digitalpulse/backend
+```
+The PostgreSQL integration suites refuse to run when the test URL resolves to the application database. They remain skipped when `TEST_DATABASE_URL` is not configured.
 
 ---
 
@@ -77,7 +99,9 @@ CLI options:
 2. Go to `chrome://extensions` or `edge://extensions`.
 3. Toggle on **Developer mode**.
 4. Click **Load unpacked** and choose `DigitalPulse\apps\browser-extension`.
-5. The extension will automatically register and monitor active browser domains.
+5. Sign in to Employee Setup, review the monitoring disclosure, and generate a one-time Browser extension token for this installation. Paste it in the extension popup. Enrollment alone does not authorize monitoring; the server must also verify consent, administrator approval, account status, time zone, and schedule.
+
+The independent Windows, Chrome and Edge download packages, exact installation instructions, rebuild commands, checksums and verified test results are documented in [EMPLOYEE_INSTALLATION_PACKAGING.md](./EMPLOYEE_INSTALLATION_PACKAGING.md). These are local/internal test builds; localhost works only on the backend's computer.
 
 ---
 

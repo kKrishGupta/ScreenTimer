@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '0.0.0.0']);
 const LOG_LEVELS = new Set(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']);
 
 export class ConfigError extends Error {
@@ -11,15 +11,26 @@ export class ConfigError extends Error {
 }
 
 /**
+ * Returns the canonical PostgreSQL URL, accepting DATABASE as a legacy alias.
+ * DATABASE_URL always takes precedence when both variables are provided.
+ * @param {Record<string, string | undefined>} env
+ */
+export function resolveDatabaseUrl(env = process.env) {
+  return env.DATABASE_URL?.trim() || env.DATABASE?.trim();
+}
+
+/**
  * Builds and validates runtime configuration from environment variables.
- * Stage 1 is localhost-only: binding to a non-loopback interface is refused.
+ * Local development may bind to all interfaces when LAN testing is explicitly
+ * requested with HOST=0.0.0.0.
  *
  * @param {Record<string, string | undefined>} env
  */
 export function loadConfig(env = process.env) {
-  const host = env.HOST ?? '127.0.0.1';
-  if (!LOOPBACK_HOSTS.has(host)) {
-    throw new ConfigError(`HOST must be a loopback address in Stage 1 (got "${host}")`);
+  const nodeEnv = env.NODE_ENV ?? 'development';
+  const host = env.HOST ?? (nodeEnv === 'production' ? '0.0.0.0' : '127.0.0.1');
+  if (!ALLOWED_HOSTS.has(host)) {
+    throw new ConfigError(`HOST must be localhost or 0.0.0.0 (got "${host}")`);
   }
 
   const port = Number.parseInt(env.PORT ?? '3001', 10);
@@ -27,9 +38,9 @@ export function loadConfig(env = process.env) {
     throw new ConfigError(`PORT must be an integer between 1 and 65535 (got "${env.PORT}")`);
   }
 
-  const databaseUrl = env.DATABASE_URL;
+  const databaseUrl = resolveDatabaseUrl(env);
   if (!databaseUrl) {
-    throw new ConfigError('DATABASE_URL is required (see backend/.env.example)');
+    throw new ConfigError('DATABASE_URL is required (legacy DATABASE is accepted; see backend/.env.example)');
   }
   let parsedDb;
   try {
@@ -39,6 +50,13 @@ export function loadConfig(env = process.env) {
   }
   if (!['postgres:', 'postgresql:'].includes(parsedDb.protocol)) {
     throw new ConfigError('DATABASE_URL must use the postgresql:// scheme');
+  }
+  if (nodeEnv === 'production') {
+    const isLocalDatabase = ['localhost', '127.0.0.1', '::1'].includes(parsedDb.hostname);
+    const sslMode = parsedDb.searchParams.get('sslmode');
+    if (!isLocalDatabase && !['require', 'verify-ca', 'verify-full'].includes(sslMode)) {
+      throw new ConfigError('Production PostgreSQL DATABASE_URL must set sslmode=require or stronger');
+    }
   }
 
   const logLevel = env.LOG_LEVEL ?? 'info';
@@ -51,13 +69,62 @@ export function loadConfig(env = process.env) {
     .map((o) => o.trim())
     .filter(Boolean);
 
+  const publicAppUrl = env.PUBLIC_APP_URL?.replace(/\/$/, '') || '';
+  const publicAppDomain = env.PUBLIC_APP_DOMAIN || '';
+  const invitationAcceptUrl = env.INVITATION_ACCEPT_URL || (publicAppUrl
+    ? `${publicAppUrl}/accept-invitation`
+    : 'http://localhost:5173/accept-invitation');
+  const passwordResetUrl = env.PASSWORD_RESET_URL || (publicAppUrl
+    ? `${publicAppUrl}/reset-password`
+    : 'http://localhost:5173/reset-password');
+
+  if (nodeEnv === 'production') {
+    if (!publicAppUrl) throw new ConfigError('PUBLIC_APP_URL is required in production');
+    let appUrl;
+    try { appUrl = new URL(publicAppUrl); } catch { throw new ConfigError('PUBLIC_APP_URL must be a valid HTTPS URL'); }
+    if (appUrl.protocol !== 'https:' || !['', '/'].includes(appUrl.pathname) || appUrl.search || appUrl.hash) {
+      throw new ConfigError('PUBLIC_APP_URL must be an HTTPS origin without a path, query, or fragment');
+    }
+    if (publicAppDomain && appUrl.hostname !== publicAppDomain) {
+      throw new ConfigError('PUBLIC_APP_DOMAIN must match the PUBLIC_APP_URL hostname');
+    }
+    if (!corsOrigins.length || corsOrigins.some((origin) => {
+      try {
+        const parsedOrigin = new URL(origin);
+        return parsedOrigin.protocol !== 'https:' || !['', '/'].includes(parsedOrigin.pathname) || parsedOrigin.search || parsedOrigin.hash;
+      } catch { return true; }
+    })) throw new ConfigError('CORS_ORIGINS must contain only valid HTTPS origins in production');
+    if (corsOrigins.length !== 1 || corsOrigins[0] !== appUrl.origin) {
+      throw new ConfigError('CORS_ORIGINS must contain only the exact PUBLIC_APP_URL origin in production');
+    }
+    for (const [name, value] of [['INVITATION_ACCEPT_URL', invitationAcceptUrl], ['PASSWORD_RESET_URL', passwordResetUrl]]) {
+      let url;
+      try { url = new URL(value); } catch { throw new ConfigError(`${name} must be a valid HTTPS URL`); }
+      if (url.protocol !== 'https:' || url.origin !== appUrl.origin) {
+        throw new ConfigError(`${name} must use the HTTPS PUBLIC_APP_URL origin`);
+      }
+    }
+  }
+
   return Object.freeze({
-    nodeEnv: env.NODE_ENV ?? 'development',
+    nodeEnv,
     host,
     port,
     databaseUrl,
     logLevel,
     corsOrigins,
+    publicAppUrl,
+    publicAppDomain,
+    allowPublicRegistration: nodeEnv !== 'production',
+    secureSessionCookies: nodeEnv === 'production',
+    trustProxy: nodeEnv === 'production',
+    smtpHost: env.SMTP_HOST ?? 'smtp.gmail.com',
+    smtpPort: env.SMTP_PORT ?? '465',
+    smtpSecure: env.SMTP_SECURE ?? 'true',
+    smtpUser: env.SMTP_USER ?? env.GMAIL_USER ?? env.google_email,
+    smtpPassword: env.SMTP_PASS ?? env.SMTP_PASSWORD ?? env.GMAIL_APP_PASSWORD ?? env.google_password,
+    smtpFrom: env.EMAIL_FROM ?? env.SMTP_FROM ?? env.SMTP_USER ?? env.GMAIL_USER ?? env.google_email,
+    passwordResetUrl,
+    invitationAcceptUrl,
   });
 }
-

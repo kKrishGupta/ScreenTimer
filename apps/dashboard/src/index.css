@@ -16,3 +16,9 @@ body,
   height: 100%;
 }
 
+/* Use the app's text Show/Hide control instead of the browser's reveal eye. */
+input[type='password']::-ms-reveal,
+input[type='password']::-ms-clear {
+  display: none;
+}
+

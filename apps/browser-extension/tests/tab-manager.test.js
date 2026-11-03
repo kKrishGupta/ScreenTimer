@@ -58,6 +58,7 @@ test('ActivityManager records session duration and emits schema-compliant event'
   });
 
   const t0 = 1700000000000;
+  await manager.setMonitoringState({ allowed: true, allowedUntil: new Date(t0 + 600000).toISOString() }, t0);
   await manager.switchDomain('github.com', t0);
 
   // 15 seconds later, switch to stackoverflow.com
@@ -94,6 +95,7 @@ test('ActivityManager tags Edge browser sessions correctly', async () => {
   });
 
   const t0 = 1700000000000;
+  await manager.setMonitoringState({ allowed: true, allowedUntil: new Date(t0 + 600000).toISOString() }, t0);
   await manager.switchDomain('microsoft.com', t0);
   await manager.switchDomain('learn.microsoft.com', t0 + 20000);
 
@@ -114,6 +116,7 @@ test('ActivityManager suppresses sub-second flickers', async () => {
   });
 
   const t0 = 1700000000000;
+  await manager.setMonitoringState({ allowed: true, allowedUntil: new Date(t0 + 600000).toISOString() }, t0);
   await manager.switchDomain('google.com', t0);
 
   // Switch after 400ms (momentary tab click)
@@ -121,4 +124,18 @@ test('ActivityManager suppresses sub-second flickers', async () => {
 
   // google.com should be ignored because duration < 1s
   assert.equal(events.length, 0);
+});
+
+test('does not collect without verified monitoring authorization and stops at schedule end', async () => {
+  const events = [];
+  const manager = new ActivityManager({ deviceId: '11111111-2222-3333-4444-555555555555', browser: 'chrome', onSessionCompleted: async (event) => events.push(event) });
+  const start = 1700000000000;
+  await manager.switchDomain('private.example', start);
+  assert.equal(manager.activeSession, null);
+  await manager.setMonitoringState({ allowed: true, allowedUntil: new Date(start + 5000).toISOString() }, start);
+  await manager.switchDomain('example.com', start);
+  await manager.checkpoint(start + 6000);
+  assert.equal(manager.monitoringAllowed, false);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].durationSeconds, 5);
 });

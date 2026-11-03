@@ -7,12 +7,15 @@
     "tabs",
     "webNavigation",
     "idle",
-    "storage"
+    "storage",
+    "alarms",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "http://127.0.0.1:3001/*",
     "http://localhost:3001/*"
   ],
+  "optional_host_permissions": ["https://*/*"],
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"
@@ -27,4 +30,3 @@
     "128": "icons/icon-128.png"
   }
 }
-

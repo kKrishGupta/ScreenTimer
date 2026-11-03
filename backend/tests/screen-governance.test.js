@@ -7,11 +7,14 @@ describe('Screenshot & Live-Sharing Governance (Milestone 7)', () => {
   it('enforces high-frequency warning, storage quota pruning, and single-viewer locks', async () => {
     const config = loadConfig({ DATABASE_URL: 'postgresql://x:y@localhost:5433/dp' });
     const app = await buildApp({ config, prisma: {}, logger: false });
+    const auth = await app.authService.createTestSession();
+    const headers = auth.headers;
 
     // 1. Grant consent
     await app.inject({
       method: 'POST',
       url: '/api/v1/screen/consent',
+      headers,
       payload: { consent: true },
     });
 
@@ -19,6 +22,7 @@ describe('Screenshot & Live-Sharing Governance (Milestone 7)', () => {
     const highFreqRes = await app.inject({
       method: 'PATCH',
       url: '/api/v1/screen/config',
+      headers,
       payload: { captureIntervalMinutes: 0.5 },
     });
     assert.equal(highFreqRes.statusCode, 400);
@@ -28,6 +32,7 @@ describe('Screenshot & Live-Sharing Governance (Milestone 7)', () => {
     const confirmedRes = await app.inject({
       method: 'PATCH',
       url: '/api/v1/screen/config',
+      headers,
       payload: { captureIntervalMinutes: 0.5, confirmHighFrequencyWarning: true },
     });
     assert.equal(confirmedRes.statusCode, 200);
@@ -36,6 +41,7 @@ describe('Screenshot & Live-Sharing Governance (Milestone 7)', () => {
     const startLive = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/live-session/start',
+      headers,
       payload: { durationMinutes: 15 },
     });
     assert.equal(startLive.statusCode, 200);
@@ -46,6 +52,7 @@ describe('Screenshot & Live-Sharing Governance (Milestone 7)', () => {
     const viewer1 = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/live-session/join',
+      headers,
       payload: {
         sessionId: liveSession.sessionId,
         viewerToken: liveSession.viewerToken,
@@ -58,6 +65,7 @@ describe('Screenshot & Live-Sharing Governance (Milestone 7)', () => {
     const viewer2 = await app.inject({
       method: 'POST',
       url: '/api/v1/screen/live-session/join',
+      headers,
       payload: {
         sessionId: liveSession.sessionId,
         viewerToken: liveSession.viewerToken,
@@ -71,6 +79,8 @@ describe('Screenshot & Live-Sharing Governance (Milestone 7)', () => {
     await app.inject({
       method: 'POST',
       url: '/api/v1/screen/live-session/stop',
+      headers,
     });
   });
 });
+
