@@ -20,7 +20,11 @@ async function getOrCreateDeviceId() {
 }
 
 const secureStorageReady = chrome.storage.local.setAccessLevel
-  ? chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
+  ? chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(async (error) => {
+      // Storage access hardening is unavailable in some Chromium versions. It
+      // must not prevent the worker from creating an ID or enrolling a device.
+      await chrome.storage.local.set({ dp_worker_warning: `Storage hardening unavailable: ${error.message || error}` });
+    })
   : Promise.resolve();
 const deviceIdPromise = secureStorageReady.then(getOrCreateDeviceId);
 
@@ -89,6 +93,21 @@ const runtime = initializeWorker();
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'get_enrollment_state') { chrome.storage.local.get(['dp_device_secret']).then((stored) => sendResponse({ enrolled: Boolean(stored.dp_device_secret) })); return true; }
   if (message.action === 'get_device_id') { deviceIdPromise.then((deviceId) => sendResponse({ deviceId })); return true; }
+  if (message.action === 'get_worker_diagnostics') {
+    Promise.all([
+      deviceIdPromise,
+      chrome.storage.local.get([CONFIG.SYNC_QUEUE_STORAGE_KEY, 'dp_device_secret', 'dp_sync_error', 'dp_worker_warning']),
+    ]).then(([deviceId, stored]) => sendResponse({
+      ok: true,
+      workerVersion: chrome.runtime.getManifest().version,
+      deviceId,
+      enrolled: Boolean(stored.dp_device_secret),
+      queued: (stored[CONFIG.SYNC_QUEUE_STORAGE_KEY] || []).length,
+      syncError: stored.dp_sync_error || null,
+      warning: stored.dp_worker_warning || null,
+    })).catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
   if (message.action === 'get_monitoring_state') {
     chrome.storage.local.get(['dp_monitoring_allowed', 'dp_monitoring_allowed_until', 'dp_monitoring_reason']).then((stored) => sendResponse({ allowed: stored.dp_monitoring_allowed === true && Date.now() < Date.parse(stored.dp_monitoring_allowed_until || ''), reason: stored.dp_monitoring_reason || null })); return true;
   }
@@ -96,7 +115,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'retry_skipped_events') { chrome.storage.local.set({ dp_rejected_event_ids: [] }).then(() => sendResponse({ success: true })); return true; }
   if (message.action === 'enroll_browser') {
     if (!CONFIG.ENROLLMENT_UI_ENABLED) { sendResponse({ success: false, deferred: true, error: ENROLLMENT_DEFERRED_MESSAGE }); return false; }
-    deviceIdPromise.then((deviceId) => enrollBrowserDevice(message.token, deviceId)).then(async (result) => { if (result?.success) { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); } return result; }).then(sendResponse).catch((error) => sendResponse({ success: false, error: error.message || 'Browser extension enrollment failed.' })); return true;
+    deviceIdPromise.then((deviceId) => enrollBrowserDevice(message.token, deviceId)).then(async (result) => { if (result?.success) { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); } return result; }).then(sendResponse).catch(async (error) => {
+      const message = error.message || 'Browser extension enrollment failed.';
+      await chrome.storage.local.set({ dp_sync_error: message });
+      sendResponse({ success: false, error: message, workerVersion: chrome.runtime.getManifest().version });
+    }); return true;
   }
   if (message.action === 'sync_now') {
     runtime.then(async ({ activityManager, refreshAuthorizedActiveTab }) => { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); await activityManager.checkpoint(); const sync = await syncQueue(); await syncBlockingRules(); sendResponse({ success: Boolean(heartbeat.ok && sync.ok), heartbeat, sync }); }).catch((error) => sendResponse({ success: false, error: error.message })); return true;

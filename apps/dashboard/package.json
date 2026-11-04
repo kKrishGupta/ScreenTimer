@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run --config vitest.config.js"
   },
   "dependencies": {
     "react": "^19.3.1",

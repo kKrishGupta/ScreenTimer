@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { api } from '../lib/api.js';
 import { useApi } from '../hooks/useApi.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -6,6 +7,9 @@ import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/States.jsx';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DEFAULT_WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+const DEFAULT_SCHEDULE = { shiftStart: '09:00', shiftEnd: '18:00', workingDays: DEFAULT_WORKING_DAYS };
+const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const roleIs = (role, ...values) => values.includes(String(role || '').toUpperCase());
 
 function formatDate(value) {
@@ -30,9 +34,9 @@ export default function DevicesPage() {
   const fetchMonitoring = useCallback((opts) => api.myMonitoringStatus(opts), []);
   const { data, error, loading, reload } = useApi(fetchDevices, { intervalMs: 10000 });
   const { data: monitoringData, error: monitoringError, reload: reloadMonitoring } = useApi(fetchMonitoring, { intervalMs: 15000 });
-  const [schedule, setSchedule] = useState({ shiftStart: '', shiftEnd: '', workingDays: [] });
+  const [schedule, setSchedule] = useState(DEFAULT_SCHEDULE);
   const [timezone, setTimezone] = useState('');
-  const [kind, setKind] = useState('DESKTOP_AGENT');
+  const [kind, setKind] = useState('BROWSER_EXTENSION');
   const [working, setWorking] = useState('');
   const [message, setMessage] = useState('');
   const [issuedToken, setIssuedToken] = useState(null);
@@ -44,13 +48,15 @@ export default function DevicesPage() {
   const isEmployee = roleIs(user?.role, 'EMPLOYEE');
   const isOrgAdmin = roleIs(user?.role, 'ORGANIZATION_ADMIN', 'ORG_ADMIN');
   const canEnrollSelf = isEmployee || isOrgAdmin;
+  const ownDevices = devices.filter((device) => device.userId === user?.id);
+  const organizationDevices = isOrgAdmin ? devices.filter((device) => device.userId !== user?.id) : [];
 
   useEffect(() => {
     if (!settings) return;
     setSchedule({
-      shiftStart: settings.shiftStart || '',
-      shiftEnd: settings.shiftEnd || '',
-      workingDays: Array.isArray(settings.workingDays) ? settings.workingDays : [],
+      shiftStart: settings.shiftStart || DEFAULT_SCHEDULE.shiftStart,
+      shiftEnd: settings.shiftEnd || DEFAULT_SCHEDULE.shiftEnd,
+      workingDays: Array.isArray(settings.workingDays) && settings.workingDays.length ? settings.workingDays : DEFAULT_WORKING_DAYS,
     });
     setTimezone(settings.organizationTimezone || '');
   }, [settings?.shiftStart, settings?.shiftEnd, settings?.workingDays?.join(','), settings?.organizationTimezone]);
@@ -60,9 +66,17 @@ export default function DevicesPage() {
     event.preventDefault();
     setWorking('schedule'); setMessage('');
     try {
-      await api.updateMyMonitoringSchedule(schedule);
-      await reloadMonitoring();
-      setMessage('Your schedule was saved.');
+      if (!TIME_RE.test(schedule.shiftStart) || !TIME_RE.test(schedule.shiftEnd) || schedule.shiftStart === schedule.shiftEnd || schedule.workingDays.length === 0) {
+        throw new Error('Choose a start time, a different end time, and at least one working day.');
+      }
+      const result = await api.updateMyMonitoringSchedule(schedule);
+      const saved = result?.settings;
+      if (!saved || saved.shiftStart !== schedule.shiftStart || saved.shiftEnd !== schedule.shiftEnd || !DAYS.every((day) => saved.workingDays.includes(day) === schedule.workingDays.includes(day))) {
+        throw new Error('The server did not confirm the saved schedule. Please retry.');
+      }
+      setSchedule({ shiftStart: saved.shiftStart, shiftEnd: saved.shiftEnd, workingDays: saved.workingDays });
+      await Promise.all([reloadMonitoring(), reload()]);
+      setMessage(`Schedule saved: ${saved.workingDays.join(', ')} · ${saved.shiftStart}–${saved.shiftEnd} (${saved.organizationTimezone}).`);
     } catch (err) { setMessage(err.message || 'The schedule could not be saved.'); }
     finally { setWorking(''); }
   };
@@ -128,7 +142,10 @@ export default function DevicesPage() {
           title={isEmployee ? 'My Devices' : 'Device Status'}
           description={isEmployee ? 'View your enrolled devices and control your monitoring consent.' : 'Review enrolled collectors and configure your own device monitoring.'}
         />
-        <Button onClick={refresh} className="self-start">Refresh</Button>
+        <div className="flex flex-wrap gap-2 self-start">
+          <Link to="/employee-setup" className="inline-flex items-center rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500">Check my device</Link>
+          <Button onClick={refresh}>Refresh</Button>
+        </div>
       </div>
 
       {message && <p role="status" className="text-sm text-sky-200">{message}</p>}
@@ -165,6 +182,7 @@ export default function DevicesPage() {
       {settings && <Card title="Working schedule">
         <form onSubmit={saveSchedule} className="space-y-4">
           <p className="text-xs text-slate-400">Collection uses your organization time zone. Overnight shifts are supported. No activity is collected outside these hours.</p>
+          {(!settings.shiftStart || !settings.shiftEnd) && <p className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">No schedule has been saved yet. A 09:00–18:00 Monday–Friday template is ready below; review it and press Save my schedule.</p>}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs text-slate-400">Start<input aria-label="Monitoring shift start" type="time" value={schedule.shiftStart} onChange={(e) => setSchedule((current) => ({ ...current, shiftStart: e.target.value }))} className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /></label>
             <label className="text-xs text-slate-400">End<input aria-label="Monitoring shift end" type="time" value={schedule.shiftEnd} onChange={(e) => setSchedule((current) => ({ ...current, shiftEnd: e.target.value }))} className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /></label>
@@ -173,7 +191,7 @@ export default function DevicesPage() {
             const active = schedule.workingDays.includes(day);
             return <button key={day} type="button" aria-pressed={active} onClick={() => setSchedule((current) => ({ ...current, workingDays: active ? current.workingDays.filter((value) => value !== day) : [...current.workingDays, day] }))} className={`rounded-lg border px-3 py-1.5 text-xs ${active ? 'border-sky-400/50 bg-sky-400/10 text-sky-200' : 'border-white/10 text-slate-500'}`}>{day}</button>;
           })}</div>
-          <Button type="submit" disabled={working === 'schedule'}>{working === 'schedule' ? 'Saving…' : 'Save my schedule'}</Button>
+          <Button type="submit" disabled={working === 'schedule' || !TIME_RE.test(schedule.shiftStart) || !TIME_RE.test(schedule.shiftEnd) || schedule.shiftStart === schedule.shiftEnd || schedule.workingDays.length === 0}>{working === 'schedule' ? 'Saving…' : 'Save my schedule'}</Button>
         </form>
       </Card>}
 
@@ -198,10 +216,10 @@ export default function DevicesPage() {
         </div>}
       </Card>}
 
-      <Card>
-        {devices.length === 0 ? <EmptyState title="No enrolled devices">Devices appear after an authorized user enrolls a collector and it sends a valid heartbeat.</EmptyState> : (
+      <Card title="My enrolled devices">
+        {ownDevices.length === 0 ? <EmptyState title="No personal device enrolled">Use “Check my device” to install, enroll, and verify this administrator account's own Windows agent or browser extension.</EmptyState> : (
           <div className="grid gap-4 sm:grid-cols-2">
-            {devices.map((device) => <div key={device.id} className="space-y-3 rounded-lg border border-white/10 bg-white/[0.02] p-5">
+            {ownDevices.map((device) => <div key={device.id} className="space-y-3 rounded-lg border border-white/10 bg-white/[0.02] p-5">
               <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-100">{device.name}</h3><p className="mt-0.5 font-mono text-xs text-slate-400">{device.platform}</p></div><span className={`rounded-md px-2.5 py-1 text-xs font-medium ${device.status === 'online' ? 'bg-emerald-500/10 text-emerald-300' : device.status === 'revoked' ? 'bg-rose-500/10 text-rose-300' : 'bg-slate-500/10 text-slate-300'}`}>{device.status === 'online' ? 'Connected' : device.status === 'revoked' ? 'Revoked' : 'Offline'}</span></div>
               <p className="text-xs text-slate-400">{String(device.kind).toUpperCase() === 'DESKTOP_AGENT' ? 'Windows Desktop Agent' : `Browser Extension (${device.browser || 'Web'})`}{device.assignedUser?.displayName ? ` · ${device.assignedUser.displayName}` : ''}</p>
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-t border-white/5 pt-3 text-xs"><dt className="text-slate-500">Last heartbeat</dt><dd className="text-slate-300">{formatDate(device.lastSeenAt)}</dd><dt className="text-slate-500">Last sync</dt><dd className="text-slate-300">{formatDate(device.lastSyncAt)}</dd><dt className="text-slate-500">Monitoring</dt><dd className={device.monitoring?.allowed ? 'text-emerald-300' : 'text-amber-200'}>{device.monitoring?.allowed ? 'Authorized now' : reasonText(device.monitoring?.reason)}</dd></dl>
@@ -209,6 +227,18 @@ export default function DevicesPage() {
           </div>
         )}
       </Card>
+
+      {isOrgAdmin && <Card title="Organization devices">
+        {organizationDevices.length === 0 ? <EmptyState title="No employee devices enrolled">Employee devices appear here after enrollment and a valid heartbeat.</EmptyState> : (
+          <div className="divide-y divide-white/5">
+            {organizationDevices.map((device) => <div key={device.id} className="grid gap-2 py-4 text-sm sm:grid-cols-[1.3fr_1fr_1fr] sm:items-center">
+              <div><p className="font-semibold text-slate-100">{device.name}</p><p className="text-xs text-slate-500">{device.assignedUser?.displayName || 'Unassigned'} · {device.assignedUser?.email || 'No employee email'}</p></div>
+              <div><p className="text-slate-300">{String(device.kind).toUpperCase() === 'DESKTOP_AGENT' ? 'Windows Desktop Agent' : `Browser Extension (${device.browser || 'Web'})`}</p><p className="text-xs text-slate-500">Last sync: {formatDate(device.lastSyncAt)}</p></div>
+              <div className="sm:text-right"><span className={`rounded-md px-2.5 py-1 text-xs font-medium ${device.status === 'online' ? 'bg-emerald-500/10 text-emerald-300' : device.status === 'revoked' ? 'bg-rose-500/10 text-rose-300' : 'bg-slate-500/10 text-slate-300'}`}>{device.status === 'online' ? 'Connected' : device.status === 'revoked' ? 'Revoked' : 'Offline'}</span><p className={`mt-2 text-xs ${device.monitoring?.allowed ? 'text-emerald-300' : 'text-amber-200'}`}>{device.monitoring?.allowed ? 'Monitoring authorized' : reasonText(device.monitoring?.reason)}</p></div>
+            </div>)}
+          </div>
+        )}
+      </Card>}
     </div>
   );
 }

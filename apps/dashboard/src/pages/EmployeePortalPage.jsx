@@ -10,11 +10,12 @@ export default function EmployeePortalPage() {
   const fetchProfile = useCallback(async (opts) => {
     const me = await api.me(opts);
     const user = me?.user || me;
-    const [employee, devices] = await Promise.all([
+    const [employee, devices, monitoring] = await Promise.all([
       api.employee(user.id, opts),
       api.devices(opts),
+      api.myMonitoringStatus(opts),
     ]);
-    return { user, profile: employee?.employee, devices: devices?.devices || [] };
+    return { user, profile: employee?.employee, devices: devices?.devices || [], monitoring };
   }, []);
   const { data, error, loading, reload } = useApi(fetchProfile, { intervalMs: 30000 });
 
@@ -25,6 +26,14 @@ export default function EmployeePortalPage() {
   const device = data?.devices?.find((entry) => !entry.isRevoked);
   const analytics = profile?.analytics;
   const hasActivity = Boolean(analytics?.hasData);
+  const monitoring = data?.monitoring?.monitoring;
+  const monitoringLabel = monitoring?.allowed
+    ? 'Active'
+    : monitoring?.reason
+      ? `Paused: ${formatMonitoringReason(monitoring.reason)}`
+      : profile?.monitoringStatus === 'WAITING_FOR_EVENTS'
+        ? 'Waiting for events'
+        : 'Not started';
 
   return (
     <div className="space-y-6">
@@ -56,8 +65,10 @@ export default function EmployeePortalPage() {
           )}
         </Card>
         <Card title="Monitoring status">
-          <p className="text-sm font-semibold text-slate-200">{profile?.monitoringStatus === 'ACTIVE' ? 'Active' : profile?.monitoringStatus === 'WAITING_FOR_EVENTS' ? 'Waiting for events' : 'Not Started'}</p>
+          <p className={`text-sm font-semibold ${monitoring?.allowed ? 'text-emerald-300' : 'text-amber-300'}`}>{monitoringLabel}</p>
           <p className="mt-1 text-xs text-slate-500">Enrollment status: {profile?.enrollmentStatus === 'ENROLLED' ? 'Enrolled' : 'Pending'}</p>
+          {monitoring?.allowedUntil && <p className="mt-1 text-xs text-slate-500">Collecting until: {new Date(monitoring.allowedUntil).toLocaleString()}</p>}
+          {!monitoring?.allowed && monitoring?.nextCheckAt && <p className="mt-1 text-xs text-slate-500">Next scheduled start: {new Date(monitoring.nextCheckAt).toLocaleString()}</p>}
         </Card>
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
@@ -83,4 +94,16 @@ export default function EmployeePortalPage() {
       </Card>
     </div>
   );
+}
+
+function formatMonitoringReason(reason) {
+  return ({
+    USER_CONSENT_REQUIRED: 'consent is required',
+    ADMIN_AUTHORIZATION_REQUIRED: 'administrator authorization is required',
+    ORGANIZATION_TIMEZONE_REQUIRED: 'organization timezone is not configured',
+    SCHEDULE_NOT_CONFIGURED: 'work schedule is not configured',
+    OUTSIDE_SCHEDULE: 'outside scheduled work hours',
+    ACCOUNT_INACTIVE: 'account is inactive',
+    DEVICE_NOT_ENROLLED: 'device is not enrolled',
+  }[reason] || 'authorization could not be verified');
 }

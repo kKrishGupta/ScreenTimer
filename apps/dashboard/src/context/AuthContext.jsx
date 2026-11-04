@@ -3,6 +3,17 @@ import { api, setAuthToken } from '../lib/api.js';
 
 const AuthContext = createContext(null);
 
+function normalizeDashboardUser(user) {
+  if (!user) return user;
+  const role = String(user.role || '').toUpperCase();
+  const canonicalRole = ['OWNER', 'ORG_ADMIN', 'FAMILY_OWNER'].includes(role)
+    ? 'ORGANIZATION_ADMIN'
+    : ['MEMBER', 'ADULT_MEMBER', 'SUPERVISED_MEMBER'].includes(role)
+      ? 'EMPLOYEE'
+      : role;
+  return { ...user, role: canonicalRole };
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -10,7 +21,7 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let active = true;
     api.me()
-      .then((result) => { if (active) setUser(result.user || result); })
+      .then((result) => { if (active) setUser(normalizeDashboardUser(result.user || result)); })
       .catch(() => { if (active) { setAuthToken(null); setUser(null); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -24,7 +35,7 @@ export function AuthProvider({ children }) {
       const result = await api.login({ ...credentials, rememberMe: options.remember !== false });
       try {
         const profile = await api.me();
-        const authenticatedUser = profile.user || profile;
+        const authenticatedUser = normalizeDashboardUser(profile.user || profile);
         if (!authenticatedUser?.id || !authenticatedUser?.role) {
           throw new Error('Authenticated user profile is incomplete.');
         }

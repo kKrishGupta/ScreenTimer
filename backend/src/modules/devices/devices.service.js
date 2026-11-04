@@ -226,7 +226,13 @@ export class DeviceService {
     const deviceSecret = `dp_sec_${crypto.randomBytes(24).toString('hex')}`;
     const { hash, salt } = hashDeviceSecret(deviceSecret);
 
-    const kind = tokenRecord.deviceKind || (browser ? 'BROWSER_EXTENSION' : 'DESKTOP_AGENT');
+    const requestedKind = browser ? 'BROWSER_EXTENSION' : 'DESKTOP_AGENT';
+    const kind = tokenRecord.deviceKind || requestedKind;
+    if (kind !== requestedKind) {
+      const err = new Error(`This token is for a ${kind === 'BROWSER_EXTENSION' ? 'browser extension' : 'Windows agent'}. Create the matching enrollment token and try again.`);
+      err.statusCode = 400;
+      throw err;
+    }
 
     const deviceData = {
       id: cleanId,

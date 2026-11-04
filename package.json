@@ -34,6 +34,9 @@
     "package:employees": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-employee-downloads.ps1",
     "verify:employee-downloads": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-employee-downloads.ps1",
     "verify:employee-download-http": "node scripts/verify-employee-download-http.mjs"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.10.1": true,
+    "prisma@7.10.1": true
   }
 }
-

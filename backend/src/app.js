@@ -21,6 +21,12 @@ import analyticsRoutes from './modules/analytics/analytics.routes.js';
 import privacyRoutes from './modules/privacy/privacy.routes.js';
 import { readSessionToken, SESSION_COOKIE_NAME } from './modules/auth/session-cookie.js';
 
+// Chromium extension IDs are exactly 32 characters from the a-p alphabet.
+// Extension requests still authenticate enrollment with a one-time token and
+// subsequent device calls with a device secret. Session-cookie mutations keep
+// using the stricter CSRF origin check below.
+const CHROMIUM_EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
+
 /**
  * Builds the Fastify application without starting a listener, so tests can use
  * `app.inject()` with an injected (real or fake) Prisma client.
@@ -57,7 +63,8 @@ export async function buildApp({ config, prisma, logger }) {
 
   await app.register(helmet, { global: true });
   await app.register(cors, {
-    origin: (origin, callback) => callback(null, !origin || config.corsOrigins.includes(origin)),
+    origin: (origin, callback) => callback(null,
+      !origin || config.corsOrigins.includes(origin) || CHROMIUM_EXTENSION_ORIGIN.test(origin)),
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });

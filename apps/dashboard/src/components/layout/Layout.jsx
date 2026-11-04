@@ -22,9 +22,13 @@ import { useNavigate } from 'react-router';
 const NAV = [
   { to: '/', label: 'Overview', icon: GridIcon, end: true },
   { to: '/employees', label: 'Employees', icon: UsersIcon },
+  { to: '/employee-setup', label: 'My Device', icon: DeviceIcon },
+  { to: '/devices', label: 'Organization Devices', icon: ScreenIcon },
   { to: '/live', label: 'Activity', icon: PulseIcon },
+  { to: '/blocked-activity', label: 'Website Blocking', icon: ShieldIcon },
   { to: '/time-planner', label: 'Schedule', icon: CalendarIcon },
   { to: '/reports', label: 'Reports', icon: TimelineIcon },
+  { to: '/alerts', label: 'Alerts', icon: BellIcon },
 ];
 
 export default function Layout() {
