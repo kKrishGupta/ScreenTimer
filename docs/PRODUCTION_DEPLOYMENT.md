@@ -51,6 +51,43 @@ The invitation PostgreSQL test exercises admin and employee login, hashed sessio
 
 ## Deploy
 
+### Vercel dashboard with a Render API
+
+For the Vercel deployment whose root directory is `apps/dashboard`, keep the
+dashboard API base on the same origin: leave `VITE_API_BASE_URL` unset, or set
+it to `/api/v1`. Do not set it to the Render URL. The committed
+`apps/dashboard/vercel.json` rewrites `/api/v1/:path*` to
+`https://screentimer.onrender.com/api/v1/:path*` before the SPA fallback.
+
+The rewrite preserves the API method, request body, authorization and cookie
+headers, response status, and `Set-Cookie` headers. The browser therefore
+stores `dp_session` for `screen-timer.vercel.app`; its `Path=/api/v1`,
+`HttpOnly`, `Secure`, and `SameSite=Lax` attributes work for login, refresh,
+and logout without enabling cross-site cookies. Configure Render with the
+dashboard origin as `PUBLIC_APP_URL` and the only value of `CORS_ORIGINS`.
+
+For this deployment, set these Vercel project values:
+
+```text
+VITE_API_BASE_URL=/api/v1   # optional; this is the default
+```
+
+Set these Render values, preserving existing secret values:
+
+```text
+NODE_ENV=production
+HOST=0.0.0.0
+PORT=10000
+PUBLIC_APP_URL=https://screen-timer.vercel.app
+PUBLIC_APP_DOMAIN=screen-timer.vercel.app
+CORS_ORIGINS=https://screen-timer.vercel.app
+INVITATION_ACCEPT_URL=https://screen-timer.vercel.app/accept-invitation
+PASSWORD_RESET_URL=https://screen-timer.vercel.app/reset-password
+```
+
+Deploy Render before Vercel, then verify `/api/v1/health` through the Vercel
+origin. Do not call the Render API directly from the dashboard browser build.
+
 1. Provision a Linux Docker host, PostgreSQL database, DNS A/AAAA records, and firewall access for ports 80 and 443.
 2. Set private values in `.env.production`: `PUBLIC_APP_DOMAIN`, matching `PUBLIC_APP_URL`, the same single-origin `CORS_ORIGINS`, and `DATABASE_URL`. Add SMTP settings when available.
 3. From the repository root, build and start:

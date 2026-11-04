@@ -1,5 +1,13 @@
-// Requests use the same-origin reverse proxy in production and the Vite proxy in development.
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '/api/v1').replace(/\/$/, '');
+// Production requests must stay on the dashboard origin.  The Vercel rewrite
+// forwards /api/v1 to Fastify, so the HttpOnly session cookie is first-party.
+// An old absolute VITE_API_BASE_URL would make this a cross-site cookie flow;
+// SameSite=Lax correctly prevents that cookie from being sent on fetches.
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
+export const API_BASE = (
+  import.meta.env.PROD && !configuredApiBase.startsWith('/')
+    ? '/api/v1'
+    : configuredApiBase
+).replace(/\/$/, '');
 const DEFAULT_TIMEOUT_MS = 8000;
 
 function clearLegacyTokens() {
