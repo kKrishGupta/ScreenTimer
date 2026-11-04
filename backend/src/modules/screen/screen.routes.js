@@ -21,7 +21,10 @@ try {
  * Derives the AES-256-GCM encryption key from environment secrets.
  */
 function getEncryptionKey() {
-  const secret = process.env.SCREENSHOT_ENCRYPTION_KEY || process.env.ENCRYPTION_SECRET || process.env.DATABASE_URL || 'dp-screen-secret-salt-32-bytes-long!';
+  const secret = process.env.SCREENSHOT_ENCRYPTION_KEY;
+  if (!secret || secret.length < 32) {
+    throw new Error('SCREENSHOT_ENCRYPTION_KEY must be configured with at least 32 characters');
+  }
   return crypto.createHash('sha256').update(secret).digest();
 }
 
@@ -196,6 +199,22 @@ function enforceStorageQuota() {
 }
 
 export default async function screenRoutes(fastify) {
+  // Screen capture is an explicitly separate, high-risk feature.  The
+  // previous implementation kept consent and live-session state in process
+  // globals, which is unsafe in a multi-tenant deployment.  Keep every
+  // screen endpoint unavailable until a persistent, tenant/device-owned
+  // implementation is introduced and independently reviewed.
+  // Screen capture has not completed its tenant-scoped persistence and privacy
+  // design. It may be exercised only in a non-production development build;
+  // an environment typo must never expose it in a release deployment.
+  if (process.env.NODE_ENV === 'production' || process.env.SCREEN_MONITORING_ENABLED !== 'true') {
+    fastify.addHook('preHandler', async (_request, reply) => reply.code(410).send({
+      error: {
+        code: 'SCREEN_MONITORING_DISABLED',
+        message: 'Screen monitoring is disabled. It is not available in this release.',
+      },
+    }));
+  }
   // GET /api/v1/screen/config
   fastify.get('/screen/config', async () => {
     // Check if pause expired

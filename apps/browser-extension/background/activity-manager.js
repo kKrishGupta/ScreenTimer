@@ -10,13 +10,36 @@ export class ActivityManager {
    * @param {'chrome' | 'edge'} options.browser
    * @param {(event: object) => Promise<void>} options.onSessionCompleted
    */
-  constructor({ deviceId, browser, onSessionCompleted }) {
+  constructor({ deviceId, browser, onSessionCompleted, initialSession = null, onSessionChanged = null }) {
     this.deviceId = deviceId;
     this.browser = browser;
     this.onSessionCompleted = onSessionCompleted;
-    this.activeSession = null;
+    this.activeSession = this._validSession(initialSession) ? { ...initialSession } : null;
+    this.onSessionChanged = onSessionChanged;
     this.monitoringAllowed = false;
     this.allowedUntil = null;
+  }
+
+  _validSession(session) {
+    return Boolean(session
+      && typeof session.domain === 'string'
+      && session.domain.length > 0
+      && Number.isFinite(session.startedAt)
+      && session.startedAt <= Date.now());
+  }
+
+  _notifySessionChanged() {
+    if (!this.onSessionChanged) return;
+    Promise.resolve(this.onSessionChanged(this.activeSession ? { ...this.activeSession } : null)).catch(() => {
+      // Persistence is best effort; telemetry collection must remain usable.
+    });
+  }
+
+  async restoreSession(session, nowMs = Date.now()) {
+    if (!this._canCollect(nowMs) || !this._validSession(session)) return false;
+    this.activeSession = { ...session };
+    this._notifySessionChanged();
+    return true;
   }
 
   async setMonitoringState({ allowed = false, allowedUntil = null, reason = null } = {}, nowMs = Date.now()) {
@@ -69,6 +92,7 @@ export class ActivityManager {
         domain,
         startedAt: nowMs,
       };
+      this._notifySessionChanged();
     }
   }
 
@@ -77,7 +101,7 @@ export class ActivityManager {
    * @param {'active' | 'idle' | 'locked'} idleState
    * @param {number} [nowMs]
    */
-  async handleIdleState(idleState, nowMs = Date.now()) {
+  async handleIdleState(idleState, nowMs = Date.now(), activeDomain = null) {
     if (!this._canCollect(nowMs)) {
       if (this.activeSession) {
         const stopAt = this.allowedUntil && this.allowedUntil > this.activeSession.startedAt ? this.allowedUntil : nowMs;
@@ -86,7 +110,9 @@ export class ActivityManager {
       return;
     }
     if (idleState === 'active') {
-      // Return to active; tab manager will restore active domain if focused
+      // Browser idle events do not reliably produce a tab-focus event. Restore
+      // the currently focused domain when the caller has it available.
+      if (activeDomain) await this.switchDomain(activeDomain, nowMs);
     } else {
       // Idle or locked; close active session
       if (this.activeSession) {
@@ -114,6 +140,7 @@ export class ActivityManager {
     if (durationSeconds < 1) return;
 
     this.activeSession.startedAt = nowMs;
+    this._notifySessionChanged();
     const eventId = crypto.randomUUID();
     const event = {
       schemaVersion: CONFIG.SCHEMA_VERSION,
@@ -143,6 +170,7 @@ export class ActivityManager {
     if (!this.activeSession) return;
     const { domain, startedAt } = this.activeSession;
     this.activeSession = null;
+    this._notifySessionChanged();
 
     const durationSeconds = Math.max(0, Math.round((nowMs - startedAt) / 1000));
     // Filter out momentary clicks / 0-second transients

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/shared/config.js';
+import { AnalyticsService } from '../src/modules/analytics/analytics.service.js';
 
 describe('Advanced Digital Wellbeing & Analytics (Milestone 6)', () => {
   it('computes daily and weekly trends, customizes categories, and exports CSV', async () => {
@@ -72,5 +73,25 @@ describe('Advanced Digital Wellbeing & Analytics (Milestone 6)', () => {
     assert.match(csvRes.payload, /Timestamp,Type,Target/);
     assert.doesNotMatch(csvRes.payload, /code\.exe|github\.com/);
   });
+});
+
+it('sums concurrent employee activity as person-hours instead of merging tenant timelines', async () => {
+  const sessions = ['employee-a', 'employee-b'].map((userId, index) => ({
+    id: `session-${index}`,
+    organizationId: 'org-1',
+    deviceId: `device-${index}`,
+    device: { userId },
+    type: 'APP_SESSION',
+    startedAt: new Date('2026-01-02T09:00:00.000Z'),
+    endedAt: new Date('2026-01-02T10:00:00.000Z'),
+    application: { executableName: 'editor.exe' },
+    website: null,
+  }));
+  const service = new AnalyticsService({
+    activitySession: { findMany: async () => sessions },
+    usageCategory: { findUnique: async () => ({ category: 'productive' }) },
+  });
+  const result = await service.getDailyAnalytics({ organizationId: 'org-1', role: 'ORGANIZATION_ADMIN', date: '2026-01-02' });
+  assert.equal(result.totalActiveMinutes, 120);
 });
 

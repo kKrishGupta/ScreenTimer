@@ -139,3 +139,26 @@ test('does not collect without verified monitoring authorization and stops at sc
   assert.equal(events.length, 1);
   assert.equal(events[0].durationSeconds, 5);
 });
+
+test('ActivityManager persists an open session and restores the selected domain after idle', async () => {
+  const states = [];
+  const start = Date.now() - 10_000;
+  const manager = new ActivityManager({
+    deviceId: '11111111-2222-3333-4444-555555555555', browser: 'chrome',
+    onSessionChanged: (session) => states.push(session),
+  });
+  await manager.setMonitoringState({ allowed: true, allowedUntil: new Date(Date.now() + 600000).toISOString() }, start);
+  await manager.switchDomain('example.com', start);
+  assert.deepEqual(states.at(-1), { domain: 'example.com', startedAt: start });
+  await manager.handleIdleState('idle', start + 2000);
+  assert.equal(states.at(-1), null);
+  await manager.handleIdleState('active', start + 3000, 'example.com');
+  assert.equal(manager.activeSession.domain, 'example.com');
+
+  const restarted = new ActivityManager({
+    deviceId: '11111111-2222-3333-4444-555555555555', browser: 'chrome',
+    initialSession: { domain: 'example.com', startedAt: start + 3000 },
+  });
+  await restarted.setMonitoringState({ allowed: true, allowedUntil: new Date(Date.now() + 600000).toISOString() });
+  assert.equal(restarted.activeSession.domain, 'example.com');
+});

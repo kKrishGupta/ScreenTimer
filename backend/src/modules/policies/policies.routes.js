@@ -5,9 +5,13 @@ import { Roles, normalizeRole } from '../auth/auth.service.js';
 // In-memory family policy rules, temporary approvals, and violation logs for fast lookup & fallback
 const policyState = {
   policies: [],
-  temporaryApprovals: new Map(), // key: targetDomainOrApp -> { expiresAt, approvedBy }
+  temporaryApprovals: new Map(), // key: organizationId:targetDomainOrApp -> { expiresAt, approvedBy }
   violations: [],
 };
+
+function temporaryApprovalKey(organizationId, target) {
+  return `${organizationId || 'unscoped'}:${target}`;
+}
 
 /**
  * Checks if current time falls within bedtime / scheduled restriction.
@@ -28,6 +32,35 @@ export default async function policyRoutes(fastify) {
   const { prisma } = fastify;
   const dashboardBaseUrl = fastify.config.publicAppUrl || 'http://localhost:5173';
   const graceService = new GraceService(fastify.prisma, fastify.log);
+
+  function isPolicyAdministrator(user) {
+    const role = normalizeRole(user?.role);
+    return role === Roles.ORGANIZATION_ADMIN || role === Roles.SUPER_ADMIN;
+  }
+
+  function requirePolicyAdministrator(req, reply) {
+    if (!isPolicyAdministrator(req.user)) {
+      reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only administrators may configure policies' } });
+      return false;
+    }
+    return true;
+  }
+
+  // Resolve the resource within the caller's tenant before any mutation.
+  // `findFirst` is supported by Prisma; `findMany` keeps lightweight test
+  // adapters compatible without permitting a cross-tenant fallback.
+  async function findOwnedPolicy(id, organizationId) {
+    if (!id || !organizationId) return null;
+    if (prisma?.familyPolicy?.findFirst) {
+      return prisma.familyPolicy.findFirst({ where: { id, organizationId } });
+    }
+    if (prisma?.familyPolicy?.findMany) {
+      const policies = await prisma.familyPolicy.findMany({ where: { organizationId } });
+      return policies.find((policy) => policy.id === id) || null;
+    }
+    if (process.env.NODE_ENV === 'production') return null;
+    return policyState.policies.find((policy) => policy.id === id && policy.organizationId === organizationId) || null;
+  }
 
   // Load organization policy state from persistence. Production never treats
   // a database error as an empty policy set, which would silently allow sites.
@@ -94,14 +127,7 @@ export default async function policyRoutes(fastify) {
   // POST /api/v1/policies (Protected: Admin only)
   fastify.post('/policies', async (req, reply) => {
     const user = req.user;
-    if (user) {
-      const userRole = normalizeRole(user.role);
-      if (userRole === Roles.EMPLOYEE || userRole === Roles.MANAGER) {
-        return reply.status(403).send({
-          error: { code: 'FORBIDDEN', message: 'Only administrators may configure policies' },
-        });
-      }
-    }
+    if (!requirePolicyAdministrator(req, reply)) return;
 
     const {
       name,
@@ -126,7 +152,7 @@ export default async function policyRoutes(fastify) {
       });
     }
 
-    const orgId = user?.organizationId || '00000000-0000-0000-0000-000000000000';
+    const orgId = user.organizationId;
     const policy = {
       id: crypto.randomUUID(),
       organizationId: orgId,
@@ -182,17 +208,10 @@ export default async function policyRoutes(fastify) {
   // PATCH /api/v1/policies/:id (Protected: Admin only)
   fastify.patch('/policies/:id', async (req, reply) => {
     const user = req.user;
-    if (user) {
-      const userRole = normalizeRole(user.role);
-      if (userRole === Roles.EMPLOYEE || userRole === Roles.MANAGER) {
-        return reply.status(403).send({
-          error: { code: 'FORBIDDEN', message: 'Only administrators may configure policies' },
-        });
-      }
-    }
+    if (!requirePolicyAdministrator(req, reply)) return;
 
     const { id } = req.params;
-    const policy = policyState.policies.find((p) => p.id === id);
+    const policy = await findOwnedPolicy(id, user.organizationId);
     if (!policy) {
       return reply.code(404).send({
         error: { code: 'NOT_FOUND', message: 'Policy not found' },
@@ -225,10 +244,10 @@ export default async function policyRoutes(fastify) {
     if (action && ['allow', 'warn', 'temporary_access', 'block'].includes(action)) policy.action = action;
     if (typeof active === 'boolean') policy.active = active;
 
-    if (prisma?.familyPolicy?.update) {
+    if (prisma?.familyPolicy?.updateMany) {
       try {
-        await prisma.familyPolicy.update({
-          where: { id },
+        const result = await prisma.familyPolicy.updateMany({
+          where: { id, organizationId: user.organizationId },
           data: {
             ...(name ? { name: policy.name } : {}),
             ...(Array.isArray(restrictedDomains) ? { restrictedDomains: policy.restrictedDomains } : {}),
@@ -239,8 +258,27 @@ export default async function policyRoutes(fastify) {
             ...(typeof active === 'boolean' ? { active: policy.active } : {}),
           },
         });
-      } catch {
-        // Safe
+        if (result.count !== 1) {
+          return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Policy not found' } });
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV === 'production') throw error;
+      }
+    } else if (prisma?.familyPolicy?.update) {
+      // Test adapters without updateMany still pass through the tenant-owned
+      // lookup above. Prisma deployments use the scoped updateMany path.
+      try {
+        await prisma.familyPolicy.update({ where: { id }, data: {
+          ...(name ? { name: policy.name } : {}),
+          ...(Array.isArray(restrictedDomains) ? { restrictedDomains: policy.restrictedDomains } : {}),
+          ...(Array.isArray(restrictedApps) ? { restrictedApps: policy.restrictedApps } : {}),
+          ...(Array.isArray(allowedDomains) ? { allowedDomains: policy.allowedDomains } : {}),
+          ...(maxMinutesPerDay != null ? { maxMinutesPerDay: policy.maxMinutesPerDay } : {}),
+          ...(action ? { action: policy.action } : {}),
+          ...(typeof active === 'boolean' ? { active: policy.active } : {}),
+        } });
+      } catch (error) {
+        if (process.env.NODE_ENV === 'production') throw error;
       }
     }
 
@@ -250,17 +288,10 @@ export default async function policyRoutes(fastify) {
   // POST /api/v1/policies/:id/reset-strictness (Admin only)
   fastify.post('/policies/:id/reset-strictness', async (req, reply) => {
     const user = req.user;
-    if (user) {
-      const userRole = normalizeRole(user.role);
-      if (userRole === Roles.EMPLOYEE || userRole === Roles.MANAGER) {
-        return reply.status(403).send({
-          error: { code: 'FORBIDDEN', message: 'Only administrators may configure policies' },
-        });
-      }
-    }
+    if (!requirePolicyAdministrator(req, reply)) return;
 
     const { id } = req.params;
-    const policy = policyState.policies.find((p) => p.id === id);
+    const policy = await findOwnedPolicy(id, user.organizationId);
     if (!policy) {
       return reply.code(404).send({
         error: { code: 'NOT_FOUND', message: 'Policy not found' },
@@ -279,31 +310,30 @@ export default async function policyRoutes(fastify) {
   // DELETE /api/v1/policies/:id (Protected: Admin only)
   fastify.delete('/policies/:id', async (req, reply) => {
     const user = req.user;
-    if (user) {
-      const userRole = normalizeRole(user.role);
-      if (userRole === Roles.EMPLOYEE || userRole === Roles.MANAGER) {
-        return reply.status(403).send({
-          error: { code: 'FORBIDDEN', message: 'Only administrators may configure policies' },
-        });
-      }
-    }
+    if (!requirePolicyAdministrator(req, reply)) return;
 
     const { id } = req.params;
-    const initialLen = policyState.policies.length;
-    policyState.policies = policyState.policies.filter((p) => p.id !== id);
+    const policy = await findOwnedPolicy(id, user.organizationId);
+    if (!policy) {
+      return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Policy not found' } });
+    }
+    policyState.policies = policyState.policies.filter((item) => item.id !== id || item.organizationId !== user.organizationId);
 
-    if (prisma?.familyPolicy?.delete) {
+    if (prisma?.familyPolicy?.deleteMany) {
+      try {
+        const result = await prisma.familyPolicy.deleteMany({ where: { id, organizationId: user.organizationId } });
+        if (result.count !== 1) {
+          return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Policy not found' } });
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV === 'production') throw error;
+      }
+    } else if (prisma?.familyPolicy?.delete) {
       try {
         await prisma.familyPolicy.delete({ where: { id } });
-      } catch {
-        // Safe
+      } catch (error) {
+        if (process.env.NODE_ENV === 'production') throw error;
       }
-    }
-
-    if (policyState.policies.length === initialLen) {
-      return reply.code(404).send({
-        error: { code: 'NOT_FOUND', message: 'Policy not found' },
-      });
     }
 
     return { success: true, deletedId: id };
@@ -311,6 +341,7 @@ export default async function policyRoutes(fastify) {
 
   // POST /api/v1/policies/temporary-approvals (Parent grants temporary bypass)
   fastify.post('/policies/temporary-approvals', async (req, reply) => {
+    if (!requirePolicyAdministrator(req, reply)) return;
     const { target, durationMinutes = 30, approvedBy = 'Parent' } = req.body || {};
     if (!target) {
       return reply.code(400).send({
@@ -321,7 +352,7 @@ export default async function policyRoutes(fastify) {
     const duration = Math.max(5, Math.min(240, Number(durationMinutes)));
     const expiresAt = new Date(Date.now() + duration * 60 * 1000);
 
-    policyState.temporaryApprovals.set(cleanTarget, { expiresAt, approvedBy });
+    policyState.temporaryApprovals.set(temporaryApprovalKey(req.user.organizationId, cleanTarget), { expiresAt, approvedBy });
 
     return {
       success: true,
@@ -347,7 +378,9 @@ export default async function policyRoutes(fastify) {
     const now = new Date();
 
     // 1. HIGHEST PRECEDENCE: Check temporary approval override
-    const tempApproval = policyState.temporaryApprovals.get(targetKey);
+    const organizationId = req.user?.organizationId || req.device?.organizationId;
+    const approvalKey = temporaryApprovalKey(organizationId, targetKey);
+    const tempApproval = policyState.temporaryApprovals.get(approvalKey);
     if (tempApproval) {
       const expDate = new Date(tempApproval.expiresAt);
       if (expDate > now) {
@@ -373,7 +406,7 @@ export default async function policyRoutes(fastify) {
           warningMessage: `Temporary access active. Countdown: ${Math.ceil(remainingSeconds / 60)} minutes remaining.`,
         };
       } else {
-        policyState.temporaryApprovals.delete(targetKey);
+        policyState.temporaryApprovals.delete(approvalKey);
       }
     }
 
@@ -455,12 +488,12 @@ export default async function policyRoutes(fastify) {
       warningMessage = `Access explicitly permitted under policy "${matchedPolicy.name}".`;
     } else if (finalAction === 'temporary_access' || matchedPolicy.strictness >= 75) {
       // Check or create temporary access grant
-      let grant = policyState.temporaryApprovals.get(targetKey);
+      let grant = policyState.temporaryApprovals.get(approvalKey);
       if (!grant) {
         const durationMins = matchedPolicy.temporaryAccessMinutes || 15;
         const expiry = new Date(now.getTime() + durationMins * 60 * 1000);
         grant = { expiresAt: expiry.toISOString(), approvedBy: 'Policy Engine' };
-        policyState.temporaryApprovals.set(targetKey, grant);
+        policyState.temporaryApprovals.set(approvalKey, grant);
       }
 
       const expDate = new Date(grant.expiresAt);
@@ -570,7 +603,7 @@ export default async function policyRoutes(fastify) {
 
         // If policy allows temporary access and an unexpired grant exists, permit browsing (do not block)
         if (policy.action === 'temporary_access') {
-          const grant = policyState.temporaryApprovals.get(clean);
+          const grant = policyState.temporaryApprovals.get(temporaryApprovalKey(orgId, clean));
           if (grant && new Date(grant.expiresAt) > now) {
             continue; // Grace period active: do not emit redirect rule
           }

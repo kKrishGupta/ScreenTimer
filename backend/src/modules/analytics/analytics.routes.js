@@ -27,13 +27,20 @@ export default async function analyticsRoutes(fastify) {
 
   // GET /api/v1/analytics/weekly
   fastify.get('/analytics/weekly', async (req, reply) => {
+    // Identity and reporting scope are always derived from the authenticated
+    // session.  Do not spread the query object here: doing so would let a
+    // caller replace `role`, `userId`, or `organizationId`.
+    const { range, startDate, endDate, employeeId } = req.query || {};
     try {
       return await analyticsService.getWeeklyAnalytics({
         organizationId: req.user?.organizationId,
         userId: req.user?.id,
         departmentId: req.user?.departmentId,
         role: normalizeRole(req.user?.role),
-        ...(req.query || {}),
+        range,
+        startDate,
+        endDate,
+        employeeId,
       });
     } catch (err) {
       return reply.status(err.statusCode || 503).send({ error: { code: err.statusCode === 403 ? 'FORBIDDEN' : err.statusCode === 400 ? 'INVALID_INPUT' : 'STORAGE_UNAVAILABLE', message: err.message } });

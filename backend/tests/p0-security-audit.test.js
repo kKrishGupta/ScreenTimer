@@ -572,8 +572,8 @@ describe('P0 Security Hardening & Multi-Tenant Audit Verification', () => {
     assert.equal(revokedBeatRes.json().error.code, 'DEVICE_REVOKED');
   });
 
-  // 8. Unauthorized screenshot access must return HTTP 403
-  it("8. Rejects unauthorized access to other employees' screenshot captures with HTTP 403", async () => {
+  // 8. Screen functionality is unavailable by default, so it cannot expose captures.
+  it("8. Keeps screenshot capture routes disabled by default", async () => {
     const { app, tokens, ids } = await setupEnvironment();
 
     // Emp 1 attempts to query Emp 2's captures
@@ -583,8 +583,8 @@ describe('P0 Security Hardening & Multi-Tenant Audit Verification', () => {
       headers: { authorization: `Bearer ${tokens.emp1}` },
     });
 
-    assert.equal(res.statusCode, 403);
-    assert.match(res.json().error.message, /Employees may only access their own screenshot captures/i);
+    assert.equal(res.statusCode, 410);
+    assert.equal(res.json().error.code, 'SCREEN_MONITORING_DISABLED');
   });
 
   // 9. Unauthorized policy changes must return HTTP 403
@@ -612,7 +612,8 @@ describe('P0 Security Hardening & Multi-Tenant Audit Verification', () => {
       headers: { authorization: `Bearer ${tokens.emp1}` },
       payload: { captureMode: 'manual' },
     });
-    assert.equal(screenRes.statusCode, 403);
+    assert.equal(screenRes.statusCode, 410);
+    assert.equal(screenRes.json().error.code, 'SCREEN_MONITORING_DISABLED');
   });
 
   // 10. Employee accessing administrative APIs must return HTTP 403

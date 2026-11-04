@@ -45,6 +45,21 @@ function unionSeconds(intervals) {
   return seconds;
 }
 
+// An organization report is a sum of employee timelines (person-hours), not
+// one union across everyone in the organization. Keep a device fallback for
+// historical rows whose user relation has been removed.
+function groupedUnionSeconds(sessions, start, end, predicate) {
+  const grouped = new Map();
+  for (const session of sessions) {
+    if (!predicate(session)) continue;
+    const owner = session.device?.userId || session.deviceId || 'unknown-device';
+    const intervals = grouped.get(owner) || [];
+    intervals.push(clippedInterval(session, start, end));
+    grouped.set(owner, intervals);
+  }
+  return [...grouped.values()].reduce((total, intervals) => total + unionSeconds(intervals), 0);
+}
+
 async function resolveEmployeeScope(prisma, { organizationId, userId, departmentId, role, employeeId }) {
   if (employeeId === undefined || employeeId === null || employeeId === '') return null;
   if (typeof employeeId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(employeeId)) {
@@ -138,15 +153,11 @@ export class AnalyticsService {
 
         const sessions = await this.prisma.activitySession.findMany({
           where,
-          include: { application: true, website: true },
+          include: { application: true, website: true, device: { select: { userId: true } } },
         });
 
-        totalActiveSec = unionSeconds(sessions
-          .filter((session) => session.type !== 'IDLE_SESSION')
-          .map((session) => clippedInterval(session, startOfDay, endOfDay)));
-        totalIdleSec = unionSeconds(sessions
-          .filter((session) => session.type === 'IDLE_SESSION')
-          .map((session) => clippedInterval(session, startOfDay, endOfDay)));
+        totalActiveSec = groupedUnionSeconds(sessions, startOfDay, endOfDay, (session) => session.type !== 'IDLE_SESSION');
+        totalIdleSec = groupedUnionSeconds(sessions, startOfDay, endOfDay, (session) => session.type === 'IDLE_SESSION');
 
         for (const s of sessions) {
           if (s.type !== 'IDLE_SESSION') {

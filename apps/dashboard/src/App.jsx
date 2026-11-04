@@ -80,7 +80,7 @@ export default function App() {
         <Route path="employees" element={<AdminOnly><EmployeesPage /></AdminOnly>} />
         <Route path="family-members" element={<AdminOnly><EmployeesPage /></AdminOnly>} />
         <Route path="devices" element={<DevicesPage />} />
-        <Route path="timeline" element={<AdminOnly><TimelinePage /></AdminOnly>} />
+        <Route path="timeline" element={<TimelinePage />} />
         <Route path="applications" element={<AdminOnly><ApplicationsPage /></AdminOnly>} />
         <Route path="websites" element={<AdminOnly><WebsitesPage /></AdminOnly>} />
         <Route path="blocked-activity" element={<AdminOnly><BlockedActivityPage /></AdminOnly>} />
@@ -88,13 +88,13 @@ export default function App() {
         <Route path="time-planner" element={<AdminOnly><SchedulePage /></AdminOnly>} />
         <Route path="schedule" element={<AdminOnly><SchedulePage /></AdminOnly>} />
         <Route path="reports" element={<AdminOnly><ReportsPage /></AdminOnly>} />
-        <Route path="digital-wellbeing" element={<Navigate replace to="/reports" />} />
+        <Route path="digital-wellbeing" element={<TimelinePage />} />
         <Route path="policies" element={<AdminOnly><FamilyPoliciesPage /></AdminOnly>} />
         <Route path="family-policies" element={<AdminOnly><FamilyPoliciesPage /></AdminOnly>} />
         <Route path="policies/declarative-rules" element={<AdminOnly><DeclarativeRulesPage /></AdminOnly>} />
         <Route path="declarative-rules" element={<AdminOnly><DeclarativeRulesPage /></AdminOnly>} />
         <Route path="alerts" element={<AdminOnly><AlertsPage /></AdminOnly>} />
-        <Route path="settings" element={<AdminOnly><SettingsPage /></AdminOnly>} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
       </Routes>
