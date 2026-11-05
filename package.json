@@ -1,4 +1,3 @@
-
 {
   "name": "digitalpulse",
   "version": "0.1.0",
@@ -44,7 +43,8 @@
   },
   "allowScripts": {
     "@prisma/engines@7.10.1": true,
-    "prisma@7.10.1": true
+    "prisma@7.10.1": true,
+    "esbuild@0.28.2": true
   },
   "overrides": {
     "vite": "$vite"
