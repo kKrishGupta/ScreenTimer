@@ -36,6 +36,14 @@ test('validates PORT and LOG_LEVEL', () => {
   assert.throws(() => loadConfig({ ...base, LOG_LEVEL: 'verbose' }), /LOG_LEVEL/);
 });
 
+test('bounds configurable password reset expiry to a short lifetime', () => {
+  assert.equal(loadConfig(base).passwordResetTtlMinutes, 30);
+  assert.equal(loadConfig({ ...base, PASSWORD_RESET_TTL_MINUTES: '10' }).passwordResetTtlMinutes, 10);
+  for (const value of ['0', '61', '1.5', 'invalid']) {
+    assert.throws(() => loadConfig({ ...base, PASSWORD_RESET_TTL_MINUTES: value }), /PASSWORD_RESET_TTL_MINUTES/);
+  }
+});
+
 test('maps documented SMTP_PASS and EMAIL_FROM settings to the mail service config', () => {
   const cfg = loadConfig({ ...base, SMTP_USER: 'mailer@example.test', SMTP_PASS: 'secret-value', EMAIL_FROM: 'DigitalPulse <mailer@example.test>' });
   assert.equal(cfg.smtpUser, 'mailer@example.test');

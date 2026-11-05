@@ -1,47 +1,63 @@
-import { useState } from 'react';
-import { Link } from 'react-router';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 import { api } from '../lib/api.js';
 import { AuthShell, ErrorMessage, Field } from './LoginPage.jsx';
 
 export default function ForgotPasswordPage() {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
-  const [message, setMessage] = useState('');
-  const [resetLink, setResetLink] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+  const [retryAt, setRetryAt] = useState(0);
+  const [now, setNow] = useState(Date.now);
+  const retrySeconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
+
+  useEffect(() => {
+    if (!retryAt) return;
+    const timer = setInterval(() => {
+      const currentTime = Date.now();
+      setNow(currentTime);
+      if (currentTime >= retryAt) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [retryAt]);
+
   async function submit(event) {
     event.preventDefault();
+    if (inFlight.current || retrySeconds > 0) return;
+    inFlight.current = true;
     setBusy(true);
     setError('');
-    setMessage('');
-    setResetLink('');
     try {
-      const result = await api.requestPasswordReset(email.trim());
-      setMessage(result.message || 'If an account exists for that email, a reset instruction has been processed.');
-      if (result.resetToken) {
-        const params = new URLSearchParams({ token: result.resetToken, email: email.trim() });
-        setResetLink(`${window.location.origin}/reset-password?${params.toString()}`);
-      }
+      await api.requestPasswordReset(email.trim());
+      // No reset credential crosses into router state. The emailed link is
+      // still required before the password fields can be used.
+      navigate('/reset-password', { replace: true, state: { resetRequested: true } });
     } catch (err) {
-      setError(err.message || 'Unable to request a password reset.');
+      if (err.status === 429) {
+        const requestedWait = Number(err.retryAfterSeconds);
+        const waitSeconds = Number.isFinite(requestedWait) && requestedWait > 0 ? Math.min(3600, Math.ceil(requestedWait)) : 60;
+        const currentTime = Date.now();
+        setNow(currentTime);
+        setRetryAt(currentTime + waitSeconds * 1000);
+        setError('Too many requests. Please wait for the countdown before requesting another link.');
+      } else if (err.code === 'RESET_EMAIL_NOT_CONFIGURED') {
+        setError('Password-reset email is unavailable. Please contact your administrator to enable email delivery.');
+      } else {
+        setError('The reset email could not be sent. Please try again later or contact your administrator.');
+      }
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
   return (
     <AuthShell title="Reset your password" description="Request a secure password-reset link.">
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Work email" type="email" value={email} onChange={setEmail} required autoComplete="email" />
+        <Field label="Work email" type="email" value={email} onChange={setEmail} required autoComplete="email" disabled={busy} />
         {error && <ErrorMessage>{error}</ErrorMessage>}
-        {message && <p role="status" className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{message}</p>}
-        {resetLink && (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-200">
-            <p className="font-medium">Development reset link</p>
-            <p className="mt-1 break-all text-xs text-amber-100/80">{resetLink}</p>
-            <Link className="mt-2 inline-block text-sky-300 hover:text-sky-200" to={resetLink.replace(window.location.origin, '')}>Open reset form</Link>
-          </div>
-        )}
-        <button disabled={busy} className="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Sending…' : 'Send reset link'}</button>
+        <button disabled={busy || retrySeconds > 0} className="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Sending…' : retrySeconds > 0 ? `Try again in ${retrySeconds}s` : 'Send reset link'}</button>
       </form>
       <p className="mt-6 text-center text-sm"><Link className="text-sky-400" to="/login">Back to sign in</Link></p>
     </AuthShell>

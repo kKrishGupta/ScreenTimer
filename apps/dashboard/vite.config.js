@@ -10,6 +10,7 @@ const DASHBOARD_HOST = process.env.DP_DASHBOARD_HOST ?? 'localhost';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    headers: { 'Referrer-Policy': 'no-referrer' },
     host: DASHBOARD_HOST,
     port: 5173,
     strictPort: true,
@@ -29,6 +30,7 @@ export default defineConfig({
     },
   },
   preview: {
+    headers: { 'Referrer-Policy': 'no-referrer' },
     host: DASHBOARD_HOST,
     port: 4173,
     proxy: {

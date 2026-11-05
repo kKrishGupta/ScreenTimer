@@ -1,6 +1,12 @@
 // Prisma 7 configuration: datasource URL, schema and migration locations.
-import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import { defineConfig } from 'prisma/config';
+
+const backendRoot = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(backendRoot, '../.env'), quiet: true });
+dotenv.config({ path: path.resolve(backendRoot, '.env'), quiet: true });
 
 // DATABASE_URL is canonical. Keep DATABASE as a compatibility alias for
 // existing deployments; the canonical value wins if both are set.

@@ -198,6 +198,18 @@ describe('Secure Device Enrollment & Management (Milestone 3)', () => {
     assert.equal(reuseRes.statusCode, 409);
   });
 
+  it('rejects using a Windows-agent token in a browser extension', async () => {
+    const prisma = fakePrisma();
+    const service = new DeviceService(prisma);
+    const issued = await service.createEnrollmentToken({ organizationId: 'org-kind-check', deviceKind: 'DESKTOP_AGENT' });
+    await assert.rejects(
+      service.enrollDevice({ token: issued.token, deviceId: '11112222-3333-4444-5555-666677778800', browser: 'chrome' }),
+      /token is for a Windows agent/i,
+    );
+    assert.equal(Boolean(prisma.__state.tokens[0].usedAt), false);
+    assert.equal(prisma.__state.devices.length, 0);
+  });
+
   it('records device heartbeats and enforces revocation', async () => {
     const config = loadConfig({ DATABASE_URL: 'postgresql://x:y@localhost:5433/dp' });
     const prisma = fakePrisma();

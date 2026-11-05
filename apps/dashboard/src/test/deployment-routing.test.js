@@ -5,6 +5,15 @@ import { describe, expect, it } from 'vitest';
 const vercelConfig = JSON.parse(readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'));
 
 describe('production API routing', () => {
+  it('protects the reset document from referrer leakage and caching', () => {
+    expect(vercelConfig.headers).toContainEqual({
+      source: '/(.*)', headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+    });
+    expect(vercelConfig.headers).toContainEqual({
+      source: '/reset-password', headers: [{ key: 'Cache-Control', value: 'no-store' }],
+    });
+    expect(readFileSync(resolve(process.cwd(), 'index.html'), 'utf8')).toContain('<meta name="referrer" content="no-referrer" />');
+  });
   it('proxies API requests before the SPA fallback', () => {
     expect(vercelConfig.rewrites[0]).toEqual({
       source: '/api/v1/:path*',

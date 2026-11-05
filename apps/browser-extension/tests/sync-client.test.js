@@ -23,6 +23,9 @@ function setup({ queue = [], fetchImpl, enrolled = true, monitoringAllowed = enr
         async set(values) {
           Object.assign(storage, structuredClone(values));
         },
+        async remove(key) {
+          for (const item of Array.isArray(key) ? key : [key]) delete storage[item];
+        },
       },
     },
     runtime: { getManifest: () => ({ version: '0.1.0' }) },
@@ -77,6 +80,14 @@ test('enrollment stores the long-lived secret in background storage and returns 
   assert.equal(storage.dp_device_secret, 'dp_sec_new-background-secret');
   assert.equal(storage.dp_enrollment_status, 'enrolled');
   assert.equal(Object.hasOwn(result, 'deviceSecret'), false);
+});
+
+test('enrollment reports whether a request failed before reaching the backend', async () => {
+  const { client } = setup({ enrolled: false, fetchImpl: async () => { throw new TypeError('Failed to fetch'); } });
+  await assert.rejects(
+    client.enrollBrowserDevice('dp_enroll_one-time', DEVICE_ID),
+    /did not reach http:\/\/127\.0\.0\.1:3001: Failed to fetch/,
+  );
 });
 
 test('an enrolled browser does not resubmit a consumed token or replace its credentials', async () => {
@@ -167,6 +178,17 @@ test('preserves pending events while monitoring authorization is paused', async 
   assert.equal(result.monitoringPaused, true);
   assert.equal(requests, 0);
   assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY].length, 3);
+});
+
+test('stops retrying a rejected device credential and preserves its queue for re-enrollment', async () => {
+  const queue = makeQueue(3);
+  const { client, storage } = setup({ queue, fetchImpl: async () => new Response(JSON.stringify({ error: { message: 'Device credentials are invalid' } }), { status: 401 }) });
+  const result = await client.syncQueue();
+  assert.equal(result.ok, false);
+  assert.equal(storage.dp_device_secret, undefined);
+  assert.equal(storage.dp_enrollment_status, 'pending');
+  assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY].length, 3);
+  assert.match(storage.dp_sync_error, /rejected|invalid/i);
 });
 
 test('retains malformed and conflicting queued rows during sync', async () => {

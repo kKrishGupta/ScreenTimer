@@ -99,6 +99,24 @@ Total Automated Verification:                                    112 / 112 PASS 
 
 ## 4. How to Run DigitalPulse Stage 2
 
+Install dependencies from the repository root before starting either server:
+
+```powershell
+cd D:\desktop\task2_updated\DigitalPulse
+npm install
+```
+
+The project uses one root lockfile for all npm workspaces. Running `npm install`
+inside `apps` also installs the workspace dependencies. Vite is pinned to 7.3.7
+for the dashboard and its plugins so they resolve the same build tool.
+
+To start the dashboard from `apps`:
+
+```powershell
+cd D:\desktop\task2_updated\DigitalPulse\apps
+npm start
+```
+
 ### Option A: One-Click Startup (PowerShell)
 ```powershell
 cd D:\desktop\task2\DigitalPulse

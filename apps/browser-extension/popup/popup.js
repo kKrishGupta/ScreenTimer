@@ -26,6 +26,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     'dp_active_domain', 'dp_enrollment_status', ...connectionKeys,
   ]);
   const enrollmentState = await chrome.runtime.sendMessage({ action: 'get_enrollment_state' }).catch(() => null);
+  const workerDiagnostics = await chrome.runtime.sendMessage({ action: 'get_worker_diagnostics' }).catch((error) => ({ ok: false, error: error.message }));
+  const extensionVersion = workerDiagnostics?.workerVersion || chrome.runtime.getManifest?.()?.version || 'unknown';
+  document.getElementById('extension-version').textContent = `v${extensionVersion} (${workerDiagnostics?.ok ? 'worker ready' : 'worker unavailable'})`;
   let isEnrolled = Boolean(enrollmentState?.enrolled);
   let deviceId = stored[CONFIG.DEVICE_STORAGE_KEY] || '';
   if (!deviceId) {
@@ -76,7 +79,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         deviceId = identity?.deviceId || '';
       }
       if (!deviceId) throw new Error('Could not initialize the browser device identity. Reopen the popup and try again.');
+      if (!workerDiagnostics?.ok) throw new Error(`Background worker unavailable: ${workerDiagnostics?.error || 'reload the extension and try again.'}`);
       const result = await chrome.runtime.sendMessage({ action: 'enroll_browser', token });
+      if (!result) throw new Error(`Background worker v${workerDiagnostics.workerVersion} returned no enrollment response. Reload the extension from chrome://extensions.`);
       if (!result?.success || !result.deviceId) throw new Error(result?.error || 'Enrollment failed');
       deviceId = result.deviceId;
       isEnrolled = true;
@@ -95,8 +100,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  deviceIdEl.textContent = isEnrolled ? (deviceId || 'Not initialized') : 'Not assigned';
-  deviceIdEl.title = isEnrolled ? (deviceId || 'Not initialized') : 'Not assigned';
+  deviceIdEl.textContent = deviceId || 'Not initialized';
+  deviceIdEl.title = `${deviceId || 'Not initialized'} · extension v${workerDiagnostics?.workerVersion || 'unknown'}`;
 
   try {
     const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });

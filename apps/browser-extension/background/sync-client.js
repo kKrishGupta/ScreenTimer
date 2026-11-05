@@ -4,6 +4,19 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
   const notEnrolledMessage = 'Enroll this device with the one-time token from your DigitalPulse account before monitoring can start.';
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+  async function resetRejectedEnrollment(message) {
+    await chromeApi.storage.local.remove('dp_device_secret');
+    await chromeApi.storage.local.set({
+      dp_enrollment_status: 'pending',
+      dp_device_connection_status: 'pending',
+      dp_backend_connection_status: 'connected',
+      dp_monitoring_allowed: false,
+      dp_monitoring_allowed_until: null,
+      dp_monitoring_reason: 'DEVICE_NOT_ENROLLED',
+      dp_sync_error: message,
+    });
+  }
+
   function auditQueue(queue, deviceId, rejectedIds = []) {
     const rejected = new Set(rejectedIds);
     const unique = new Map();
@@ -51,22 +64,27 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
       return { success: true, deviceId: stored[config.DEVICE_STORAGE_KEY], alreadyEnrolled: true };
     }
     const backendUrl = normalizeBackendUrl(stored[config.SETTINGS_STORAGE_KEY]?.backendUrl || config.DEFAULT_BACKEND_URL);
-    const response = await fetchImpl(`${backendUrl}/api/v1/devices/enroll`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      redirect: 'error',
-      signal: AbortSignal.timeout(10000),
-      body: JSON.stringify({
-        token,
-        deviceId,
-        name: `${browserName === 'edge' ? 'Edge' : 'Chrome'} Extension`,
-        platform: 'windows',
-        browser: browserName,
-        agentVersion: chromeApi.runtime.getManifest().version,
-      }),
-    });
+    let response;
+    try {
+      response = await fetchImpl(`${backendUrl}/api/v1/devices/enroll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        redirect: 'error',
+        signal: AbortSignal.timeout(10000),
+        body: JSON.stringify({
+          token,
+          deviceId,
+          name: `${browserName === 'edge' ? 'Edge' : 'Chrome'} Extension`,
+          platform: 'windows',
+          browser: browserName,
+          agentVersion: chromeApi.runtime.getManifest().version,
+        }),
+      });
+    } catch (error) {
+      throw new Error(`Enrollment request did not reach ${backendUrl}: ${error.message || error}`);
+    }
     const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.deviceSecret) throw new Error(result.error?.message || 'Browser extension enrollment failed.');
+    if (!response.ok || !result.deviceSecret) throw new Error(result.error?.message || `Enrollment was rejected by the backend (HTTP ${response.status}).`);
     await chromeApi.storage.local.set({
       [config.DEVICE_STORAGE_KEY]: result.deviceId,
       dp_device_secret: result.deviceSecret,
@@ -188,7 +206,13 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
         body: JSON.stringify(batch),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error?.message || `Event sync failed (${response.status}).`);
+      if (!response.ok) {
+        const message = result.error?.message || `Event sync failed (${response.status}).`;
+        if (response.status === 401 || response.status === 403) {
+          await resetRejectedEnrollment(`Device credential was rejected. Create a new browser-extension token and enroll again. Pending events were preserved. (${message})`);
+        }
+        throw new Error(message);
+      }
       const sentIds = new Set(events.map((event) => event.eventId));
       const acknowledgedIds = [
         ...(Array.isArray(result.acceptedEventIds) ? result.acceptedEventIds : []),

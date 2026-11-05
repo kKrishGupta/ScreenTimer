@@ -1,6 +1,7 @@
 import { AuthService, Roles } from './auth.service.js';
 import { createAuthMiddleware } from '../../middleware/auth.middleware.js';
 import { readSessionToken, serializeSessionCookie } from './session-cookie.js';
+import { createRateLimiter } from '../../middleware/rate-limiter.js';
 
 export default async function authRoutes(fastify) {
   const authService = fastify.authService || new AuthService(fastify.prisma, fastify.log, fastify.config);
@@ -112,27 +113,48 @@ export default async function authRoutes(fastify) {
     },
   );
 
-  // Request Password Reset Token (Dev friendly)
-  fastify.post('/auth/reset-password-request', async (req, reply) => {
+  const resetHeaders = async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    reply.header('Referrer-Policy', 'no-referrer');
+  };
+  const resetRequestLimit = createRateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 5 });
+  const resetConfirmLimit = createRateLimiter({ windowMs: 15 * 60 * 1000, maxRequests: 10 });
+
+  // Raw reset credentials are delivered exclusively through email.
+  fastify.post('/auth/reset-password-request', { onRequest: [resetHeaders, resetRequestLimit] }, async (req, reply) => {
     const { email } = req.body || {};
-    if (!email) {
+    if (typeof email !== 'string' || !email.trim()) {
       return reply.status(400).send({
         error: { code: 'BAD_REQUEST', message: 'Email is required' },
       });
     }
-    const result = await authService.requestPasswordReset({ email });
-    return reply.send(result);
+    try {
+      const result = await authService.requestPasswordReset({ email });
+      return reply.send(result);
+    } catch (err) {
+      if (err.code === 'RESET_EMAIL_NOT_CONFIGURED') {
+        return reply.status(503).send({ error: { code: 'RESET_EMAIL_NOT_CONFIGURED', message: 'Password-reset email is unavailable. Please contact your administrator.' } });
+      }
+      return reply.status(503).send({ error: { code: 'RESET_UNAVAILABLE', message: 'Password reset is temporarily unavailable. Please try again.' } });
+    }
   });
 
   // Confirm Password Reset
-  fastify.post('/auth/reset-password-confirm', async (req, reply) => {
+  fastify.post('/auth/reset-password-confirm', { onRequest: [resetHeaders, resetConfirmLimit] }, async (req, reply) => {
     const { email, resetToken, newPassword } = req.body || {};
     try {
       const result = await authService.confirmPasswordReset({ email, resetToken, newPassword });
       return reply.send(result);
     } catch (err) {
-      return reply.status(err.statusCode || 400).send({
-        error: { code: 'RESET_FAILED', message: err.message },
+      const invalidLink = err.code === 'RESET_LINK_INVALID';
+      const weakPassword = err.code === 'PASSWORD_TOO_SHORT';
+      return reply.status(invalidLink || weakPassword ? 400 : 503).send({
+        error: {
+          code: weakPassword ? 'PASSWORD_TOO_SHORT' : 'RESET_FAILED',
+          message: weakPassword ? 'Password must be at least 8 characters long'
+            : invalidLink ? 'This reset link is invalid, expired, or already used. Request a new reset link.'
+              : 'Password reset is temporarily unavailable. Please try again.',
+        },
       });
     }
   });

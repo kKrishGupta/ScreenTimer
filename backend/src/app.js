@@ -21,6 +21,12 @@ import analyticsRoutes from './modules/analytics/analytics.routes.js';
 import privacyRoutes from './modules/privacy/privacy.routes.js';
 import { readSessionToken, SESSION_COOKIE_NAME } from './modules/auth/session-cookie.js';
 
+// Chromium extension IDs are exactly 32 characters from the a-p alphabet.
+// Extension requests still authenticate enrollment with a one-time token and
+// subsequent device calls with a device secret. Session-cookie mutations keep
+// using the stricter CSRF origin check below.
+const CHROMIUM_EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
+
 /**
  * Builds the Fastify application without starting a listener, so tests can use
  * `app.inject()` with an injected (real or fake) Prisma client.
@@ -33,9 +39,24 @@ import { readSessionToken, SESSION_COOKIE_NAME } from './modules/auth/session-co
 export async function buildApp({ config, prisma, logger }) {
   const app = Fastify({
     trustProxy: Boolean(config.trustProxy),
-    logger: logger ?? {
+    logger: logger === false ? false : {
       level: config.logLevel,
-      redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]'],
+      ...logger,
+      redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]',
+        'req.body.resetToken', 'req.body.token', 'req.body.password', 'req.body.newPassword',
+        'resetToken', 'token', 'password', 'newPassword'],
+      serializers: {
+        req(request) {
+          // Query strings may contain reset credentials from legacy email links.
+          return {
+            method: request.method,
+            url: request.url.split('?')[0],
+            hostname: request.hostname,
+            remoteAddress: request.ip,
+            remotePort: request.socket?.remotePort,
+          };
+        },
+      },
     },
     bodyLimit: 1024 * 1024, // 1 MiB: ample for a 500-event batch, bounded against abuse.
   });
@@ -55,9 +76,10 @@ export async function buildApp({ config, prisma, logger }) {
   // Shared contract schemas are registered once and referenced by $id from route schemas.
   app.addSchema(activityEventSchema);
 
-  await app.register(helmet, { global: true });
+  await app.register(helmet, { global: true, referrerPolicy: { policy: 'no-referrer' } });
   await app.register(cors, {
-    origin: (origin, callback) => callback(null, !origin || config.corsOrigins.includes(origin)),
+    origin: (origin, callback) => callback(null,
+      !origin || config.corsOrigins.includes(origin) || CHROMIUM_EXTENSION_ORIGIN.test(origin)),
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   });
@@ -72,7 +94,12 @@ export async function buildApp({ config, prisma, logger }) {
       return reply.code(403).send({ error: { code: 'CSRF_ORIGIN_REJECTED', message: 'This request origin is not allowed.' } });
     }
   });
-  app.addHook('onRequest', createRateLimiter({ maxRequests: 200 }));
+  app.addHook('onRequest', createRateLimiter({
+    maxRequests: 200,
+    // Recovery has stricter, independent route limits. Background device sync
+    // and dashboard polling must not exhaust the recovery request budget.
+    excludedPaths: ['/api/v1/health', '/api/v1/auth/reset-password-request', '/api/v1/auth/reset-password-confirm'],
+  }));
 
   await app.register(
     async (api) => {

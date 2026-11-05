@@ -28,12 +28,13 @@ export function setAuthToken() { clearLegacyTokens(); }
 export function getAuthToken() { return null; }
 
 export class ApiError extends Error {
-  constructor(message, { status = 0, code = 'NETWORK_ERROR', body } = {}) {
+  constructor(message, { status = 0, code = 'NETWORK_ERROR', body, retryAfterSeconds = 0 } = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.body = body;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -77,6 +78,7 @@ async function request(path, { method = 'GET', body, signal, acceptStatuses = []
     status: res.status,
     code: resBody?.error?.code ?? 'HTTP_ERROR',
     body: resBody,
+    retryAfterSeconds: res.status === 429 ? Math.max(0, Number(res.headers.get('Retry-After')) || 0) : 0,
   });
 }
 
@@ -117,7 +119,7 @@ export const api = {
   login: (credentials, opts = {}) => postJson('/auth/login', credentials, opts),
   register: (details, opts = {}) => postJson('/auth/register', details, opts),
   logout: (opts = {}) => postJson('/auth/logout', {}, opts),
-  requestPasswordReset: (email, opts = {}) => postJson('/auth/reset-password-request', { email }, opts),
+  requestPasswordReset: (email, opts = {}) => postJson('/auth/reset-password-request', { email }, { timeoutMs: 45000, ...opts }),
   confirmPasswordReset: (details, opts = {}) => postJson('/auth/reset-password-confirm', details, opts),
   acceptInvitation: (details, opts = {}) => postJson('/auth/invitations/accept', details, opts),
   me: (opts = {}) => getJson('/auth/me', opts),

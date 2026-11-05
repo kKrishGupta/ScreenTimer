@@ -48,6 +48,11 @@ function AdminOnly({ children }) {
   return children;
 }
 
+function DigitalWellbeingRoute() {
+  const { user } = useAuth();
+  return user?.role === 'EMPLOYEE' ? <TimelinePage /> : <ReportsPage />;
+}
+
 function ProtectedRoutes() {
   const { loading, isAuthenticated } = useAuth();
   const location = useLocation();
@@ -63,7 +68,8 @@ export default function App() {
         <Route path="login" element={<PublicOnly><LoginPage /></PublicOnly>} />
         <Route path="register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
         <Route path="forgot-password" element={<PublicOnly><ForgotPasswordPage /></PublicOnly>} />
-        <Route path="reset-password" element={<PublicOnly><ResetPasswordPage /></PublicOnly>} />
+        {/* Capture and scrub reset credentials before the session lookup finishes. */}
+        <Route path="reset-password" element={<ResetPasswordPage />} />
         {/* Invitation acceptance must remain reachable even when an administrator
             is signed in, because invitation links are often opened on the same
             browser that created them. */}
@@ -88,7 +94,7 @@ export default function App() {
         <Route path="time-planner" element={<AdminOnly><SchedulePage /></AdminOnly>} />
         <Route path="schedule" element={<AdminOnly><SchedulePage /></AdminOnly>} />
         <Route path="reports" element={<AdminOnly><ReportsPage /></AdminOnly>} />
-        <Route path="digital-wellbeing" element={<TimelinePage />} />
+        <Route path="digital-wellbeing" element={<DigitalWellbeingRoute />} />
         <Route path="policies" element={<AdminOnly><FamilyPoliciesPage /></AdminOnly>} />
         <Route path="family-policies" element={<AdminOnly><FamilyPoliciesPage /></AdminOnly>} />
         <Route path="policies/declarative-rules" element={<AdminOnly><DeclarativeRulesPage /></AdminOnly>} />

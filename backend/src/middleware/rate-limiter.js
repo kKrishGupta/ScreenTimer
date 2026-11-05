@@ -24,7 +24,7 @@ export function createRateLimiter({
   }
 
   return async function rateLimitHook(req, reply) {
-    if (excludedPaths.some((p) => req.url.startsWith(p))) {
+    if (excludedPaths.includes(req.url.split('?')[0])) {
       return;
     }
 

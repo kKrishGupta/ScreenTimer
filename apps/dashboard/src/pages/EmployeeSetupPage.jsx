@@ -10,6 +10,48 @@ const WINDOWS_PACKAGE_URL = '/downloads/digitalpulse-windows-agent.zip';
 const CHROME_PACKAGE_URL = '/downloads/digitalpulse-chrome-extension.zip';
 const EDGE_PACKAGE_URL = '/downloads/digitalpulse-edge-extension.zip';
 
+const PACKAGE_FILE_NAMES = {
+  windows: 'digitalpulse-windows-agent.zip',
+  chrome: 'digitalpulse-chrome-extension.zip',
+  edge: 'digitalpulse-edge-extension.zip',
+};
+
+const SHA256_LINE = /^[a-f0-9]{64}(?:\s+\*?[^\s]+)?\s*$/i;
+
+function deviceBackendUrl() {
+  const configured = String(import.meta.env.VITE_DEVICE_BACKEND_URL || '').trim();
+  if (configured) return configured.replace(/\/$/, '');
+  if (['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)) return 'http://127.0.0.1:3001';
+  return window.location.origin;
+}
+
+async function checkPublishedPackage(url, signal) {
+  // CDNs do not consistently support HEAD or expose Content-Length. The small
+  // checksum sidecar is the portable check; HEAD protects against SPA HTML.
+  const checksumRequest = fetch(`${url}.sha256`, {
+    headers: { Accept: 'text/plain' },
+    signal,
+    cache: 'no-store',
+  }).then(async (response) => {
+    if (!response.ok || /text\/html/i.test(response.headers.get('content-type') || '')) return false;
+    return SHA256_LINE.test((await response.text()).trim());
+  }).catch(() => false);
+
+  const packageRequest = fetch(url, {
+    method: 'HEAD',
+    signal,
+    cache: 'no-store',
+  }).then((response) => {
+    if (!response.ok) return false;
+    return !/text\/html|application\/json/i.test(response.headers.get('content-type') || '');
+  }).catch(() => false);
+
+  const [checksumExists, packageExists] = await Promise.all([checksumRequest, packageRequest]);
+  if (checksumExists && packageExists) return 'available';
+  if (checksumExists || packageExists) return 'unverified';
+  return 'unavailable';
+}
+
 function monitoringMessage(reason) {
   return ({
     USER_CONSENT_REQUIRED: 'Your consent is required.',
@@ -89,20 +131,29 @@ function DeviceStatus({ title, device, installStarted }) {
   );
 }
 
-function InstallationCard({ title, packageUrl, packageState, onStarted, instructionsId, platform }) {
+function InstallationCard({ title, packageUrl, packageState, fileName, onStarted, instructionsId, platform }) {
+  const checking = packageState === 'checking';
+  const verified = packageState === 'available';
+  const unavailable = packageState === 'unavailable';
+
   return (
     <Card title={title}>
       <p className="text-sm text-slate-400">Download the independent {platform} package, extract it, then follow its README. Installation and enrollment do not enable monitoring.</p>
       <div className="mt-4 flex flex-wrap gap-2">
-        {packageState === 'available' ? (
-          <a className="inline-flex items-center rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500" href={packageUrl} download>{title}</a>
-        ) : (
-          <Button disabled title="Package availability must be confirmed before downloading." className="bg-slate-700 text-slate-300">{title} ({packageState === 'checking' ? 'Checking…' : 'Unavailable'})</Button>
-        )}
+        <a
+          className={`inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-white ${unavailable ? 'bg-amber-700 hover:bg-amber-600' : 'bg-sky-600 hover:bg-sky-500'}`}
+          href={packageUrl}
+          download={fileName}
+          onClick={onStarted}
+        >
+          {checking ? `${title} (checking…)` : unavailable ? `Try ${title} download` : title}
+        </a>
         <a className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/5" href={`#${instructionsId}`}>Read installation instructions</a>
       </div>
-      {packageState === 'unavailable' && <p className="mt-3 text-xs text-amber-200">The {platform} download could not be verified. Ask your administrator for the approved package or retry the package check.</p>}
-      {packageState === 'available' && <a href={`${packageUrl}.sha256`} download className="mt-3 block text-xs text-sky-400 underline">Download {platform} SHA-256 checksum</a>}
+      {packageState === 'unverified' && <p className="mt-3 text-xs text-amber-200">The download exists, but this browser could not complete every verification check. Download it and compare the published SHA-256 checksum.</p>}
+      {unavailable && <p className="mt-3 text-xs text-amber-200">Automatic verification failed. You can still try the direct download. If it opens a web page instead of downloading a ZIP, ask your administrator to republish the employee packages.</p>}
+      {verified && <p className="mt-3 text-xs text-emerald-300">Package and published checksum are available.</p>}
+      {!checking && <a href={`${packageUrl}.sha256`} download={`${fileName}.sha256`} className="mt-3 block text-xs text-sky-400 underline">Download {platform} SHA-256 checksum</a>}
       <button type="button" onClick={onStarted} className="mt-3 block text-xs text-slate-400 underline decoration-slate-600 underline-offset-2">I have started installation</button>
     </Card>
   );
@@ -134,6 +185,8 @@ export default function EmployeeSetupPage() {
   const settings = !monitoringError && monitoringData?.settings;
   const gate = !monitoringError && monitoringData?.monitoring;
   const monitoringAuthorized = gate?.allowed === true && Date.parse(gate.allowedUntil || '') > now;
+  const backendUrl = deviceBackendUrl();
+  const remoteBackend = !/^http:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?)(?::\d+)?$/i.test(backendUrl);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -148,17 +201,12 @@ export default function EmployeeSetupPage() {
   useEffect(() => {
     const controller = new AbortController();
     setPackageAvailability({ windows: 'checking', chrome: 'checking', edge: 'checking' });
-    const isPublishedPackage = async (url) => {
-      try {
-        const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]), cache: 'no-store' });
-        const type = response.headers.get('content-type') || '';
-        const size = Number(response.headers.get('content-length'));
-        return response.ok && /zip|octet-stream/i.test(type) && size > 0 ? 'available' : 'unavailable';
-      } catch {
-        return 'unavailable';
-      }
-    };
-    Promise.all([isPublishedPackage(WINDOWS_PACKAGE_URL), isPublishedPackage(CHROME_PACKAGE_URL), isPublishedPackage(EDGE_PACKAGE_URL)])
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
+    Promise.all([
+      checkPublishedPackage(WINDOWS_PACKAGE_URL, signal),
+      checkPublishedPackage(CHROME_PACKAGE_URL, signal),
+      checkPublishedPackage(EDGE_PACKAGE_URL, signal),
+    ])
       .then(([windows, chrome, edge]) => { if (!controller.signal.aborted) setPackageAvailability({ windows, chrome, edge }); });
     return () => controller.abort();
   }, [packageCheck]);
@@ -227,6 +275,12 @@ export default function EmployeeSetupPage() {
         <p className="mt-1 text-amber-100/80">The default backend is http://127.0.0.1:3001 and must run on this computer. Employees on separate computers need an administrator-provided HTTPS deployment.</p>
       </div>
 
+      <Card title="Connection target for this installation">
+        <p className="text-sm text-slate-300">Use this exact backend origin when enrolling the downloaded agent or extension:</p>
+        <code className="mt-2 block overflow-x-auto rounded-lg border border-white/10 bg-surface-950 p-3 text-xs text-sky-300">{backendUrl}</code>
+        <p className="mt-2 text-xs text-slate-400">This value comes from the approved dashboard deployment{remoteBackend ? '. The Windows agent must explicitly allow its HTTPS remote backend in the terminal session.' : ' and points to the backend on this computer.'}</p>
+      </Card>
+
       <Card title="What DigitalPulse collects">
         <p className="text-sm leading-6 text-slate-300">When the Windows agent is installed, enrolled, and running, it records foreground application names, active and idle intervals, and device heartbeats. When the browser extension is installed, enrolled, and running, it records foreground website domains and their active durations.</p>
         <p className="mt-2 text-sm text-slate-400">DigitalPulse does not collect keystrokes, passwords, page contents, private messages, clipboard contents, or credentials. Time while the device is locked, idle, or offline is not counted as active work.</p>
@@ -243,9 +297,9 @@ export default function EmployeeSetupPage() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <InstallationCard title="Install Windows Agent" platform="Windows" packageUrl={WINDOWS_PACKAGE_URL} packageState={packageAvailability.windows} onStarted={() => markInstallStarted('windows')} instructionsId="windows-installation-instructions" />
-        <InstallationCard title="Install Chrome Extension" platform="Chrome" packageUrl={CHROME_PACKAGE_URL} packageState={packageAvailability.chrome} onStarted={() => markInstallStarted('chrome')} instructionsId="chrome-installation-instructions" />
-        <InstallationCard title="Install Edge Extension" platform="Edge" packageUrl={EDGE_PACKAGE_URL} packageState={packageAvailability.edge} onStarted={() => markInstallStarted('edge')} instructionsId="edge-installation-instructions" />
+        <InstallationCard title="Install Windows Agent" platform="Windows" fileName={PACKAGE_FILE_NAMES.windows} packageUrl={WINDOWS_PACKAGE_URL} packageState={packageAvailability.windows} onStarted={() => markInstallStarted('windows')} instructionsId="windows-installation-instructions" />
+        <InstallationCard title="Install Chrome Extension" platform="Chrome" fileName={PACKAGE_FILE_NAMES.chrome} packageUrl={CHROME_PACKAGE_URL} packageState={packageAvailability.chrome} onStarted={() => markInstallStarted('chrome')} instructionsId="chrome-installation-instructions" />
+        <InstallationCard title="Install Edge Extension" platform="Edge" fileName={PACKAGE_FILE_NAMES.edge} packageUrl={EDGE_PACKAGE_URL} packageState={packageAvailability.edge} onStarted={() => markInstallStarted('edge')} instructionsId="edge-installation-instructions" />
       </div>
       <Button onClick={() => setPackageCheck((current) => current + 1)}>Recheck downloads</Button>
 
@@ -274,6 +328,8 @@ export default function EmployeeSetupPage() {
             <ol className="mt-2 list-decimal space-y-1 pl-5">
               <li>Download the approved Windows package when it is available and unzip it.</li>
               <li>Open PowerShell in the extracted <code>digitalpulse-windows-agent</code> folder. Follow <code>README.txt</code> to enroll using your Windows token.</li>
+              {remoteBackend && <li>In that PowerShell window, run <code>$env:DP_ALLOW_REMOTE_BACKEND='true'</code>. Then enroll with <code>--server {backendUrl}</code>. Keep this setting in the terminal session when starting the agent.</li>}
+              {!remoteBackend && <li>Enroll with <code>--server {backendUrl}</code>.</li>}
               <li>Run <code>.\dp-user-agent.exe --status</code> for local status. Run the agent when ready to connect; it stays paused until the server authorizes collection.</li>
               <li>The activity buffer is stored in <code>%LOCALAPPDATA%\DigitalPulse</code>. Stop with Ctrl+C and retain this folder when upgrading.</li>
             </ol>
@@ -283,6 +339,7 @@ export default function EmployeeSetupPage() {
             <ol className="mt-2 list-decimal space-y-1 pl-5">
               <li>Download and extract the Chrome ZIP.</li>
               <li>Open <code>chrome://extensions</code>, enable Developer mode, select <span className="font-medium">Load unpacked</span>, and choose the extracted <code>digitalpulse-chrome-extension</code> folder containing <code>manifest.json</code>.</li>
+              <li>Open the extension popup, expand <span className="font-medium">Backend settings</span>, save <code>{backendUrl}</code>, then paste your browser enrollment token.</li>
               <li>Pin DigitalPulse. Paste your browser token in the popup and select Enroll. Check its heartbeat and monitoring status separately.</li>
             </ol>
           </section>
@@ -291,6 +348,7 @@ export default function EmployeeSetupPage() {
             <ol className="mt-2 list-decimal space-y-1 pl-5">
               <li>Download and extract the Edge ZIP.</li>
               <li>Open <code>edge://extensions</code>, enable Developer mode, select <span className="font-medium">Load unpacked</span>, and choose the extracted <code>digitalpulse-edge-extension</code> folder containing <code>manifest.json</code>.</li>
+              <li>Open the extension popup, save <code>{backendUrl}</code> under <span className="font-medium">Backend settings</span>, then use the Edge-specific browser token.</li>
               <li>Pin DigitalPulse. Generate a separate browser token, paste it in the popup, and select Enroll. Chrome and Edge enroll independently.</li>
             </ol>
           </section>

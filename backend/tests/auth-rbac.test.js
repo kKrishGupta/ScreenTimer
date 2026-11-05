@@ -372,6 +372,8 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     const config = loadConfig({ DATABASE_URL: 'postgresql://x:y@localhost:5433/dp' });
     const prisma = fakePrisma();
     const app = await buildApp({ config, prisma, logger: false });
+    let resetToken;
+    app.authService.emailService = { configured: true, async sendPasswordResetEmail(message) { resetToken = message.resetToken; } };
 
     await app.inject({
       method: 'POST',
@@ -386,7 +388,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
       payload: { email: 'dan@family.local' },
     });
     assert.equal(reqRes.statusCode, 200);
-    const { resetToken } = reqRes.json();
+    assert.equal('resetToken' in reqRes.json(), false);
     assert.ok(resetToken);
 
     // 2. Confirm reset

@@ -290,27 +290,32 @@ describe('dashboard shell and navigation', () => {
     localStorage.removeItem('dp_install_started_employee-1');
   });
 
-  it('offers three independent verified downloads and rejects a failed or HTML package response', async () => {
+  it('offers direct downloads and reports failed or HTML verification without blocking employees', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
       const u = String(url);
       if (u.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'employee-1', role: 'EMPLOYEE' } }), { status: 200 });
       if (u.startsWith('/downloads/')) {
+        if (u.endsWith('.sha256')) {
+          if (u.includes('chrome')) return new Response('', { status: 404 });
+          return new Response(`${'a'.repeat(64)}  package.zip\n`, { status: 200, headers: { 'content-type': 'text/plain' } });
+        }
         expect(options.method).toBe('HEAD');
         if (u.includes('chrome')) return new Response(null, { status: 404 });
-        if (u.includes('edge')) return new Response(null, { status: 200, headers: { 'content-type': 'text/html', 'content-length': '1200' } });
-        return new Response(null, { status: 200, headers: { 'content-type': 'application/zip', 'content-length': '1024' } });
+        if (u.includes('edge')) return new Response(null, { status: 200, headers: { 'content-type': 'text/html' } });
+        return new Response(null, { status: 200, headers: { 'content-type': 'application/zip' } });
       }
       return defaultRouterFetch(url, options);
     });
     renderAt('/employee-setup');
     expect(await screen.findByRole('link', { name: 'Install Windows Agent' })).toHaveAttribute('href', '/downloads/digitalpulse-windows-agent.zip');
-    expect(await screen.findByRole('button', { name: 'Install Chrome Extension (Unavailable)' })).toBeDisabled();
-    expect(await screen.findByRole('button', { name: 'Install Edge Extension (Unavailable)' })).toBeDisabled();
-    expect(screen.queryByRole('link', { name: 'Install Chrome Extension' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Install Edge Extension' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Try Install Chrome Extension download' })).toHaveAttribute('href', '/downloads/digitalpulse-chrome-extension.zip');
+    expect(await screen.findByRole('link', { name: 'Install Edge Extension' })).toHaveAttribute('href', '/downloads/digitalpulse-edge-extension.zip');
+    expect(screen.getByText(/Automatic verification failed/)).toBeInTheDocument();
+    expect(screen.getByText(/could not complete every verification check/)).toBeInTheDocument();
     const calls = globalThis.fetch.mock.calls.map(([url]) => String(url));
     expect(calls).toContain('/downloads/digitalpulse-chrome-extension.zip');
     expect(calls).toContain('/downloads/digitalpulse-edge-extension.zip');
+    expect(calls).toContain('/downloads/digitalpulse-windows-agent.zip.sha256');
   });
 
   it('creates and copies a scoped token once while keeping monitoring paused', async () => {

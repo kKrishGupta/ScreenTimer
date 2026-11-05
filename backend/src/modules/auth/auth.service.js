@@ -10,8 +10,15 @@ let lastLoginAttemptCleanupAt = 0;
 
 // In-memory session store (works standalone and caches DB sessions)
 const inMemorySessions = new Map();
-// Password reset tokens (dev-friendly, expires in 30 minutes)
+// Hashed reset credentials for development-only storage fallback.
 const resetTokens = new Map();
+
+function invalidResetLink() {
+  const error = new Error('Invalid, expired, or already used password reset token');
+  error.statusCode = 400;
+  error.code = 'RESET_LINK_INVALID';
+  return error;
+}
 
 export const Roles = {
   SUPER_ADMIN: 'SUPER_ADMIN',
@@ -805,13 +812,21 @@ export class AuthService {
   /**
    * Requests a password reset token.
    * Produces an expiring, single-use reset token with secure storage (SHA-256 hash).
-   * In production, the raw token is delivered via email and never exposed in the API response.
+   * The raw token is delivered only via email, never in API responses.
    */
   async requestPasswordReset({ email }) {
-    const cleanEmail = email?.toLowerCase().trim();
+    const cleanEmail = typeof email === 'string' ? email.toLowerCase().trim() : '';
     if (!cleanEmail) {
       const err = new Error('Email is required');
       err.statusCode = 400;
+      throw err;
+    }
+    if (!this.emailService.configured) {
+      // Fail identically for known and unknown accounts; never return a token
+      // as an alternative to private email delivery.
+      const err = new Error('Password reset is temporarily unavailable');
+      err.statusCode = 503;
+      err.code = 'RESET_EMAIL_NOT_CONFIGURED';
       throw err;
     }
 
@@ -830,11 +845,13 @@ export class AuthService {
     // Always generate secure random token
     const resetToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+    const expiresInMinutes = this.config.passwordResetTtlMinutes ?? 30;
+    const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
     const orgId = user?.organizationId || '00000000-0000-0000-0000-000000000000';
 
     const isProduction = this.isProduction;
+    let persisted = false;
     if (user && this.prisma?.passwordResetToken?.create) {
       try {
         await this.prisma.passwordResetToken.create({
@@ -844,6 +861,7 @@ export class AuthService {
             expiresAt,
           },
         });
+        persisted = true;
       } catch {
         if (isProduction) {
           const err = new Error('Password reset is temporarily unavailable');
@@ -858,7 +876,7 @@ export class AuthService {
     }
 
     // In-memory reset state is development/test-only and never used in production.
-    if (!isProduction) {
+    if (!isProduction && user && !persisted) {
       resetTokens.set(tokenHash, {
         tokenHash,
         email: user?.email || cleanEmail,
@@ -884,10 +902,12 @@ export class AuthService {
         await this.emailService.sendPasswordResetEmail({
           to: user.email,
           resetToken,
+          expiresInMinutes,
           resetUrl: this.config.passwordResetUrl || process.env.PASSWORD_RESET_URL || 'http://localhost:5173/reset-password',
         });
-      } catch (error) {
-        this.logger.error?.({ err: error, email: cleanEmail }, 'Password reset email delivery failed');
+      } catch {
+        // SMTP errors can embed the complete email, including its reset link.
+        this.logger.error?.('Password reset email delivery failed');
         const err = new Error('Password reset is temporarily unavailable');
         err.statusCode = 503;
         throw err;
@@ -896,13 +916,8 @@ export class AuthService {
 
     const response = {
       success: true,
-      message: 'If the account exists, a password reset instruction has been processed.',
+      message: 'If an account exists for that email, check your inbox and spam folder for a password-reset link.',
     };
-
-    // Only expose reset token if in non-production environment for test/dev usability without SMTP
-    if (!isProduction && !emailProviderConfigured && user) {
-      response.resetToken = resetToken;
-    }
 
     return response;
   }
@@ -911,10 +926,14 @@ export class AuthService {
    * Confirms password reset using expiring, single-use reset token.
    */
   async confirmPasswordReset({ email, resetToken, newPassword }) {
-    const cleanEmail = email?.toLowerCase().trim();
-    if (!resetToken || !newPassword) {
-      const err = new Error('Reset token and new password are required');
+    const cleanEmail = typeof email === 'string' ? email.toLowerCase().trim() : '';
+    if (typeof resetToken !== 'string' || !/^[a-f0-9]{64}$/.test(resetToken)) {
+      throw invalidResetLink();
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      const err = new Error('Password must be at least 8 characters long');
       err.statusCode = 400;
+      err.code = 'PASSWORD_TOO_SHORT';
       throw err;
     }
 
@@ -948,32 +967,26 @@ export class AuthService {
       }
     }
 
-    if (!record || record.usedAt || new Date(record.expiresAt) < new Date()) {
-      const err = new Error('Invalid, expired, or already used password reset token');
-      err.statusCode = 400;
-      throw err;
+    if (!record || record.usedAt || !Number.isFinite(new Date(record.expiresAt).getTime()) || new Date(record.expiresAt) <= new Date()) {
+      throw invalidResetLink();
     }
 
     if (cleanEmail && record.email && cleanEmail !== record.email.toLowerCase()) {
-      const err = new Error('Reset token does not match the supplied account');
-      err.statusCode = 400;
-      throw err;
+      throw invalidResetLink();
     }
 
     const { hash, salt } = hashPassword(newPassword);
     const targetUserId = record.userId;
     const consumedAt = new Date();
 
-    if (this.prisma?.$transaction && this.prisma.passwordResetToken?.updateMany) {
+    if (record.id && this.prisma?.$transaction && this.prisma.passwordResetToken?.updateMany) {
       await this.prisma.$transaction(async (tx) => {
         const consumed = await tx.passwordResetToken.updateMany({
-          where: { tokenHash, usedAt: null },
+          where: { tokenHash, usedAt: null, expiresAt: { gt: consumedAt } },
           data: { usedAt: consumedAt },
         });
         if (consumed.count !== 1) {
-          const err = new Error('Invalid, expired, or already used password reset token');
-          err.statusCode = 400;
-          throw err;
+          throw invalidResetLink();
         }
         await tx.user.update({
           where: { id: targetUserId },
@@ -986,12 +999,19 @@ export class AuthService {
           });
         }
       });
-    } else if (this.prisma?.user?.update && !isProduction) {
+    } else if (this.prisma?.user?.update && !isProduction && resetTokens.get(tokenHash) === record) {
+      // Claim in-memory tokens before awaiting the update to reject concurrent reuse.
+      record.usedAt = consumedAt;
       await this.prisma.user.update({
         where: { id: targetUserId },
         data: { passwordHash: hash, passwordSalt: salt },
       });
-      record.usedAt = consumedAt;
+      if (this.prisma.userSession?.updateMany) {
+        await this.prisma.userSession.updateMany({
+          where: { userId: targetUserId, revokedAt: null },
+          data: { revokedAt: consumedAt },
+        });
+      }
     } else {
       const err = new Error('Password reset is temporarily unavailable');
       err.statusCode = 503;

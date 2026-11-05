@@ -34,18 +34,22 @@ export function createEmailService(config = {}) {
     port: Number(config.smtpPort || process.env.SMTP_PORT || 465),
     secure: String(config.smtpSecure ?? process.env.SMTP_SECURE ?? 'true').toLowerCase() === 'true',
     auth: { user, pass: String(pass).replace(/\s+/g, '') },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+    dnsTimeout: 10000,
   });
 
   return {
     configured: true,
-    async sendPasswordResetEmail({ to, resetToken, resetUrl }) {
+    async sendPasswordResetEmail({ to, resetToken, resetUrl, expiresInMinutes = 30 }) {
       const link = `${resetUrl}?token=${encodeURIComponent(resetToken)}&email=${encodeURIComponent(to)}`;
       await transporter.sendMail({
         from: config.smtpFrom || process.env.SMTP_FROM || user,
         to,
         subject: 'Reset your DigitalPulse password',
-        text: `Use this link to reset your DigitalPulse password. It expires in 30 minutes:\n\n${link}\n\nIf you did not request this, you can ignore this email.`,
-        html: `<p>Use the link below to reset your DigitalPulse password. It expires in 30 minutes.</p><p><a href="${link}">Reset your password</a></p><p>If you did not request this, you can ignore this email.</p>`,
+        text: `Use this link to reset your DigitalPulse password. It expires in ${expiresInMinutes} minutes:\n\n${link}\n\nIf you did not request this, you can ignore this email.`,
+        html: `<p>Use the link below to reset your DigitalPulse password. It expires in ${expiresInMinutes} minutes.</p><p><a href="${link}" referrerpolicy="no-referrer" rel="noreferrer">Reset your password</a></p><p>If you did not request this, you can ignore this email.</p>`,
       });
     },
     async sendInvitationEmail({ to, token, invitationUrl }) {

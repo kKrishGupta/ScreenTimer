@@ -1,4 +1,14 @@
-import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+
+// Workspace scripts run with `backend/` as cwd, while direct local launches
+// often run from the repository root. Resolve env files from this module so
+// configuration never depends on the directory from which npm was invoked.
+const backendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const repositoryRoot = path.resolve(backendRoot, '..');
+dotenv.config({ path: path.join(repositoryRoot, '.env'), quiet: true });
+dotenv.config({ path: path.join(backendRoot, '.env'), quiet: true });
 
 const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '0.0.0.0']);
 const LOG_LEVELS = new Set(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']);
@@ -77,6 +87,10 @@ export function loadConfig(env = process.env) {
   const passwordResetUrl = env.PASSWORD_RESET_URL || (publicAppUrl
     ? `${publicAppUrl}/reset-password`
     : 'http://localhost:5173/reset-password');
+  const passwordResetTtlMinutes = Number(env.PASSWORD_RESET_TTL_MINUTES ?? 30);
+  if (!Number.isInteger(passwordResetTtlMinutes) || passwordResetTtlMinutes < 1 || passwordResetTtlMinutes > 60) {
+    throw new ConfigError('PASSWORD_RESET_TTL_MINUTES must be an integer between 1 and 60');
+  }
 
   if (nodeEnv === 'production') {
     if (!publicAppUrl) throw new ConfigError('PUBLIC_APP_URL is required in production');
@@ -125,6 +139,7 @@ export function loadConfig(env = process.env) {
     smtpPassword: env.SMTP_PASS ?? env.SMTP_PASSWORD ?? env.GMAIL_APP_PASSWORD ?? env.google_password,
     smtpFrom: env.EMAIL_FROM ?? env.SMTP_FROM ?? env.SMTP_USER ?? env.GMAIL_USER ?? env.google_email,
     passwordResetUrl,
+    passwordResetTtlMinutes,
     invitationAcceptUrl,
   });
 }

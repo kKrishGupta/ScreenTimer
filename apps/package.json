@@ -4,9 +4,9 @@
   "private": true,
   "description": "DigitalPulse applications container",
   "scripts": {
-    "dev": "npm run dev --prefix dashboard",
-    "start": "npm run dev --prefix dashboard",
-    "build": "npm run build --prefix dashboard"
+    "dev": "npm --prefix .. run dev:dashboard",
+    "start": "npm --prefix .. run dev:dashboard",
+    "build": "npm --prefix .. run build:dashboard"
   }
 }
 

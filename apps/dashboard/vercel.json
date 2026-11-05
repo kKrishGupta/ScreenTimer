@@ -1,4 +1,8 @@
 {
+  "headers": [
+    { "source": "/(.*)", "headers": [{ "key": "Referrer-Policy", "value": "no-referrer" }] },
+    { "source": "/reset-password", "headers": [{ "key": "Cache-Control", "value": "no-store" }] }
+  ],
   "rewrites": [
     {
       "source": "/api/v1/:path*",
