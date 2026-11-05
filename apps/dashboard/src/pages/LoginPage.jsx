@@ -12,30 +12,56 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  async function submit(event) {
-    event.preventDefault();
-    setError('');
-    setBusy(true);
-    setPassword('');
-    try {
-      const result = await login({ email: email.trim(), password }, { remember });
-      const role = result.user.role;
-      const requestedRoute = location.state?.from;
-      const requestedPath = requestedRoute?.pathname;
-      const canResumeInvitation = requestedPath === '/accept-invitation' || requestedPath === '/invitations/accept';
-      const canResumeEmployeePath = role === 'EMPLOYEE' && requestedPath?.startsWith('/employee-portal');
-      const canResumeAdminPath = role !== 'EMPLOYEE' && requestedPath && !requestedPath.startsWith('/employee-portal');
-      const resumePath = canResumeInvitation || canResumeEmployeePath || canResumeAdminPath;
-      const target = resumePath
-        ? `${requestedPath}${requestedRoute.search || ''}${requestedRoute.hash || ''}`
-        : roleDestination(role);
-      navigate(target, { replace: true });
-    } catch {
-      setError('Unable to sign in. Check your credentials and try again.');
-    } finally {
-      setBusy(false);
-    }
+  
+async function submit(event) {
+  event.preventDefault();
+
+  if (busy) return;
+
+  setError('');
+  setBusy(true);
+
+  try {
+    const result = await login(
+      { email: email.trim(), password },
+      { remember }
+    );
+
+    const role = result.user.role;
+    const requestedRoute = location.state?.from;
+    const requestedPath = requestedRoute?.pathname;
+
+    const canResumeInvitation =
+      requestedPath === '/accept-invitation' ||
+      requestedPath === '/invitations/accept';
+
+    const canResumeEmployeePath =
+      role === 'EMPLOYEE' &&
+      requestedPath?.startsWith('/employee-portal');
+
+    const canResumeAdminPath =
+      role !== 'EMPLOYEE' &&
+      requestedPath &&
+      !requestedPath.startsWith('/employee-portal');
+
+    const resumePath =
+      canResumeInvitation ||
+      canResumeEmployeePath ||
+      canResumeAdminPath;
+
+    const target = resumePath
+      ? `${requestedPath}${requestedRoute.search || ''}${requestedRoute.hash || ''}`
+      : roleDestination(role);
+
+    navigate(target, { replace: true });
+
+  } catch {
+    setError('Unable to sign in. Check your credentials and try again.');
+  } finally {
+    setBusy(false);
   }
+}
+
 
   function roleDestination(role) {
     if (role === 'EMPLOYEE') return '/employee-portal';
