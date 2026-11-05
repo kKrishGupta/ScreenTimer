@@ -60,7 +60,12 @@ export default function LoginPage() {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-      {import.meta.env.DEV && <p className="mt-6 text-center text-sm text-slate-400">New organization? <Link className="text-sky-400" to="/register">Create an account</Link></p>}
+      <p className="mt-6 text-center text-sm text-slate-400">
+        New organization?{" "}
+        <Link className="text-sky-400 hover:text-sky-300" to="/register">
+          Create an account
+        </Link>
+      </p>
     </AuthShell>
   );
 }
