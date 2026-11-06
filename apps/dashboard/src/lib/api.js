@@ -63,8 +63,9 @@ async function request(path, { method = 'GET', body, signal, acceptStatuses = []
     });
   } catch (err) {
     if (signal?.aborted) throw err;
-    throw new ApiError('Cannot reach the DigitalPulse service. Check your connection and try again.', {
-      code: err?.name === 'TimeoutError' ? 'TIMEOUT' : 'NETWORK_ERROR',
+    const timedOut = controller.signal.reason?.name === 'TimeoutError' || err?.name === 'TimeoutError';
+    throw new ApiError(timedOut ? 'The DigitalPulse service took too long to respond. It may be starting up. Please try again shortly.' : 'Cannot reach the DigitalPulse service. Check your connection and try again.', {
+      code: timedOut ? 'TIMEOUT' : 'NETWORK_ERROR',
     });
   } finally {
     clearTimeout(timer);
@@ -117,9 +118,9 @@ function toQueryString(params = {}) {
 
 export const api = {
   login: (credentials, opts = {}) => postJson('/auth/login', credentials, opts),
-  organizationLogin: (credentials, opts = {}) => postJson('/organization/login', credentials, opts),
+  organizationLogin: (credentials, opts = {}) => postJson('/organization/login', credentials, { timeoutMs: 45000, ...opts }),
   superAdminLogin: (credentials, opts = {}) => postJson('/super-admin/login', credentials, opts),
-  registerOrganization: (details, opts = {}) => postJson('/organization/register', details, opts),
+  registerOrganization: (details, opts = {}) => postJson('/organization/register', details, { timeoutMs: 45000, ...opts }),
   logout: (opts = {}) => postJson('/auth/logout', {}, opts),
   requestPasswordReset: (email, opts = {}) => postJson('/auth/reset-password-request', { email }, { timeoutMs: 45000, ...opts }),
   confirmPasswordReset: (details, opts = {}) => postJson('/auth/reset-password-confirm', details, opts),

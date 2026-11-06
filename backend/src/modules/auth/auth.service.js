@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { createEmailService } from './email.service.js';
+import { createEmailService, invitationDeliveryError } from './email.service.js';
 
 // In-memory rate limiting for login attempts
 const loginAttempts = new Map();
@@ -1160,6 +1160,7 @@ export class AuthService {
       return link.toString();
     };
     let emailSent = false;
+    let emailError = invitationDeliveryError({ code: 'EMAIL_NOT_CONFIGURED' });
     if (this.emailService?.configured) {
       try {
         await this.emailService.sendInvitationEmail({
@@ -1168,7 +1169,9 @@ export class AuthService {
           invitationUrl: baseUrl,
         });
         emailSent = true;
+        emailError = null;
       } catch (error) {
+        emailError = invitationDeliveryError(error);
         // Do not log provider error details: mail transport errors can contain message content.
         this.logger.warn?.({ invitationId: invitation.id }, 'Invitation email delivery failed');
       }
@@ -1178,6 +1181,7 @@ export class AuthService {
       success: true,
       invitation: { id: invitation.id, email: cleanEmail, role: roleValue, displayName: displayName?.trim() || null },
       emailSent,
+      emailError,
       organizationId,
       expiresAt: expiresAt.toISOString(),
       invitationUrl: makeInvitationUrl(),
@@ -1291,11 +1295,14 @@ export class AuthService {
     const link = new URL(baseUrl);
     link.hash = new URLSearchParams({ token }).toString();
     let emailSent = false;
+    let emailError = invitationDeliveryError({ code: 'EMAIL_NOT_CONFIGURED' });
     if (this.emailService?.configured) {
       try {
         await this.emailService.sendInvitationEmail({ to: invitation.email, token, invitationUrl: baseUrl });
         emailSent = true;
-      } catch {
+        emailError = null;
+      } catch (error) {
+        emailError = invitationDeliveryError(error);
         this.logger.warn?.({ invitationId }, 'Invitation email delivery failed');
       }
     }
@@ -1310,6 +1317,7 @@ export class AuthService {
       organizationId: invitation.organizationId,
       expiresAt: expiresAt.toISOString(),
       emailSent,
+      emailError,
       invitationUrl: link.toString(),
     };
   }

@@ -10,10 +10,12 @@ export default function RegisterPage() {
   const [form, setForm] = useState({ displayName: '', organizationName: '', email: '', password: '', confirmPassword: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState(false);
   const update = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
 
   async function submit(event) {
     event.preventDefault();
+    if (busy || created) return;
     setError('');
     if (form.password !== form.confirmPassword) {
       setError('Passwords do not match.');
@@ -27,11 +29,19 @@ export default function RegisterPage() {
         email: form.email.trim(),
         password: form.password,
       });
-      await login({ email: form.email.trim(), password: form.password }, { loginType: 'admin' });
+      setCreated(true);
+      try {
+        await login({ email: form.email.trim(), password: form.password }, { loginType: 'admin' });
+      } catch {
+        setError('Your organization was created, but automatic sign-in failed. Use Sign in below; do not register again.');
+        return;
+      }
 
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err.message || 'Unable to create the organization.');
+      setError(['TIMEOUT', 'NETWORK_ERROR'].includes(err.code)
+        ? `${err.message} Registration may have completed. Try Sign in before submitting again.`
+        : err.message || 'Unable to create the organization.');
     } finally {
       setBusy(false);
     }
@@ -46,8 +56,8 @@ export default function RegisterPage() {
         <Field label="Password" type="password" value={form.password} onChange={update('password')} required minLength={8} autoComplete="new-password" />
         <Field label="Confirm password" type="password" value={form.confirmPassword} onChange={update('confirmPassword')} required minLength={8} autoComplete="new-password" />
         {error && <ErrorMessage>{error}</ErrorMessage>}
-        <button disabled={busy} className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
-          {busy ? 'Creating organization…' : 'Create organization'}
+        <button disabled={busy || created} className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
+          {created ? 'Organization created' : busy ? 'Creating organization…' : 'Create organization'}
         </button>
       </form>
       <p className="mt-6 text-center text-sm text-slate-400">Already registered? <Link className="text-sky-400" to="/organization/login">Sign in</Link></p>

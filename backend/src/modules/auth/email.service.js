@@ -1,5 +1,15 @@
 import nodemailer from 'nodemailer';
 
+export function invitationDeliveryError(error) {
+  const code = ['EMAIL_NOT_CONFIGURED', 'EAUTH', 'ETIMEDOUT', 'ECONNECTION', 'ECONNREFUSED', 'EDNS', 'EMAIL_RECIPIENT_REJECTED'].includes(error?.code) ? error.code : 'EMAIL_DELIVERY_FAILED';
+  const messages = {
+    EMAIL_NOT_CONFIGURED: 'SMTP credentials are missing. Configure SMTP_USER and SMTP_PASS, then restart the backend.',
+    EAUTH: 'The email provider rejected SMTP authentication. Check the sender credentials or app password.',
+    EMAIL_RECIPIENT_REJECTED: 'The email provider rejected the recipient address. Check the employee email.',
+  };
+  return { code, message: messages[code] || 'The backend could not send the invitation. Check SMTP host, port, network access and provider status, then resend.' };
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
     '&': '&amp;',
@@ -24,7 +34,7 @@ export function createEmailService(config = {}) {
     : (process.env.SMTP_USER || process.env.GMAIL_USER || process.env.google_email);
   const pass = hasExplicitConfig
     ? config.smtpPassword
-    : (process.env.SMTP_PASSWORD || process.env.GMAIL_APP_PASSWORD || process.env.google_password);
+    : (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.GMAIL_APP_PASSWORD || process.env.google_password);
 
   if (!user || !pass) {
     return {
@@ -366,13 +376,18 @@ DigitalPulse Security Team
       const url = new URL(invitationUrl);
       url.hash = new URLSearchParams({ token }).toString();
       const link = url.toString();
-      await transporter.sendMail({
+      const delivery = await transporter.sendMail({
         from: config.smtpFrom || process.env.SMTP_FROM || user,
         to,
         subject: 'You are invited to DigitalPulse',
         text: `You have been invited to DigitalPulse. Accept your invitation here:\n\n${link}`,
-        html: `<p>You have been invited to DigitalPulse.</p><p><a href="${link}">Accept invitation</a></p>`,
+        html: `<p>You have been invited to DigitalPulse.</p><p><a href="${escapeHtml(link)}">Accept invitation</a></p><p>This invitation expires in seven days.</p>`,
       });
+      if (!delivery?.accepted?.some((recipient) => String(recipient.address || recipient).toLowerCase() === to.toLowerCase())) {
+        const error = new Error('SMTP did not accept the invitation recipient');
+        error.code = 'EMAIL_RECIPIENT_REJECTED';
+        throw error;
+      }
     },
     async sendDeviceSetupReminder({ to, setupUrl }) {
       await transporter.sendMail({
