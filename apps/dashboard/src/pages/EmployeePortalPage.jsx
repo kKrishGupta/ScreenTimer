@@ -1,21 +1,23 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../lib/api.js';
 import { useApi } from '../hooks/useApi.js';
-import { Card, PageHeader } from '../components/ui/Card.jsx';
+import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
 import { ErrorState, LoadingState } from '../components/ui/States.jsx';
 import { formatDuration } from '../lib/format.js';
 
 export default function EmployeePortalPage() {
+  const [acknowledging, setAcknowledging] = useState(false);
   const fetchProfile = useCallback(async (opts) => {
     const me = await api.me(opts);
     const user = me?.user || me;
-    const [employee, devices, monitoring] = await Promise.all([
+    const [employee, devices, monitoring, screenMonitoring] = await Promise.all([
       api.employee(user.id, opts),
       api.devices(opts),
       api.myMonitoringStatus(opts),
+      api.myScreenMonitoring(opts),
     ]);
-    return { user, profile: employee?.employee, devices: devices?.devices || [], monitoring };
+    return { user, profile: employee?.employee, devices: devices?.devices || [], monitoring, screenMonitoring };
   }, []);
   const { data, error, loading, reload } = useApi(fetchProfile, { intervalMs: 30000 });
 
@@ -27,6 +29,7 @@ export default function EmployeePortalPage() {
   const analytics = profile?.analytics;
   const hasActivity = Boolean(analytics?.hasData);
   const monitoring = data?.monitoring?.monitoring;
+  const screenMonitoring = data?.screenMonitoring;
   const monitoringLabel = monitoring?.allowed
     ? 'Active'
     : monitoring?.reason
@@ -41,6 +44,12 @@ export default function EmployeePortalPage() {
         title={`Good morning, ${data?.user?.displayName || 'Employee'}!`}
         description="Your workspace, activity, devices, and privacy controls."
       />
+      <div className={`rounded-xl border p-4 ${screenMonitoring?.organizationEnabled ? 'border-sky-500/30 bg-sky-500/5' : 'border-white/10 bg-white/[0.02]'}`}>
+        <p className="font-semibold text-white">Work-screen monitoring notice</p>
+        <p className="mt-1 text-sm text-slate-300">{screenMonitoring?.explanation}</p>
+        <p className="mt-2 text-xs text-slate-400">Schedule: {screenMonitoring?.workingDays?.join(', ')} · {screenMonitoring?.shiftStart}–{screenMonitoring?.shiftEnd} · interval {Math.round((screenMonitoring?.captureIntervalSeconds || 300) / 60)} minutes · retained {screenMonitoring?.retentionDays || 30} days.</p>
+        {screenMonitoring?.acknowledgedAt ? <p className="mt-3 text-sm font-medium text-emerald-300">Acknowledged {new Date(screenMonitoring.acknowledgedAt).toLocaleString()}. Monitoring remains subject to all authorization gates.</p> : <Button className="mt-3" disabled={acknowledging} onClick={async () => { setAcknowledging(true); try { await api.acknowledgeScreenMonitoring(); await reload(); } finally { setAcknowledging(false); } }}>{acknowledging ? 'Saving...' : 'I acknowledge this monitoring notice'}</Button>}
+      </div>
       <div className="grid gap-4 sm:grid-cols-3">
         <Card title="Active time"><p className="text-2xl font-bold text-emerald-400">{hasActivity ? formatDuration(analytics.activeSeconds) : 'No data available'}</p></Card>
         <Card title="Idle time"><p className="text-2xl font-bold text-amber-400">{hasActivity ? formatDuration(analytics.idleSeconds) : 'No data available'}</p></Card>

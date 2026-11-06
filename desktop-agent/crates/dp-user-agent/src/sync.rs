@@ -30,6 +30,15 @@ pub struct MonitoringGate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenMonitoringPolicy {
+    pub allowed: bool,
+    pub reason: Option<String>,
+    pub interval_seconds: u64,
+    pub excluded_applications: Vec<String>,
+    pub visible_indicator: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedUrl {
     scheme: String,
     host: String,
@@ -189,7 +198,7 @@ fn post_batch_response(backend_url: &str, body: &[u8]) -> Result<serde_json::Val
             headers.push(("X-Device-Secret".to_string(), secret.trim().to_string()));
         }
     }
-    let response = request_backend(backend_url, "/api/v1/activity/events/batch", &headers, body)?;
+    let response = request_backend("POST", backend_url, "/api/v1/activity/events/batch", &headers, body)?;
     serde_json::from_slice(&response.body)
         .context("backend returned invalid JSON for activity sync")
 }
@@ -255,6 +264,7 @@ fn parse_local_url(raw: &str) -> Result<(String, u16, String)> {
 }
 
 fn request_backend(
+    method: &str,
     backend_url: &str,
     endpoint: &str,
     headers: &[(String, String)],
@@ -268,7 +278,8 @@ fn request_backend(
 
     #[cfg(windows)]
     {
-        let response = dp_platform_windows::http::post_json(
+        let response = dp_platform_windows::http::request(
+            method,
             &parsed.host,
             parsed.port,
             &path,
@@ -314,7 +325,7 @@ fn request_backend(
         stream.set_read_timeout(Some(Duration::from_secs(10)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         let mut request_headers = format!(
-            "POST {path} HTTP/1.1\r\nHost: {}:{}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            "{method} {path} HTTP/1.1\r\nHost: {}:{}\r\nContent-Length: {}\r\nConnection: close\r\n",
             parsed.host,
             parsed.port,
             body.len()
@@ -369,6 +380,7 @@ pub fn send_startup_heartbeat(backend_url: &str, device: &DeviceInfo) -> Result<
         ("X-Device-Secret".to_string(), secret.trim().to_string()),
     ];
     let response = request_backend(
+        "POST",
         backend_url,
         &format!("/api/v1/devices/{}/heartbeat", device.id),
         &headers,
@@ -429,10 +441,80 @@ pub fn enroll_device_token(
     });
     let body = serde_json::to_vec(&payload)?;
     let headers = vec![("Content-Type".to_string(), "application/json".to_string())];
-    let response = request_backend(backend_url, "/api/v1/devices/enroll", &headers, &body)?;
+    let response = request_backend("POST", backend_url, "/api/v1/devices/enroll", &headers, &body)?;
     let parsed: serde_json::Value = serde_json::from_slice(&response.body)
         .context("failed to parse JSON enrollment response")?;
     extract_device_secret(&parsed)
+}
+
+pub fn fetch_screen_monitoring_policy(
+    backend_url: &str,
+    device: &DeviceInfo,
+) -> Result<ScreenMonitoringPolicy> {
+    let secret = std::env::var("DP_DEVICE_SECRET")
+        .context("device secret is not configured; enroll this agent first")?;
+    let headers = vec![("X-Device-Secret".to_string(), secret.trim().to_string())];
+    let response = request_backend(
+        "GET",
+        backend_url,
+        &format!("/api/v1/screen-monitoring/device-policy?deviceId={}", device.id),
+        &headers,
+        &[],
+    )?;
+    let parsed: serde_json::Value = serde_json::from_slice(&response.body)
+        .context("backend returned invalid screenshot policy JSON")?;
+    let policy = parsed.get("policy").context("screenshot policy response is missing policy")?;
+    Ok(ScreenMonitoringPolicy {
+        allowed: policy.get("allowed").and_then(serde_json::Value::as_bool) == Some(true),
+        reason: policy.get("reason").and_then(serde_json::Value::as_str).map(str::to_owned),
+        interval_seconds: policy.get("intervalSeconds").and_then(serde_json::Value::as_u64).unwrap_or(300).clamp(300, 3600),
+        excluded_applications: policy.get("excludedApplications").and_then(serde_json::Value::as_array).map(|items| items.iter().filter_map(serde_json::Value::as_str).map(str::to_lowercase).collect()).unwrap_or_default(),
+        visible_indicator: policy.get("visibleIndicator").and_then(serde_json::Value::as_bool) != Some(false),
+    })
+}
+
+pub struct ScreenCaptureUpload<'a> {
+    pub capture_key: &'a str,
+    pub captured_at: &'a str,
+    pub width: u32,
+    pub height: u32,
+    pub application_name: &'a str,
+    pub jpeg: &'a [u8],
+}
+
+pub fn upload_screen_capture(
+    backend_url: &str,
+    device: &DeviceInfo,
+    capture: ScreenCaptureUpload<'_>,
+) -> Result<()> {
+    let secret = std::env::var("DP_DEVICE_SECRET")
+        .context("device secret is not configured; enroll this agent first")?;
+    let headers = vec![
+        ("Content-Type".to_string(), "image/jpeg".to_string()),
+        ("X-Device-Secret".to_string(), secret.trim().to_string()),
+        ("X-Capture-Key".to_string(), capture.capture_key.to_string()),
+        ("X-Captured-At".to_string(), capture.captured_at.to_string()),
+        ("X-Image-Width".to_string(), capture.width.to_string()),
+        ("X-Image-Height".to_string(), capture.height.to_string()),
+        ("X-Application-Name".to_string(), capture.application_name.chars().filter(|c| !matches!(c, '\r' | '\n')).take(128).collect()),
+    ];
+    request_backend(
+        "POST",
+        backend_url,
+        &format!("/api/v1/screen-monitoring/captures?deviceId={}", device.id),
+        &headers,
+        capture.jpeg,
+    )?;
+    Ok(())
+}
+
+pub fn report_screen_capture_failure(backend_url: &str, device: &DeviceInfo, code: &str) -> Result<()> {
+    let secret = std::env::var("DP_DEVICE_SECRET")
+        .context("device secret is not configured; enroll this agent first")?;
+    let body = serde_json::to_vec(&serde_json::json!({ "deviceId": device.id, "failureCode": code }))?;
+    let headers = vec![("Content-Type".to_string(), "application/json".to_string()), ("X-Device-Secret".to_string(), secret.trim().to_string())];
+    request_backend("POST", backend_url, "/api/v1/screen-monitoring/failures", &headers, &body)?;
+    Ok(())
 }
 
 fn extract_device_secret(response: &serde_json::Value) -> Result<String> {

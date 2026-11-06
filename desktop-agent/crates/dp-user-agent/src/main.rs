@@ -9,7 +9,7 @@ use dp_core::{
 };
 use dp_platform_windows::{
     get_current_foreground_app, get_current_process_metrics, get_system_idle_duration,
-    ActivityMonitor, PlatformEvent,
+    is_workstation_locked, ActivityMonitor, PlatformEvent,
 };
 use dp_storage::{Storage, StoredActivitySession};
 use std::path::PathBuf;
@@ -22,6 +22,7 @@ use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 mod sync;
+mod screenshot;
 use sync::sync_pending_events;
 
 fn main() -> Result<()> {
@@ -301,6 +302,9 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
 
     let mut monitor = ActivityMonitor::new(config.idle_threshold);
     let mut session_manager = SessionManager::new(device_id);
+    let mut screenshot_scheduler = screenshot::ScreenshotScheduler::new(
+        db_path.parent().unwrap_or_else(|| std::path::Path::new(".")),
+    )?;
 
     let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into());
     let device_info = DeviceInfo {
@@ -332,6 +336,11 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
             }
         }
     };
+    let mut screen_policy = sync::fetch_screen_monitoring_policy(&config.backend_url, &device_info)
+        .unwrap_or_else(|error| {
+            warn!(error = %error, "Screenshot policy unavailable; work-screen capture remains disabled");
+            sync::ScreenMonitoringPolicy { allowed: false, reason: Some("POLICY_UNAVAILABLE".into()), interval_seconds: 300, excluded_applications: Vec::new(), visible_indicator: true }
+        });
     let mut last_sample_at = Utc::now();
     if gate_is_active(&gate, Utc::now()) {
         match sync_pending_events(&mut storage, &config.backend_url, &device_info, 50) {
@@ -426,6 +435,15 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
             }
         }
 
+        let mut effective_screen_policy = screen_policy.clone();
+        if !monitoring_now || is_workstation_locked() {
+            effective_screen_policy.allowed = false;
+        }
+        let foreground_name = get_current_foreground_app()
+            .map(|application| application.executable_name)
+            .unwrap_or_else(|_| "Windows desktop".into());
+        screenshot_scheduler.tick(&effective_screen_policy, &config.backend_url, &device_info, &foreground_name);
+
         // Periodic background synchronization to backend
         if last_sync_time.elapsed() >= config.sync_interval {
             let previous_gate = gate.clone();
@@ -444,6 +462,11 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
                     }
                 }
             };
+            screen_policy = sync::fetch_screen_monitoring_policy(&config.backend_url, &device_info)
+                .unwrap_or_else(|error| {
+                    warn!(error = %error, "Screenshot policy refresh failed; capture paused until policy can be verified");
+                    sync::ScreenMonitoringPolicy { allowed: false, reason: Some("POLICY_UNAVAILABLE".into()), interval_seconds: 300, excluded_applications: Vec::new(), visible_indicator: true }
+                });
             if !gate_is_active(&gate, Utc::now()) && previous_gate.allowed {
                 let end = if gate.reason.as_deref() == Some("OUTSIDE_SCHEDULE") {
                     previous_gate.allowed_until.unwrap_or_else(Utc::now)

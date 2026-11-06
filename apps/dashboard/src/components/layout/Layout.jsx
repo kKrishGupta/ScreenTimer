@@ -25,6 +25,7 @@ const NAV = [
   { to: '/employees', label: 'Employees', icon: UsersIcon },
   { to: '/employee-setup', label: 'My Device', icon: DeviceIcon },
   { to: '/devices', label: 'Organization Devices', icon: ScreenIcon },
+  { to: '/screen-monitoring', label: 'Screen Monitoring', icon: ScreenIcon },
   { to: '/live', label: 'Activity', icon: PulseIcon },
   { to: '/blocked-activity', label: 'Website Blocking', icon: ShieldIcon },
   { to: '/time-planner', label: 'Schedule', icon: CalendarIcon },

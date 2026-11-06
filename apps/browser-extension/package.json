@@ -1,6 +1,6 @@
 {
   "name": "@digitalpulse/browser-extension",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "DigitalPulse Chrome and Edge Manifest V3 browser extension",
   "type": "module",

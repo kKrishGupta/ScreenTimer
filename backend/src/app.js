@@ -161,8 +161,14 @@ export async function buildApp({ config, prisma, logger }) {
           return authMiddleware.authenticateDevice(req, reply);
         }
 
-        // Screen capture ingestion can be called by agent using device secret or authorized user
-        if (urlPath === '/api/v1/screen/capture' && (req.headers['x-device-secret'] || req.headers.authorization?.startsWith('Bearer dp_sec_'))) {
+        // Screen policy, capture ingestion and failure reporting are available
+        // only to the enrolled desktop device identified by deviceId.
+        const isScreenDeviceRoute = [
+          '/api/v1/screen-monitoring/device-policy',
+          '/api/v1/screen-monitoring/captures',
+          '/api/v1/screen-monitoring/failures',
+        ].includes(urlPath) && (req.headers['x-device-secret'] || req.headers.authorization?.startsWith('Bearer dp_sec_'));
+        if (isScreenDeviceRoute) {
           return authMiddleware.authenticateDevice(req, reply);
         }
 

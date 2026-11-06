@@ -4,6 +4,7 @@ import { TabManager } from './tab-manager.js';
 import { ActivityManager } from './activity-manager.js';
 import { syncBlockingRulesWithStatus as syncBlockingRules } from './policy-sync.js';
 import { createSyncClient } from './sync-client.js';
+import { ensureSyncAlarm, singleFlight, SYNC_ALARM_NAME } from './sync-scheduler.js';
 
 const isEdge = navigator.userAgent.includes('Edg/');
 const browserName = isEdge ? 'edge' : 'chrome';
@@ -77,22 +78,63 @@ async function initializeWorker() {
   const performPeriodicSync = async () => {
     await flushBlockedAttempts().catch((error) => console.debug('[DigitalPulse] Blocked attempt sync:', error.message));
     // Policy enforcement must not depend on activity upload or work hours.
-    await syncBlockingRules();
+    const policy = await syncBlockingRules();
     try {
       const heartbeat = await sendHeartbeat();
       await applyMonitoringState(heartbeat.monitoring || {});
       await refreshAuthorizedActiveTab();
       await activityManager.checkpoint();
-      await syncQueue();
-    } catch (error) { console.debug('[DigitalPulse] Periodic sync error:', error.message); }
+      const sync = await syncQueue();
+      return { policy, heartbeat, sync };
+    } catch (error) {
+      console.debug('[DigitalPulse] Periodic sync error:', error.message);
+      return { policy, heartbeat: { ok: false }, sync: { ok: false }, error: error.message || String(error) };
+    }
   };
   await refreshAuthorizedActiveTab();
-  void performPeriodicSync();
   return { activityManager, tabManager, refreshAuthorizedActiveTab, performPeriodicSync };
 }
 
 // Chrome requires event listeners to be registered as the worker evaluates.
-const runtime = initializeWorker();
+const workerRuntime = initializeWorker();
+const runSync = singleFlight(async (source) => {
+  const { performPeriodicSync } = await workerRuntime;
+  const result = await performPeriodicSync();
+  await chrome.storage.local.set({
+    dp_automatic_sync: {
+      source,
+      ok: Boolean(result.heartbeat?.ok && result.sync?.ok),
+      checkedAt: new Date().toISOString(),
+      error: result.error || result.sync?.error || result.heartbeat?.error || null,
+    },
+  });
+  return result;
+});
+
+const ensurePeriodicSyncAlarm = singleFlight(async () => {
+  try {
+    return await ensureSyncAlarm(chrome, CONFIG.DEFAULT_SYNC_INTERVAL_SECS);
+  } catch (error) {
+    await chrome.storage.local.set({ dp_worker_warning: `Automatic sync scheduling failed: ${error.message || error}` });
+    return null;
+  }
+});
+
+function runSyncSafely(source) {
+  return runSync(source).catch(async (error) => {
+    console.debug('[DigitalPulse] Automatic sync error:', error.message || error);
+    await chrome.storage.local.set({
+      dp_automatic_sync: {
+        source,
+        ok: false,
+        checkedAt: new Date().toISOString(),
+        error: error.message || String(error),
+      },
+    });
+    return null;
+  });
+}
+
 chrome.webNavigation.onErrorOccurred.addListener((details) => {
   recordBlockedAttempt(details).then(() => flushBlockedAttempts()).catch((error) => console.debug('[DigitalPulse] Blocked attempt:', error.message));
 });
@@ -128,20 +170,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }); return true;
   }
   if (message.action === 'sync_now') {
-    runtime.then(async ({ activityManager, refreshAuthorizedActiveTab }) => { const policy = await syncBlockingRules(); const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); await activityManager.checkpoint(); const sync = await syncQueue(); sendResponse({ success: Boolean(heartbeat.ok && sync.ok && policy.updated), heartbeat, sync, policy }); }).catch((error) => sendResponse({ success: false, error: error.message })); return true;
+    runSync('popup').then(({ heartbeat, sync, policy }) => sendResponse({ success: Boolean(heartbeat.ok && sync.ok && policy.updated), heartbeat, sync, policy })).catch((error) => sendResponse({ success: false, error: error.message })); return true;
   }
   if (message.action === 'refresh_status') {
-    runtime.then(async ({ refreshAuthorizedActiveTab }) => { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); sendResponse({ heartbeat }); }).catch((error) => sendResponse({ error: error.message })); return true;
+    workerRuntime.then(async ({ refreshAuthorizedActiveTab }) => { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); sendResponse({ heartbeat }); }).catch((error) => sendResponse({ error: error.message })); return true;
   }
   return false;
 });
 
-chrome.tabs.onActivated.addListener((activeInfo) => { runtime.then(async ({ activityManager, tabManager }) => { if (!activityManager.monitoringAllowed) return; try { tabManager.handleTabActivated(await chrome.tabs.get(activeInfo.tabId)); } catch { /* tab closed */ } }); });
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => { runtime.then(({ activityManager, tabManager }) => { if (activityManager.monitoringAllowed && tab.active && changeInfo.url) tabManager.handleUrlChanged(changeInfo.url); }); });
-chrome.windows.onFocusChanged.addListener((windowId) => { runtime.then(async ({ activityManager, tabManager }) => { if (!activityManager.monitoringAllowed) return; if (windowId === chrome.windows.WINDOW_ID_NONE) tabManager.handleWindowFocusChanged(false); else { const [tab] = await chrome.tabs.query({ active: true, windowId }); tabManager.handleWindowFocusChanged(true, tab?.url); } }); });
+chrome.tabs.onActivated.addListener((activeInfo) => { workerRuntime.then(async ({ activityManager, tabManager }) => { if (!activityManager.monitoringAllowed) return; try { tabManager.handleTabActivated(await chrome.tabs.get(activeInfo.tabId)); } catch { /* tab closed */ } }); });
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => { workerRuntime.then(({ activityManager, tabManager }) => { if (activityManager.monitoringAllowed && tab.active && changeInfo.url) tabManager.handleUrlChanged(changeInfo.url); }); });
+chrome.windows.onFocusChanged.addListener((windowId) => { workerRuntime.then(async ({ activityManager, tabManager }) => { if (!activityManager.monitoringAllowed) return; if (windowId === chrome.windows.WINDOW_ID_NONE) tabManager.handleWindowFocusChanged(false); else { const [tab] = await chrome.tabs.query({ active: true, windowId }); tabManager.handleWindowFocusChanged(true, tab?.url); } }); });
 chrome.idle.setDetectionInterval(CONFIG.IDLE_THRESHOLD_SECS);
-chrome.idle.onStateChanged.addListener((state) => { runtime.then(async ({ activityManager, refreshAuthorizedActiveTab }) => { if (state === 'active') await refreshAuthorizedActiveTab(); const stored = await chrome.storage.local.get(['dp_active_domain']); await activityManager.handleIdleState(state, Date.now(), state === 'active' ? stored.dp_active_domain : null); }); });
-if (chrome.alarms?.create) {
-  chrome.alarms.create('dp_sync', { periodInMinutes: 0.5 });
-  chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === 'dp_sync') runtime.then(({ performPeriodicSync }) => performPeriodicSync()); });
+chrome.idle.onStateChanged.addListener((state) => { workerRuntime.then(async ({ activityManager, refreshAuthorizedActiveTab }) => { if (state === 'active') await refreshAuthorizedActiveTab(); const stored = await chrome.storage.local.get(['dp_active_domain']); await activityManager.handleIdleState(state, Date.now(), state === 'active' ? stored.dp_active_domain : null); }); });
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === SYNC_ALARM_NAME) void runSyncSafely('alarm'); });
 }
+chrome.runtime.onInstalled?.addListener(() => { void ensurePeriodicSyncAlarm(); void runSyncSafely('installed'); });
+chrome.runtime.onStartup?.addListener(() => { void ensurePeriodicSyncAlarm(); void runSyncSafely('browser-startup'); });
+
+// Alarms may be cleared by a browser restart. Check without replacing an
+// existing alarm, then synchronize once whenever the worker is loaded.
+void ensurePeriodicSyncAlarm();
+void runSyncSafely('worker-start');

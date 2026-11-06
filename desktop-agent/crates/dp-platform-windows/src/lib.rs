@@ -13,6 +13,7 @@
 
 pub mod diagnostics;
 pub mod credential_store;
+pub mod data_protection;
 pub mod foreground;
 pub mod http;
 pub mod session_state;

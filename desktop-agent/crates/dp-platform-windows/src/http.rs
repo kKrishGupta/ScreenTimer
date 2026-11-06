@@ -15,6 +15,19 @@ pub fn post_json(
     body: &[u8],
     secure: bool,
 ) -> Result<HttpResponse, String> {
+    request("POST", host, port, path, headers, body, secure)
+}
+
+#[cfg(windows)]
+pub fn request(
+    method_name: &str,
+    host: &str,
+    port: u16,
+    path: &str,
+    headers: &[(String, String)],
+    body: &[u8],
+    secure: bool,
+) -> Result<HttpResponse, String> {
     use std::io;
     use windows_sys::Win32::Networking::WinHttp::{
         WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
@@ -47,7 +60,10 @@ pub fn post_json(
 
     let user_agent = wide("DigitalPulse-Agent/0.1");
     let host_w = wide(host);
-    let method = wide("POST");
+    if !matches!(method_name, "GET" | "POST" | "DELETE") {
+        return Err("unsupported HTTP method".into());
+    }
+    let method = wide(method_name);
     let path_w = wide(path);
     let header_text = headers
         .iter()
@@ -186,6 +202,19 @@ pub fn post_json(
 
 #[cfg(not(windows))]
 pub fn post_json(
+    _host: &str,
+    _port: u16,
+    _path: &str,
+    _headers: &[(String, String)],
+    _body: &[u8],
+    _secure: bool,
+) -> Result<HttpResponse, String> {
+    Err("WinHTTP is available only on Windows".into())
+}
+
+#[cfg(not(windows))]
+pub fn request(
+    _method_name: &str,
     _host: &str,
     _port: u16,
     _path: &str,

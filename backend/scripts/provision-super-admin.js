@@ -1,6 +1,4 @@
 import crypto from 'node:crypto';
-import readline from 'node:readline/promises';
-import { stdin as input, stdout as output } from 'node:process';
 import { loadConfig } from '../src/shared/config.js';
 import { createPrismaClient } from '../src/database/prisma.js';
 import { hashPassword } from '../src/modules/auth/auth.service.js';
@@ -8,12 +6,6 @@ import { hashPassword } from '../src/modules/auth/auth.service.js';
 const EMAIL = 'emailkrish@gmail.com';
 const DISPLAY_NAME = 'Krish';
 const ORGANIZATION_NAME = 'DigitalPulse System';
-
-// Only this exact Neon database is authorized.
-const ALLOWED_DATABASE_HOST =
-  'ep-mute-darkness-az8sv2be-pooler.c-3.ap-southeast-1.aws.neon.tech';
-
-const CONFIRMATION_TEXT = 'YES';
 
 function readHidden(prompt) {
   return new Promise((resolve, reject) => {
@@ -51,7 +43,10 @@ function readHidden(prompt) {
 
         if (char === '\u007f' || char === '\b') {
           value = value.slice(0, -1);
-        } else if (char >= ' ' && char !== '\u007f') {
+          continue;
+        }
+
+        if (char >= ' ' && char !== '\u007f') {
           value += char;
         }
       }
@@ -64,63 +59,31 @@ function readHidden(prompt) {
 let prisma;
 
 try {
-  // Load the existing application database configuration.
   const config = loadConfig();
   const database = new URL(config.databaseUrl);
 
-  // Strict database-host verification.
-  if (database.hostname !== ALLOWED_DATABASE_HOST) {
+  // Safety check: only allow local database provisioning.
+  if (!['localhost', '127.0.0.1', '::1'].includes(database.hostname)) {
     throw new Error(
-      `Unauthorized database host: ${database.hostname}`
+      'Refusing to provision against a remote database. Check your local DATABASE_URL.'
     );
   }
 
-  if (database.protocol !== 'postgresql:') {
-    throw new Error('Expected a PostgreSQL database URL.');
-  }
-
-  console.log('\nDigitalPulse Super Admin Provisioning');
-  console.log('-------------------------------------');
-  console.log('Target database host:', database.hostname);
-  console.log('Target database name:', database.pathname.slice(1));
-  console.log('Account email:', EMAIL);
-  console.log('Role: SUPER_ADMIN');
-
-  const rl = readline.createInterface({ input, output });
-
-  const confirmation = await rl.question(
-    '\nType YES to continue: '
-  );
-
-  rl.close();
-
-  if (confirmation !== CONFIRMATION_TEXT) {
-    throw new Error('Database confirmation failed. No changes made.');
-  }
-
-  // Collect a fresh password without displaying it.
-  const password = await readHidden(
-    '\nEnter a NEW Super Admin password: '
-  );
-
-  const passwordConfirmation = await readHidden(
-    'Confirm password: '
-  );
+  const password = await readHidden('Enter a NEW Super Admin password: ');
+  const confirmation = await readHidden('Confirm password: ');
 
   if (password.length < 16) {
-    throw new Error('Password must contain at least 16 characters.');
+    throw new Error('Use a password of at least 16 characters.');
   }
 
-  if (password !== passwordConfirmation) {
+  if (password !== confirmation) {
     throw new Error('Passwords do not match.');
   }
 
-  // Never reuse a password that was previously shared in chat.
   const { hash, salt } = hashPassword(password);
 
   prisma = createPrismaClient(config);
 
-  // Check whether the account already exists.
   const existing = await prisma.user.findFirst({
     where: {
       email: {
@@ -137,16 +100,15 @@ try {
 
   if (existing) {
     throw new Error(
-      `Account already exists with role ${existing.role}. No changes made.`
+      `An account with this email already exists (role: ${existing.role}). No changes made.`
     );
   }
 
-  // Create organization and Super Admin atomically.
   const result = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({
       data: {
         name: ORGANIZATION_NAME,
-        slug: `digitalpulse-system-${crypto.randomBytes(6).toString('hex')}`
+        slug: `digitalpulse-system-${crypto.randomBytes(4).toString('hex')}`
       }
     });
 
@@ -171,17 +133,15 @@ try {
     return { organization, user };
   });
 
-  console.log('\nSUCCESS: Super Admin provisioned.');
-  console.log('-------------------------------------');
+  console.log('\nSuper Admin created successfully.');
   console.log('Email:', result.user.email);
   console.log('Role:', result.user.role);
   console.log('User ID:', result.user.id);
-  console.log('Organization:', result.organization.name);
-  console.log('Organization ID:', result.organization.id);
-  console.log('Password: securely hashed and stored.');
+  console.log('System organization:', result.organization.name);
+  console.log('Password stored as a secure hash.');
 
 } catch (error) {
-  console.error('\nPROVISIONING FAILED:', error.message);
+  console.error('\nProvisioning failed:', error.message);
   process.exitCode = 1;
 } finally {
   if (prisma) {

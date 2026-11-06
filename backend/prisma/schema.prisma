@@ -67,6 +67,7 @@ model Organization {
   dailySummaries   DailySummary[]
   screenCaptures   ScreenCaptureMetadata[]
   screenShares     ScreenShareSession[]
+  screenMonitoring ScreenMonitoringSetting?
   plannerTasks     PlannerTask[]
   focusSessions    FocusSession[]
   policies         FamilyPolicy[]
@@ -133,6 +134,7 @@ model User {
   monitoringConsentAt DateTime? @map("monitoring_consent_at") @db.Timestamptz(3)
   monitoringConsentRevokedAt DateTime? @map("monitoring_consent_revoked_at") @db.Timestamptz(3)
   monitoringConsentVersion String? @map("monitoring_consent_version") @db.VarChar(64)
+  screenMonitoringAcknowledgedAt DateTime? @map("screen_monitoring_acknowledged_at") @db.Timestamptz(3)
   metadata       Json?       @db.JsonB
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -150,6 +152,7 @@ model User {
   resetTokens      PasswordResetToken[]
   violations       PolicyViolation[]
   notifications    Notification[]
+  screenCaptures   ScreenCaptureMetadata[]
 
   @@unique([organizationId, email])
   @@map("users")
@@ -243,6 +246,10 @@ model Device {
   revokedAt      DateTime?     @map("revoked_at") @db.Timestamptz(3)
   lastSeenAt     DateTime?     @map("last_seen_at") @db.Timestamptz(3)
   lastSyncAt     DateTime?     @map("last_sync_at") @db.Timestamptz(3)
+  screenCaptureEnabled Boolean @default(false) @map("screen_capture_enabled")
+  lastScreenCaptureAt DateTime? @map("last_screen_capture_at") @db.Timestamptz(3)
+  lastScreenCaptureFailureAt DateTime? @map("last_screen_capture_failure_at") @db.Timestamptz(3)
+  lastScreenCaptureError String? @map("last_screen_capture_error") @db.VarChar(128)
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -363,20 +370,51 @@ model DailySummary {
 model ScreenCaptureMetadata {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId  String   @map("organization_id") @db.Uuid
+  employeeId      String   @map("employee_id") @db.Uuid
   deviceId        String   @map("device_id") @db.Uuid
-  filePath        String   @map("file_path") @db.VarChar(512)
+  captureKey      String   @map("capture_key") @db.VarChar(128)
+  storageKey      String?  @map("storage_key") @db.VarChar(512)
+  filePath        String?  @map("file_path") @db.VarChar(512)
   applicationName String   @map("application_name") @db.VarChar(128)
-  sizeBytes       Int      @map("size_bytes")
+  mimeType        String   @default("image/jpeg") @map("mime_type") @db.VarChar(64)
+  sizeBytes       Int      @default(0) @map("size_bytes")
   width           Int      @default(1920)
   height          Int      @default(1080)
   blurred         Boolean  @default(false)
+  captureStatus   String   @default("stored") @map("capture_status") @db.VarChar(32)
+  failureCode     String?  @map("failure_code") @db.VarChar(128)
   capturedAt      DateTime @default(now()) @map("captured_at") @db.Timestamptz(3)
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee        User         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   device          Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
+  @@unique([deviceId, captureKey])
   @@index([organizationId, capturedAt])
+  @@index([employeeId, capturedAt])
+  @@index([expiresAt])
   @@map("screen_captures")
+}
+
+model ScreenMonitoringSetting {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId        String   @unique @map("organization_id") @db.Uuid
+  enabled               Boolean  @default(false)
+  captureIntervalSeconds Int     @default(300) @map("capture_interval_seconds")
+  retentionDays         Int      @default(30) @map("retention_days")
+  workingDays           String[] @default(["Mon", "Tue", "Wed", "Thu", "Fri"]) @map("working_days")
+  shiftStart            String   @default("09:00") @map("shift_start") @db.VarChar(5)
+  shiftEnd              String   @default("18:00") @map("shift_end") @db.VarChar(5)
+  excludedApplications  String[] @default([]) @map("excluded_applications")
+  updatedBy             String?  @map("updated_by") @db.VarChar(128)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("screen_monitoring_settings")
 }
 
 model ScreenShareSession {
