@@ -73,9 +73,12 @@ export default async function privacyRoutes(fastify) {
       });
     }
 
-    // Server-derived organization identity (never trust client-supplied organizationId)
-    const orgId = user.organizationId;
     const userRole = normalizeRole(user.role);
+    // Only platform administrators may explicitly select another organization.
+    const orgId = userRole === Roles.SUPER_ADMIN ? req.body?.organizationId : user.organizationId;
+    if (!orgId) {
+      return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization before deleting activity' } });
+    }
 
     let targetDeviceIds = [];
 
@@ -101,7 +104,7 @@ export default async function privacyRoutes(fastify) {
 
       // Some Prisma-compatible test doubles and older clients do not hydrate
       // the relation requested above. Resolve the owner explicitly before
-      // applying employee/manager authorization.
+      // applying employee/admin authorization.
       if (device.userId && !device.user && prisma?.user?.findUnique) {
         try {
           device = {
@@ -117,7 +120,7 @@ export default async function privacyRoutes(fastify) {
       }
 
       // Cross-tenant verification: Reject if device belongs to another tenant
-      if (userRole !== Roles.SUPER_ADMIN && device.organizationId !== orgId) {
+      if (device.organizationId !== orgId) {
         return reply.code(403).send({
           error: {
             code: 'CROSS_TENANT_FORBIDDEN',
@@ -137,26 +140,7 @@ export default async function privacyRoutes(fastify) {
             },
           });
         }
-      } else if (userRole === Roles.MANAGER) {
-        // Managers may only delete for employees within their assigned scope
-        const isSelf = device.userId === user.id;
-        let isAssigned = isSelf;
-        if (!isAssigned && device.user) {
-          const target = device.user;
-          isAssigned =
-            target.managerId === user.id ||
-            (user.departmentId && target.departmentId === user.departmentId);
-        }
-
-        if (!isAssigned) {
-          return reply.code(403).send({
-            error: {
-              code: 'FORBIDDEN',
-              message: 'Managers may access only employees within their assigned scope',
-            },
-          });
-        }
-      }
+}
 
       targetDeviceIds = [deviceId];
     } else {
@@ -174,15 +158,7 @@ export default async function privacyRoutes(fastify) {
             targetDeviceIds = [];
           }
         }
-      } else if (userRole === Roles.MANAGER) {
-        // Managers cannot perform wildcard deletions across their department
-        return reply.code(403).send({
-          error: {
-            code: 'FORBIDDEN',
-            message: 'Administrative organization-wide deletion requires an explicit target deviceId',
-          },
-        });
-      } else if (userRole === Roles.ORGANIZATION_ADMIN || userRole === Roles.SUPER_ADMIN) {
+      } else if (userRole === Roles.ADMIN || userRole === Roles.SUPER_ADMIN) {
         // Admins can target all devices in their organization
         targetDeviceIds = null; // null represents all devices in org
       }

@@ -82,18 +82,24 @@ export function normalizeDomain(rawDomain) {
  */
 async function buildActivityScope(request, prisma) {
   const user = request.user;
-  const orgId = user?.role === Roles.SUPER_ADMIN && request.query?.organizationId
-    ? request.query.organizationId
-    : (user?.organizationId || request.organizationId);
+  const userRole = user ? normalizeRole(user.role) : null;
 
-  if (request.query?.organizationId && normalizeRole(user?.role) !== Roles.SUPER_ADMIN && request.query.organizationId !== orgId) {
+  const orgId =
+    userRole === Roles.SUPER_ADMIN && request.query?.organizationId
+      ? request.query.organizationId
+      : (user?.organizationId || request.organizationId);
+
+  if (
+    request.query?.organizationId &&
+    userRole !== Roles.SUPER_ADMIN &&
+    request.query.organizationId !== orgId
+  ) {
     const err = new Error('Access denied: cross-tenant access prohibited');
     err.statusCode = 403;
     throw err;
   }
 
   const where = orgId ? { organizationId: orgId } : {};
-  const userRole = user ? normalizeRole(user.role) : null;
 
   if (userRole === Roles.EMPLOYEE && user) {
     if (request.query?.userId && request.query.userId !== user.id) {
@@ -102,28 +108,6 @@ async function buildActivityScope(request, prisma) {
       throw err;
     }
     where.device = { userId: user.id };
-  } else if (userRole === Roles.MANAGER && user) {
-    if (request.query?.userId) {
-      if (!prisma?.user?.findFirst) {
-        const err = new Error('Manager employee scope could not be verified');
-        err.statusCode = 503;
-        throw err;
-      }
-      const target = await prisma.user.findFirst({
-        where: {
-          id: request.query.userId,
-          organizationId: orgId,
-          OR: [{ id: user.id }, { managerId: user.id }, ...(user.departmentId ? [{ departmentId: user.departmentId }] : [])],
-        },
-        select: { id: true },
-      });
-      if (!target) {
-        const err = new Error('Managers may only access employees within their assigned scope');
-        err.statusCode = 403;
-        throw err;
-      }
-      where.device = { userId: request.query.userId };
-    } else where.OR = [{ device: { user: { id: user.id } } }, { device: { user: { managerId: user.id } } }, ...(user.departmentId ? [{ device: { user: { departmentId: user.departmentId } } }] : [])];
   } else if (request.query?.userId) {
     where.device = { userId: request.query.userId };
   }

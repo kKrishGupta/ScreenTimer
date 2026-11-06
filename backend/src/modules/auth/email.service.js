@@ -39,6 +39,11 @@ export function createEmailService(config = {}) {
         error.code = 'EMAIL_NOT_CONFIGURED';
         throw error;
       },
+      async sendInvitationEmail() {
+        const error = new Error('Email delivery is not configured');
+        error.code = 'EMAIL_NOT_CONFIGURED';
+        throw error;
+      },
     };
   }
 
@@ -194,6 +199,8 @@ DigitalPulse Security Team
 <td align="center" style="padding: 20px 0;">
 
 <a href="${safeLink}"
+  referrerpolicy="no-referrer"
+  rel="noreferrer"
   style="
     display: inline-block;
     padding: 15px 35px;
@@ -260,7 +267,7 @@ DigitalPulse Security Team
   font-size: 12px;
   word-break: break-all;
 ">
-  <a href="${safeLink}" style="color: #38bdf8;">
+  <a href="${safeLink}" referrerpolicy="no-referrer" rel="noreferrer" style="color: #38bdf8;">
     ${safeLink}
   </a>
 </p>
@@ -342,7 +349,8 @@ DigitalPulse Security Team
 
   // 7. Verify SMTP recipient acceptance
   if (
-    !delivery.accepted?.some(
+    delivery?.accepted &&
+    !delivery.accepted.some(
       (recipient) =>
         String(recipient).toLowerCase() === String(to).toLowerCase()
     )
@@ -352,8 +360,8 @@ DigitalPulse Security Team
     );
     error.code = 'EMAIL_RECIPIENT_REJECTED';
     throw error;
-    }
-  },
+  }
+},
     async sendInvitationEmail({ to, token, invitationUrl }) {
       const url = new URL(invitationUrl);
       url.hash = new URLSearchParams({ token }).toString();

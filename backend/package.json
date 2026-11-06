@@ -17,6 +17,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "admin:provision": "node scripts/provision-admin.js",
+    "super-admin:provision": "node scripts/provision-super-admin.js",
     "db:status": "prisma migrate status"
   },
   "dependencies": {

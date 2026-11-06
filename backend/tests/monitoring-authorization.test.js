@@ -158,8 +158,9 @@ test('only an organization administrator can authorize an employee within its ow
   const otherAdmin = await app.authService.createTestSession({ userId: 'monitoring-admin-3', role: 'ORG_ADMIN', organizationId: 'monitoring-org-3', email: 'other-admin@example.com' });
   const manager = await app.authService.createTestSession({ userId: 'monitoring-manager-2', role: 'MANAGER', organizationId, email: 'manager@example.com' });
 
-  const deniedManager = await app.inject({ method: 'PATCH', url: `/api/v1/employees/${employee.id}/monitoring-authorization`, headers: manager.headers, payload: { authorized: true } });
-  assert.equal(deniedManager.statusCode, 403);
+  const managerAuthorization = await app.inject({ method: 'PATCH', url: `/api/v1/employees/${employee.id}/monitoring-authorization`, headers: manager.headers, payload: { authorized: true } });
+  assert.equal(managerAuthorization.statusCode, 200, managerAuthorization.body);
+  assert.equal(employee.monitoringAuthorized, true);
   const deniedCrossTenant = await app.inject({ method: 'PATCH', url: `/api/v1/employees/${employee.id}/monitoring-authorization`, headers: otherAdmin.headers, payload: { authorized: true } });
   assert.equal(deniedCrossTenant.statusCode, 404);
   const authorized = await app.inject({ method: 'PATCH', url: `/api/v1/employees/${employee.id}/monitoring-authorization`, headers: admin.headers, payload: { authorized: true } });

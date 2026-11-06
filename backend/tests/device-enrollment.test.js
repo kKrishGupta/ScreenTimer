@@ -125,11 +125,11 @@ describe('Secure Device Enrollment & Management (Milestone 3)', () => {
     assert.equal(afterHeartbeat[0].status, 'online');
 
     const manager = await app.authService.createTestSession({ role: 'MANAGER', organizationId: 'org-employee-one' });
-    const deniedManager = await app.inject({
+    const managerEnrollment = await app.inject({
       method: 'POST', url: '/api/v1/devices/my-enrollment-token', headers: manager.headers,
       payload: { deviceKind: 'DESKTOP_AGENT' },
     });
-    assert.equal(deniedManager.statusCode, 403);
+    assert.equal(managerEnrollment.statusCode, 201, managerEnrollment.body);
 
     const superAdmin = await app.authService.createTestSession({ role: 'SUPER_ADMIN', organizationId: 'org-employee-one' });
     const deniedSuperAdmin = await app.inject({

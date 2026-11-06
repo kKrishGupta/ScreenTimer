@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { Roles, normalizeRole } from '../auth/auth.service.js';
 
 // Local storage for planner tasks, goals, and focus sessions (Stage 1 local MVP)
 const plannerState = {
@@ -19,6 +20,22 @@ const plannerState = {
 
 export default async function plannerRoutes(fastify) {
   const { prisma } = fastify;
+
+  function taskScope(req, reply) {
+    if (!req.user?.id) {
+      reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+      return null;
+    }
+    const role = normalizeRole(req.user.role);
+    const organizationId = role === Roles.SUPER_ADMIN
+      ? (req.method === 'GET' ? req.query?.organizationId : req.body?.organizationId)
+      : req.user.organizationId;
+    if (!organizationId) {
+      reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
+      return null;
+    }
+    return { organizationId, ...(role === Roles.EMPLOYEE ? { userId: req.user.id } : {}) };
+  }
 
   // Planner state is ancillary to activity monitoring. Production requests
   // must use durable models; unsupported in-memory-only endpoints fail closed.
@@ -49,13 +66,14 @@ export default async function plannerRoutes(fastify) {
   });
 
   // GET /api/v1/planner/tasks
-  fastify.get('/planner/tasks', async (req) => {
-    const orgId = req.user?.organizationId;
-    let tasks = plannerState.tasks;
+  fastify.get('/planner/tasks', async (req, reply) => {
+    const whereClause = taskScope(req, reply);
+    if (!whereClause) return;
+    let tasks = plannerState.tasks.filter((task) => task.organizationId === whereClause.organizationId
+      && (!whereClause.userId || task.userId === whereClause.userId));
 
     if (prisma?.plannerTask?.findMany) {
       try {
-        const whereClause = orgId ? { organizationId: orgId } : {};
         const rows = await prisma.plannerTask.findMany({ where: whereClause, orderBy: { createdAt: 'desc' } });
         if (rows) {
           tasks = rows.map((r) => ({
@@ -66,6 +84,7 @@ export default async function plannerRoutes(fastify) {
             completed: r.completed,
             createdAt: r.createdAt?.toISOString ? r.createdAt.toISOString() : r.createdAt,
             organizationId: r.organizationId,
+            userId: r.userId,
           }));
         }
       } catch {
@@ -82,7 +101,9 @@ export default async function plannerRoutes(fastify) {
 
   // POST /api/v1/planner/tasks
   fastify.post('/planner/tasks', async (req, reply) => {
-    const orgId = req.user?.organizationId || '00000000-0000-0000-0000-000000000000';
+    const scope = taskScope(req, reply);
+    if (!scope) return;
+    const orgId = scope.organizationId;
     const { title, category = 'general', targetMinutes = 30 } = req.body ?? {};
     if (!title || typeof title !== 'string' || title.trim().length === 0) {
       return reply.code(400).send({
@@ -93,6 +114,7 @@ export default async function plannerRoutes(fastify) {
     const task = {
       id: crypto.randomUUID(),
       organizationId: orgId,
+      userId: req.user.id,
       title: title.trim().slice(0, 140),
       category: String(category).slice(0, 32),
       targetMinutes: Math.max(5, Math.min(720, Number(targetMinutes) || 30)),
@@ -125,42 +147,45 @@ export default async function plannerRoutes(fastify) {
   // PATCH /api/v1/planner/tasks/:id
   fastify.patch('/planner/tasks/:id', async (req, reply) => {
     const { id } = req.params;
-    const task = plannerState.tasks.find((t) => t.id === id);
+    const scope = taskScope(req, reply);
+    if (!scope) return;
 
     const { completed, title, targetMinutes } = req.body ?? {};
 
-    if (prisma?.plannerTask?.update) {
-      try {
-        const updateData = {};
-        if (typeof completed === 'boolean') updateData.completed = completed;
-        if (title && typeof title === 'string') updateData.title = title.trim().slice(0, 140);
-        if (targetMinutes != null) updateData.targetMinutes = Math.max(5, Math.min(720, Number(targetMinutes)));
+    const updateData = {};
+    if (typeof completed === 'boolean') updateData.completed = completed;
+    if (typeof title === 'string' && title.trim()) {
+      updateData.title = title.trim().slice(0, 140);
+    }
+    if (targetMinutes != null) {
+      updateData.targetMinutes = Math.max(
+        5,
+        Math.min(720, Number(targetMinutes) || 5),
+      );
+    }
 
-        const isAdmin = ['SUPER_ADMIN', 'ORGANIZATION_ADMIN'].includes(
-          String(req.user?.role || '').toUpperCase(),
-        );
+    if (Object.keys(updateData).length === 0) {
+      return reply.code(400).send({
+        error: { code: 'INVALID_INPUT', message: 'No valid task fields supplied' },
+      });
+    }
+
+    if (prisma?.plannerTask?.findFirst && prisma?.plannerTask?.update) {
+      try {
         const existing = await prisma.plannerTask.findFirst({
-          where: {
-            id,
-            organizationId: req.user?.organizationId,
-            ...(isAdmin ? {} : { userId: req.user?.id }),
-          },
+          where: { id, ...scope },
         });
+
         if (!existing) {
           return reply.code(404).send({
             error: { code: 'NOT_FOUND', message: 'Task not found' },
           });
         }
+
         const updated = await prisma.plannerTask.update({
           where: { id: existing.id },
           data: updateData,
         });
-
-        if (task) {
-          if (typeof completed === 'boolean') task.completed = completed;
-          if (title && typeof title === 'string') task.title = title.trim().slice(0, 140);
-          if (targetMinutes != null) task.targetMinutes = Math.max(5, Math.min(720, Number(targetMinutes)));
-        }
 
         return {
           success: true,
@@ -170,70 +195,108 @@ export default async function plannerRoutes(fastify) {
             category: updated.category,
             targetMinutes: updated.targetMinutes,
             completed: updated.completed,
-            createdAt: updated.createdAt?.toISOString ? updated.createdAt.toISOString() : updated.createdAt,
+            createdAt: updated.createdAt?.toISOString
+              ? updated.createdAt.toISOString()
+              : updated.createdAt,
+            organizationId: updated.organizationId,
+            userId: updated.userId,
           },
         };
-      } catch {
+      } catch (error) {
+        req.log?.error?.({ err: error }, 'Planner task update failed');
         return reply.code(503).send({
-          error: { code: 'PERSISTENCE_UNAVAILABLE', message: 'Planner task update is temporarily unavailable' },
+          error: {
+            code: 'PERSISTENCE_UNAVAILABLE',
+            message: 'Planner task update is temporarily unavailable',
+          },
         });
       }
     }
 
-    if (!task) {
+    // Development-only in-memory fallback, using the same authorization scope.
+    const taskIndex = plannerState.tasks.findIndex(
+      (task) =>
+        task.id === id &&
+        task.organizationId === scope.organizationId &&
+        (!scope.userId || task.userId === scope.userId),
+    );
+
+    if (taskIndex === -1) {
       return reply.code(404).send({
         error: { code: 'NOT_FOUND', message: 'Task not found' },
       });
     }
 
-    if (typeof completed === 'boolean') task.completed = completed;
-    if (title && typeof title === 'string') task.title = title.trim().slice(0, 140);
-    if (targetMinutes != null) task.targetMinutes = Math.max(5, Math.min(720, Number(targetMinutes)));
+    Object.assign(plannerState.tasks[taskIndex], updateData);
 
-    return { success: true, task };
+    return {
+      success: true,
+      task: plannerState.tasks[taskIndex],
+    };
   });
 
   // DELETE /api/v1/planner/tasks/:id
   fastify.delete('/planner/tasks/:id', async (req, reply) => {
     const { id } = req.params;
-    let deletedFromDb = false;
+    const scope = taskScope(req, reply);
+    if (!scope) return;
 
-    if (prisma?.plannerTask?.delete) {
+    if (prisma?.plannerTask?.findFirst && prisma?.plannerTask?.delete) {
       try {
-        const isAdmin = ['SUPER_ADMIN', 'ORGANIZATION_ADMIN'].includes(
-          String(req.user?.role || '').toUpperCase(),
-        );
         const existing = await prisma.plannerTask.findFirst({
-          where: {
-            id,
-            organizationId: req.user?.organizationId,
-            ...(isAdmin ? {} : { userId: req.user?.id }),
-          },
+          where: { id, ...scope },
         });
+
         if (!existing) {
           return reply.code(404).send({
             error: { code: 'NOT_FOUND', message: 'Task not found' },
           });
         }
-        await prisma.plannerTask.delete({ where: { id: existing.id } });
-        deletedFromDb = true;
-      } catch {
+
+        await prisma.plannerTask.delete({
+          where: { id: existing.id },
+        });
+
+        plannerState.tasks = plannerState.tasks.filter(
+          (task) =>
+            !(
+              task.id === id &&
+              task.organizationId === scope.organizationId &&
+              (!scope.userId || task.userId === scope.userId)
+            ),
+        );
+
+        return { success: true, message: 'Task deleted successfully' };
+      } catch (error) {
+        req.log?.error?.({ err: error }, 'Planner task deletion failed');
         return reply.code(503).send({
-          error: { code: 'PERSISTENCE_UNAVAILABLE', message: 'Planner task deletion is temporarily unavailable' },
+          error: {
+            code: 'PERSISTENCE_UNAVAILABLE',
+            message: 'Planner task deletion is temporarily unavailable',
+          },
         });
       }
     }
 
-    const initialLen = plannerState.tasks.length;
-    plannerState.tasks = plannerState.tasks.filter((t) => t.id !== id);
+    // Development-only in-memory fallback, using the same authorization scope.
+    const initialLength = plannerState.tasks.length;
 
-    if (plannerState.tasks.length === initialLen && !deletedFromDb) {
+    plannerState.tasks = plannerState.tasks.filter(
+      (task) =>
+        !(
+          task.id === id &&
+          task.organizationId === scope.organizationId &&
+          (!scope.userId || task.userId === scope.userId)
+        ),
+    );
+
+    if (plannerState.tasks.length === initialLength) {
       return reply.code(404).send({
         error: { code: 'NOT_FOUND', message: 'Task not found' },
       });
     }
 
-    return { success: true, deletedId: id };
+    return { success: true, message: 'Task deleted successfully' };
   });
 
   // GET /api/v1/planner/goals
@@ -414,8 +477,12 @@ export default async function plannerRoutes(fastify) {
   // overlap, so use their union for total active duration and do not invent
   // per-task attribution, productivity scores, goals, or planned schedules.
   fastify.get('/planner/analytics', async (req, reply) => {
-    const organizationId = req.user?.organizationId;
-    if (!organizationId || !prisma?.activitySession?.findMany) {
+    const scope = taskScope(req, reply);
+    if (!scope) return;
+
+    const organizationId = scope.organizationId;
+
+    if (!prisma?.activitySession?.findMany) {
       return reply.code(503).send({ error: { code: 'ANALYTICS_UNAVAILABLE', message: 'Persistent activity data is unavailable' } });
     }
     const dayStart = new Date();
@@ -427,10 +494,8 @@ export default async function plannerRoutes(fastify) {
       startedAt: { lt: dayEnd },
       endedAt: { gt: dayStart },
     };
-    if (req.user.role === 'MANAGER') {
-      where.OR = [{ device: { user: { id: req.user.id } } }, { device: { user: { managerId: req.user.id } } }];
-    } else if (req.user.role === 'EMPLOYEE') {
-      where.device = { userId: req.user.id };
+    if (scope.userId) {
+      where.device = { userId: scope.userId };
     }
 
     let sessions;
@@ -457,16 +522,17 @@ export default async function plannerRoutes(fastify) {
     if (current) activeSeconds += (current[1] - current[0]) / 1000;
 
     const realActiveMinutes = Math.round(activeSeconds / 60);
-    let tasks = plannerState.tasks;
+    let tasks = plannerState.tasks.filter(
+      (task) =>
+        task.organizationId === organizationId &&
+        (!scope.userId || task.userId === scope.userId),
+    );
     if (prisma?.plannerTask?.findMany) {
-      const taskWhere = { organizationId };
-      if (req.user.role === 'MANAGER') {
-        taskWhere.OR = [{ userId: req.user.id }, { user: { managerId: req.user.id } }];
-      } else if (req.user.role === 'EMPLOYEE') {
-        taskWhere.userId = req.user.id;
-      }
       try {
-        tasks = await prisma.plannerTask.findMany({ where: taskWhere, orderBy: { createdAt: 'desc' } });
+        tasks = await prisma.plannerTask.findMany({
+          where: scope,
+          orderBy: { createdAt: 'desc' },
+        });
       } catch (error) {
         req.log?.error?.({ err: error }, 'Planner task query failed');
         return reply.code(503).send({ error: { code: 'ANALYTICS_UNAVAILABLE', message: 'Persistent task data is unavailable' } });

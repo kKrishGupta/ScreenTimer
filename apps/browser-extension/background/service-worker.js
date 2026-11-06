@@ -1,7 +1,7 @@
 import { CONFIG } from '../shared/constants.js';
 import { TabManager } from './tab-manager.js';
 import { ActivityManager } from './activity-manager.js';
-import { syncBlockingRules } from './policy-sync.js';
+import { syncBlockingRulesWithStatus as syncBlockingRules } from './policy-sync.js';
 import { createSyncClient } from './sync-client.js';
 
 const isEdge = navigator.userAgent.includes('Edg/');
@@ -74,13 +74,14 @@ async function initializeWorker() {
     } catch { return null; }
   };
   const performPeriodicSync = async () => {
+    // Policy enforcement must not depend on activity upload or work hours.
+    await syncBlockingRules();
     try {
       const heartbeat = await sendHeartbeat();
       await applyMonitoringState(heartbeat.monitoring || {});
       await refreshAuthorizedActiveTab();
       await activityManager.checkpoint();
       await syncQueue();
-      await syncBlockingRules();
     } catch (error) { console.debug('[DigitalPulse] Periodic sync error:', error.message); }
   };
   await refreshAuthorizedActiveTab();
@@ -115,14 +116,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'retry_skipped_events') { chrome.storage.local.set({ dp_rejected_event_ids: [] }).then(() => sendResponse({ success: true })); return true; }
   if (message.action === 'enroll_browser') {
     if (!CONFIG.ENROLLMENT_UI_ENABLED) { sendResponse({ success: false, deferred: true, error: ENROLLMENT_DEFERRED_MESSAGE }); return false; }
-    deviceIdPromise.then((deviceId) => enrollBrowserDevice(message.token, deviceId)).then(async (result) => { if (result?.success) { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); } return result; }).then(sendResponse).catch(async (error) => {
+    deviceIdPromise.then((deviceId) => enrollBrowserDevice(message.token, deviceId)).then(async (result) => { if (result?.success) { await syncBlockingRules(); const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); } return result; }).then(sendResponse).catch(async (error) => {
       const message = error.message || 'Browser extension enrollment failed.';
       await chrome.storage.local.set({ dp_sync_error: message });
       sendResponse({ success: false, error: message, workerVersion: chrome.runtime.getManifest().version });
     }); return true;
   }
   if (message.action === 'sync_now') {
-    runtime.then(async ({ activityManager, refreshAuthorizedActiveTab }) => { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); await activityManager.checkpoint(); const sync = await syncQueue(); await syncBlockingRules(); sendResponse({ success: Boolean(heartbeat.ok && sync.ok), heartbeat, sync }); }).catch((error) => sendResponse({ success: false, error: error.message })); return true;
+    runtime.then(async ({ activityManager, refreshAuthorizedActiveTab }) => { const policy = await syncBlockingRules(); const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); await activityManager.checkpoint(); const sync = await syncQueue(); sendResponse({ success: Boolean(heartbeat.ok && sync.ok && policy.updated), heartbeat, sync, policy }); }).catch((error) => sendResponse({ success: false, error: error.message })); return true;
   }
   if (message.action === 'refresh_status') {
     runtime.then(async ({ refreshAuthorizedActiveTab }) => { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); sendResponse({ heartbeat }); }).catch((error) => sendResponse({ error: error.message })); return true;

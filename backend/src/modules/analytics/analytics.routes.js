@@ -58,7 +58,7 @@ export default async function analyticsRoutes(fastify) {
   });
 
   // POST /api/v1/analytics/categories (Customize app / web category)
-  fastify.post('/analytics/categories', { preHandler: fastify.authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN) }, async (req, reply) => {
+  fastify.post('/analytics/categories', { preHandler: fastify.authMiddleware.requireRole(Roles.ADMIN) }, async (req, reply) => {
     const { target, category, targetType } = req.body || {};
     try {
       const res = await analyticsService.setCategory({ organizationId: req.user?.organizationId, target, category, targetType });

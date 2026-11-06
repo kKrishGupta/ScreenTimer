@@ -138,7 +138,7 @@ export default function AcceptInvitationPage() {
             <p className="font-semibold text-white">{details.organizationName} invited you to DigitalPulse</p>
             <p className="mt-2">{details.displayName && isPersonName(details.displayName) ? details.displayName : 'Employee'} · {details.email}</p>
             {details.department && <p className="mt-1 text-slate-400">Department: {details.department}</p>}
-            <p className="mt-1 text-slate-400">Role: {details.role === 'MANAGER' ? 'Manager' : 'Employee'}</p>
+            <p className="mt-1 text-slate-400">Role: Employee</p>
             {details.shiftStart && details.shiftEnd && <p className="mt-1 text-slate-400">Schedule: {details.shiftStart}–{details.shiftEnd} ({details.shiftTimezone || 'local time'})</p>}
             <p className="mt-2 text-xs text-slate-500">Expires {new Date(details.expiresAt).toLocaleString()}</p>
           </section>

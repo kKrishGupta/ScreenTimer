@@ -117,7 +117,9 @@ function toQueryString(params = {}) {
 
 export const api = {
   login: (credentials, opts = {}) => postJson('/auth/login', credentials, opts),
-  register: (details, opts = {}) => postJson('/auth/register', details, opts),
+  organizationLogin: (credentials, opts = {}) => postJson('/organization/login', credentials, opts),
+  superAdminLogin: (credentials, opts = {}) => postJson('/super-admin/login', credentials, opts),
+  registerOrganization: (details, opts = {}) => postJson('/organization/register', details, opts),
   logout: (opts = {}) => postJson('/auth/logout', {}, opts),
   requestPasswordReset: (email, opts = {}) => postJson('/auth/reset-password-request', { email }, { timeoutMs: 45000, ...opts }),
   confirmPasswordReset: (details, opts = {}) => postJson('/auth/reset-password-confirm', details, opts),

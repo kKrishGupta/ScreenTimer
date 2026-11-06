@@ -31,14 +31,7 @@
       <span class="label">Backend:</span>
       <span id="backend-url" class="value mono">http://127.0.0.1:3001</span>
     </div>
-    <details>
-      <summary>Backend settings</summary>
-      <label for="backend-input">Trusted backend origin</label>
-      <input id="backend-input" type="url" autocomplete="off" placeholder="http://127.0.0.1:3001" />
-      <button id="save-backend" type="button" class="btn">Save backend</button>
-      <p>Local test build: localhost connects only to this computer. Remote servers require HTTPS and permission for that host.</p>
-      <p id="backend-settings-status" role="status" aria-live="polite"></p>
-    </details>
+    <p>Server address is managed by your organization. Contact your administrator to change it.</p>
     <div class="field">
       <span class="label">Pending Queue:</span>
       <span id="queue-count" class="value">0 events</span>
@@ -47,6 +40,7 @@
     <button id="retry-skipped" type="button" hidden>Recheck skipped events</button>
     <div class="field"><span class="label">Last successful sync:</span><span id="last-sync" class="value">—</span></div>
     <div class="field"><span class="label">Last heartbeat:</span><span id="last-heartbeat" class="value">—</span></div>
+    <p id="policy-status" role="status" aria-live="polite">Website blocking: waiting for policy sync.</p>
     <div class="field" id="enrollment-panel" hidden style="margin-top: 8px;">
       <label class="label" for="enrollment-token">Enrollment:</label>
       <input id="enrollment-token" type="password" autocomplete="off" disabled placeholder="One-time enrollment token" style="flex: 1; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: monospace;" />

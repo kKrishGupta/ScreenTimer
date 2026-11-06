@@ -31,15 +31,9 @@ enum ActivityType {
 }
 
 enum UserRole {
-  OWNER             @map("owner")
-  MEMBER            @map("member")
-  FAMILY_OWNER      @map("family_owner")
-  ADULT_MEMBER      @map("adult_member")
-  SUPERVISED_MEMBER @map("supervised_member")
-  SUPER_ADMIN       @map("super_admin")
-  ORG_ADMIN         @map("org_admin")
-  MANAGER           @map("manager")
-  EMPLOYEE          @map("employee")
+  SUPER_ADMIN @map("super_admin")
+  ADMIN       @map("admin")
+  EMPLOYEE    @map("employee")
 
   @@map("user_role")
 }

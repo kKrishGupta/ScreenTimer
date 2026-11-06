@@ -257,7 +257,7 @@ export default async function screenRoutes(fastify) {
   fastify.post('/screen/policy', async (req, reply) => {
     if (req.user) {
       const userRole = normalizeRole(req.user.role);
-      if (userRole !== Roles.ORGANIZATION_ADMIN && userRole !== Roles.SUPER_ADMIN) {
+      if (userRole !== Roles.ADMIN && userRole !== Roles.SUPER_ADMIN) {
         return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: 'Only administrators may modify screen monitoring policy' },
         });
@@ -277,7 +277,7 @@ export default async function screenRoutes(fastify) {
     if (typeof updates.excludeSensitiveApps === 'boolean') screenState.policy.excludeSensitiveApps = updates.excludeSensitiveApps;
     if (typeof updates.visibleMonitoringIndicator === 'boolean') screenState.policy.visibleMonitoringIndicator = updates.visibleMonitoringIndicator;
 
-    recordAudit('screenshot_policy_updated', req.user?.email || 'manager_admin', { policy: screenState.policy });
+    recordAudit('screenshot_policy_updated', req.user?.email || 'admin', { policy: screenState.policy });
     return { success: true, policy: screenState.policy };
   });
 
@@ -285,7 +285,7 @@ export default async function screenRoutes(fastify) {
   fastify.patch('/screen/config', async (req, reply) => {
     if (req.user) {
       const userRole = normalizeRole(req.user.role);
-      if (userRole !== Roles.ORGANIZATION_ADMIN && userRole !== Roles.SUPER_ADMIN) {
+      if (userRole !== Roles.ADMIN && userRole !== Roles.SUPER_ADMIN) {
         return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: 'Only administrators may modify screen configuration' },
         });
@@ -393,7 +393,34 @@ export default async function screenRoutes(fastify) {
   fastify.get('/screen/captures', async (req, reply) => {
     const user = req.user;
     const userRole = user ? normalizeRole(user.role) : null;
-    const userOrg = user?.organizationId;
+    const userOrg = userRole === Roles.SUPER_ADMIN ? req.query?.organizationId : user?.organizationId;
+    if (!user?.id) return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+    const whereClause = {};
+    if (userRole === Roles.SUPER_ADMIN) {
+      const selectedOrgId = req.query?.organizationId;
+      if (!selectedOrgId) {
+        return reply.code(400).send({
+          error: {
+            code: 'ORGANIZATION_REQUIRED',
+            message: 'Super Admin must select an organization to view captures',
+          },
+        });
+      }
+      whereClause.organizationId = selectedOrgId;
+    } else {
+      if (!userOrg) {
+        return reply.code(403).send({
+          error: {
+            code: 'ORGANIZATION_SCOPE_REQUIRED',
+            message: 'Your account is not assigned to an organization',
+          },
+        });
+      }
+      whereClause.organizationId = userOrg;
+    }
+    if (userRole === Roles.EMPLOYEE) {
+      whereClause.device = { userId: user.id };
+    }
 
     if (user && req.query?.organizationId && userRole !== Roles.SUPER_ADMIN && req.query.organizationId !== userOrg) {
       return reply.code(403).send({
@@ -409,33 +436,19 @@ export default async function screenRoutes(fastify) {
           error: { code: 'FORBIDDEN', message: 'Employees may only access their own screenshot captures' },
         });
       }
-    } else if (user && userRole === Roles.MANAGER) {
-      if (employeeId && employeeId !== user.id && fastify.prisma?.user?.findUnique) {
-        try {
-          const target = await fastify.prisma.user.findUnique({ where: { id: employeeId } });
-          if (target && target.managerId !== user.id && target.departmentId !== user.departmentId) {
-            return reply.code(403).send({
-              error: { code: 'FORBIDDEN', message: 'Managers may only access employees within their assigned scope' },
-            });
-          }
-        } catch (e) {
-          if (e.statusCode === 403) throw e;
-        }
-      }
     }
 
+    if (deviceId) {
+      whereClause.deviceId = deviceId;
+    }
     let allCaptures = [];
 
     // Query persistent PostgreSQL captures if available
     if (fastify.prisma?.screenCaptureMetadata?.findMany) {
       try {
-        const whereClause = {};
-        if (user && userRole !== Roles.SUPER_ADMIN && userOrg) {
-          whereClause.organizationId = userOrg;
-        }
-        if (deviceId) whereClause.deviceId = deviceId;
         const rows = await fastify.prisma.screenCaptureMetadata.findMany({
           where: whereClause,
+          include: { device: { select: { userId: true } } },
           orderBy: { capturedAt: sort === 'asc' ? 'asc' : 'desc' },
         });
 
@@ -454,6 +467,7 @@ export default async function screenRoutes(fastify) {
             id: r.id,
             organizationId: r.organizationId,
             deviceId: r.deviceId,
+            employeeId: r.device?.userId,
             filePath: r.filePath,
             applicationName: r.applicationName,
             sizeBytes: r.sizeBytes,
@@ -479,13 +493,13 @@ export default async function screenRoutes(fastify) {
     let filtered = allCaptures;
 
     // Tenant isolation
-    if (user && userRole !== Roles.SUPER_ADMIN && userOrg) {
-      filtered = filtered.filter((c) => !c.organizationId || c.organizationId === userOrg);
+    if (userOrg) {
+      filtered = filtered.filter((c) => c.organizationId === userOrg);
     }
 
     // Role-based visibility scoping
     if (user && userRole === Roles.EMPLOYEE) {
-      filtered = filtered.filter((c) => c.employeeId === user?.id || c.employeeId === user?.employeeId || c.deviceId === req.device?.id);
+      filtered = filtered.filter((c) => c.employeeId === user.id || (Boolean(user.employeeId) && c.employeeId === user.employeeId));
     }
 
     if (employeeId) filtered = filtered.filter((c) => c.employeeId === employeeId);
@@ -517,15 +531,17 @@ export default async function screenRoutes(fastify) {
     const user = req.user;
     const userRole = normalizeRole(user?.role);
     let capture = screenState.captures.find((c) => c.id === id);
+    if (!user?.id) return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
 
     if (!capture && fastify.prisma?.screenCaptureMetadata?.findUnique) {
       try {
-        const row = await fastify.prisma.screenCaptureMetadata.findUnique({ where: { id } });
+        const row = await fastify.prisma.screenCaptureMetadata.findUnique({ where: { id }, include: { device: { select: { userId: true } } } });
         if (row) {
           capture = {
             id: row.id,
             organizationId: row.organizationId,
             deviceId: row.deviceId,
+            employeeId: row.device?.userId,
             filePath: row.filePath,
             applicationName: row.applicationName,
             sizeBytes: row.sizeBytes,
@@ -548,7 +564,17 @@ export default async function screenRoutes(fastify) {
     }
 
     // Tenant check
-    if (userRole !== Roles.SUPER_ADMIN && capture.organizationId && user?.organizationId && capture.organizationId !== user.organizationId) {
+    if (userRole === Roles.SUPER_ADMIN) {
+      const selectedOrgId = req.query?.organizationId;
+      if (!selectedOrgId || capture.organizationId !== selectedOrgId) {
+        return reply.code(403).send({
+          error: {
+            code: 'ORGANIZATION_SCOPE_REQUIRED',
+            message: 'Super Admin must select the organization containing this capture',
+          },
+        });
+      }
+    } else if (!user.organizationId || capture.organizationId !== user.organizationId) {
       return reply.code(403).send({
         error: { code: 'CROSS_TENANT_FORBIDDEN', message: 'Access to capture outside your organization is prohibited' },
       });
@@ -556,23 +582,10 @@ export default async function screenRoutes(fastify) {
 
     // Employee ownership check
     if (userRole === Roles.EMPLOYEE) {
-      if (capture.employeeId && capture.employeeId !== user?.id && capture.employeeId !== user?.employeeId) {
+      if (capture.employeeId !== user.id && !(user.employeeId && capture.employeeId === user.employeeId)) {
         return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: 'Employees may only access their own screenshot captures' },
         });
-      }
-    } else if (userRole === Roles.MANAGER) {
-      if (capture.employeeId && capture.employeeId !== user?.id && fastify.prisma?.user?.findUnique) {
-        try {
-          const target = await fastify.prisma.user.findUnique({ where: { id: capture.employeeId } });
-          if (target && target.managerId !== user?.id && target.departmentId !== user?.departmentId) {
-            return reply.code(403).send({
-              error: { code: 'FORBIDDEN', message: 'Managers may only access employees within their assigned scope' },
-            });
-          }
-        } catch (e) {
-          if (e.statusCode === 403) throw e;
-        }
       }
     }
 
@@ -702,7 +715,7 @@ export default async function screenRoutes(fastify) {
     const user = req.user;
     if (user) {
       const userRole = normalizeRole(user.role);
-      if (userRole !== Roles.ORGANIZATION_ADMIN && userRole !== Roles.SUPER_ADMIN) {
+      if (userRole !== Roles.ADMIN && userRole !== Roles.SUPER_ADMIN) {
         return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: 'Only administrators may delete screenshot records' },
         });
@@ -766,7 +779,7 @@ export default async function screenRoutes(fastify) {
     const user = req.user;
     if (user) {
       const userRole = normalizeRole(user.role);
-      if (userRole !== Roles.ORGANIZATION_ADMIN && userRole !== Roles.SUPER_ADMIN) {
+      if (userRole !== Roles.ADMIN && userRole !== Roles.SUPER_ADMIN) {
         return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: 'Only administrators may purge retention captures' },
         });

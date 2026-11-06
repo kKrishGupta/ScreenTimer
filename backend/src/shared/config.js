@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { isIP } from 'node:net';
 
 // Workspace scripts run with `backend/` as cwd, while direct local launches
 // often run from the repository root. Resolve env files from this module so
@@ -43,12 +44,20 @@ export function loadConfig(env = process.env) {
     throw new ConfigError(`HOST must be localhost or 0.0.0.0 (got "${host}")`);
   }
 
-  const port = Number.parseInt(env.PORT ?? '3001', 10);
+  const port = Number(env.PORT ?? '3001');
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new ConfigError(`PORT must be an integer between 1 and 65535 (got "${env.PORT}")`);
   }
 
   const databaseUrl = resolveDatabaseUrl(env);
+  const trustedProxies = (env.TRUSTED_PROXIES || '').split(',').map((value) => value.trim()).filter(Boolean);
+  for (const proxy of trustedProxies) {
+    const [address, prefix, extra] = proxy.split('/');
+    const version = isIP(address);
+    if (!version || extra !== undefined || (prefix !== undefined && (!/^\d+$/.test(prefix) || Number(prefix) > (version === 4 ? 32 : 128)))) {
+      throw new ConfigError('TRUSTED_PROXIES must contain explicit proxy IP addresses or CIDR ranges');
+    }
+  }
   if (!databaseUrl) {
     throw new ConfigError('DATABASE_URL is required (legacy DATABASE is accepted; see backend/.env.example)');
   }
@@ -129,9 +138,10 @@ export function loadConfig(env = process.env) {
     corsOrigins,
     publicAppUrl,
     publicAppDomain,
-    allowPublicRegistration: nodeEnv !== 'production',
+    allowPublicRegistration: env.ALLOW_PUBLIC_REGISTRATION === undefined
+      ? nodeEnv !== 'production' : env.ALLOW_PUBLIC_REGISTRATION === 'true',
     secureSessionCookies: nodeEnv === 'production',
-    trustProxy: nodeEnv === 'production',
+    trustProxy: trustedProxies.length ? trustedProxies : false,
     smtpHost: env.SMTP_HOST ?? 'smtp.gmail.com',
     smtpPort: env.SMTP_PORT ?? '465',
     smtpSecure: env.SMTP_SECURE ?? 'true',

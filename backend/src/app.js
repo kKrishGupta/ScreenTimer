@@ -38,11 +38,11 @@ const CHROMIUM_EXTENSION_ORIGIN = /^chrome-extension:\/\/[a-p]{32}$/;
  */
 export async function buildApp({ config, prisma, logger }) {
   const app = Fastify({
-    trustProxy: Boolean(config.trustProxy),
+    trustProxy: config.trustProxy ?? false,
     logger: logger === false ? false : {
       level: config.logLevel,
       ...logger,
-      redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]',
+      redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-api-key"]', 'req.headers["x-device-secret"]',
         'req.body.resetToken', 'req.body.token', 'req.body.password', 'req.body.newPassword',
         'resetToken', 'token', 'password', 'newPassword'],
       serializers: {
@@ -98,7 +98,7 @@ export async function buildApp({ config, prisma, logger }) {
     maxRequests: 200,
     // Recovery has stricter, independent route limits. Background device sync
     // and dashboard polling must not exhaust the recovery request budget.
-    excludedPaths: ['/api/v1/health', '/api/v1/auth/reset-password-request', '/api/v1/auth/reset-password-confirm'],
+    excludedPaths: ['/api/v1/health', '/api/v1/health/live', '/api/v1/auth/reset-password-request', '/api/v1/auth/reset-password-confirm'],
   }));
 
   await app.register(
@@ -110,8 +110,11 @@ export async function buildApp({ config, prisma, logger }) {
         // Explicit public allowlist (Task 1)
         const isPublic = [
           '/api/v1/health',
-          '/api/v1/auth/register',
+          '/api/v1/health/live',
+          '/api/v1/organization/register',
           '/api/v1/auth/login',
+          '/api/v1/organization/login',
+          '/api/v1/super-admin/login',
           '/api/v1/auth/logout',
           '/api/v1/auth/roles',
           '/api/v1/auth/reset-password-request',

@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { api } from '../lib/api.js';
 import { useApi } from '../hooks/useApi.js';
+import WebsiteBlockingControls from '../components/WebsiteBlockingControls.jsx';
 import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/States.jsx';
 
@@ -95,6 +96,8 @@ export default function BlockedActivityPage() {
           </Button>
         </div>
       </PageHeader>
+
+      <WebsiteBlockingControls />
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

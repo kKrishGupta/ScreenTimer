@@ -12,15 +12,6 @@ export default function RegisterPage() {
   const [busy, setBusy] = useState(false);
   const update = (key) => (value) => setForm((current) => ({ ...current, [key]: value }));
 
-  if (import.meta.env.PROD) {
-    return (
-      <AuthShell title="Registration is unavailable" description="A workspace administrator must provision your DigitalPulse account.">
-        <p className="text-sm text-slate-300">Public organization registration is disabled. Ask your workspace owner for an invitation.</p>
-        <p className="mt-6 text-center text-sm"><Link className="text-sky-400" to="/login">Back to sign in</Link></p>
-      </AuthShell>
-    );
-  }
-
   async function submit(event) {
     event.preventDefault();
     setError('');
@@ -30,13 +21,13 @@ export default function RegisterPage() {
     }
     setBusy(true);
     try {
-      await api.register({
+      await api.registerOrganization({
         displayName: form.displayName.trim(),
         organizationName: form.organizationName.trim(),
         email: form.email.trim(),
         password: form.password,
       });
-      await login({ email: form.email.trim(), password: form.password });
+      await login({ email: form.email.trim(), password: form.password }, { loginType: 'admin' });
 
       navigate('/', { replace: true });
     } catch (err) {
@@ -59,7 +50,7 @@ export default function RegisterPage() {
           {busy ? 'Creating organization…' : 'Create organization'}
         </button>
       </form>
-      <p className="mt-6 text-center text-sm text-slate-400">Already registered? <Link className="text-sky-400" to="/login">Sign in</Link></p>
+      <p className="mt-6 text-center text-sm text-slate-400">Already registered? <Link className="text-sky-400" to="/organization/login">Sign in</Link></p>
     </AuthShell>
   );
 }

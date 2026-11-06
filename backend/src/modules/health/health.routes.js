@@ -10,10 +10,15 @@ const VERSION = process.env.npm_package_version ?? '0.1.0';
  * @param {import('fastify').FastifyInstance} app
  */
 export default async function healthRoutes(app) {
+  // Liveness is intentionally independent of database availability.
+  app.get('/health/live', async (_request, reply) => {
+    return reply.header('Cache-Control', 'no-store').send({ status: 'ok', service: 'digitalpulse-backend' });
+  });
   app.get(
     '/health',
     { schema: { response: { 200: healthResponseSchema, 503: healthResponseSchema } } },
     async (_request, reply) => {
+      reply.header('Cache-Control', 'no-store');
       const database = await probeDatabase(app.prisma);
       if (database.status === 'down' && app.config.nodeEnv === 'production') {
         database.error = 'Database connectivity check failed';

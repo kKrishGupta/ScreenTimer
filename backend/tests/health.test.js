@@ -13,6 +13,14 @@ const fakePrisma = (healthy) => ({
   },
 });
 
+test('liveness stays available without querying the database', async (t) => {
+  const app = await buildApp({ config, prisma: { $queryRaw: async () => { throw new Error('Must not query'); } }, logger: false });
+  t.after(() => app.close());
+  const response = await app.inject('/api/v1/health/live');
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['cache-control'], 'no-store');
+});
+
 test('GET /api/v1/health returns ok when the database is reachable', async (t) => {
   const app = await buildApp({ config, prisma: fakePrisma(true), logger: false });
   t.after(() => app.close());

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../context/AuthContext.jsx';
 
-export default function LoginPage() {
+export default function LoginPage({ mode = 'employee' }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { login } = useAuth();
@@ -24,7 +24,7 @@ async function submit(event) {
   try {
     const result = await login(
       { email: email.trim(), password },
-      { remember }
+      { remember, loginType: mode }
     );
 
     const role = result.user.role;
@@ -40,7 +40,7 @@ async function submit(event) {
       requestedPath?.startsWith('/employee-portal');
 
     const canResumeAdminPath =
-      role !== 'EMPLOYEE' &&
+      ['ADMIN', 'SUPER_ADMIN'].includes(role) &&
       requestedPath &&
       !requestedPath.startsWith('/employee-portal');
 
@@ -65,12 +65,22 @@ async function submit(event) {
 
   function roleDestination(role) {
     if (role === 'EMPLOYEE') return '/employee-portal';
-    if (role === 'SUPER_ADMIN' || role === 'FAMILY_OWNER' || role === 'ORGANIZATION_ADMIN' || role === 'MANAGER') return '/';
-    throw new Error('This account has no supported dashboard role.');
+
+    if (role === 'ADMIN' || role === 'SUPER_ADMIN') {
+      return '/';
+    }
+
+    throw new Error('Unsupported account role.');
   }
 
+  const portalTitles = {
+    employee: { title: 'Employee Login', description: 'Sign in to your personal DigitalPulse workspace.' },
+    admin: { title: 'Organization Admin Login', description: 'Manage your organization and employees.' },
+    'super-admin': { title: 'Super Admin Login', description: 'Access the DigitalPulse platform administration portal.' },
+  };
+
   return (
-    <AuthShell title="Welcome back" description="Sign in to your DigitalPulse workspace.">
+    <AuthShell title={portalTitles[mode].title} description={portalTitles[mode].description}>
       <form onSubmit={submit} className="space-y-4">
         <Field label="Work email" type="email" value={email} onChange={setEmail} required autoComplete="email" />
         <Field label="Password" type="password" value={password} onChange={setPassword} required autoComplete="current-password" />
@@ -86,12 +96,15 @@ async function submit(event) {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-      <p className="mt-6 text-center text-sm text-slate-400">
+      {mode === 'admin' && <p className="mt-6 text-center text-sm text-slate-400">
         New organization?{" "}
-        <Link className="text-sky-400 hover:text-sky-300" to="/register">
-          Create an account
+        <Link className="text-sky-400" to="/organization/register">
+          Register your organization
         </Link>
-      </p>
+      </p>}
+      {mode === 'employee' && <p className="mt-6 text-center text-sm text-slate-400">
+        Need an account? Ask your organization administrator for an invitation.
+      </p>}
     </AuthShell>
   );
 }

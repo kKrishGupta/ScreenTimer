@@ -173,7 +173,7 @@ export default function EmployeeSetupPage() {
   const [installStarted, setInstallStarted] = useState(() => readInstallState(user?.id));
   const [lastCheckedAt, setLastCheckedAt] = useState(null);
   const isEmployee = user?.role === 'EMPLOYEE';
-  const canEnroll = isEmployee || ['ORG_ADMIN', 'ORGANIZATION_ADMIN'].includes(user?.role);
+  const canEnroll = isEmployee || user?.role === 'ADMIN';
   const [deviceKind, setDeviceKind] = useState('DESKTOP_AGENT');
   const [tokens, setTokens] = useState({});
   const [busy, setBusy] = useState('');

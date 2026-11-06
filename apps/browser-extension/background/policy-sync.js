@@ -1,5 +1,5 @@
 import { CONFIG } from '../shared/constants.js';
-import { normalizeBackendUrl } from '../shared/backend-settings.js';
+import { resolveBackendUrl } from '../shared/backend-settings.js';
 
 /**
  * Replaces the extension's dynamic rules with the authenticated device policy.
@@ -14,7 +14,7 @@ export async function syncBlockingRules(chromeApi = globalThis.chrome, fetchImpl
     CONFIG.DEVICE_STORAGE_KEY,
     'dp_device_secret',
   ]);
-  const backendUrl = normalizeBackendUrl(stored[CONFIG.SETTINGS_STORAGE_KEY]?.backendUrl || CONFIG.DEFAULT_BACKEND_URL);
+  const backendUrl = resolveBackendUrl(stored);
   const deviceId = stored[CONFIG.DEVICE_STORAGE_KEY];
   const deviceSecret = stored.dp_device_secret || '';
   if (!deviceId || !deviceSecret) return { updated: false, reason: 'device-not-enrolled' };
@@ -26,8 +26,14 @@ export async function syncBlockingRules(chromeApi = globalThis.chrome, fetchImpl
   if (!res.ok) return { updated: false, reason: `backend-${res.status}` };
 
   const payload = await res.json();
+  if (!Array.isArray(payload.rules)) return { updated: false, reason: 'invalid-policy-response' };
   const rules = Array.isArray(payload.rules)
-    ? payload.rules.filter((rule) => Number.isInteger(rule.id) && rule.condition && rule.action)
+    ? payload.rules.filter((rule) => Number.isInteger(rule.id) && rule.condition && rule.action).map((rule) => ({
+        ...rule,
+        // Redirects require permission for each intercepted website. Native
+        // blocks work with declarativeNetRequest without broad host access.
+        action: rule.action.type === 'redirect' ? { type: 'block' } : rule.action,
+      }))
     : [];
   const existing = await chromeApi.declarativeNetRequest.getDynamicRules();
   await chromeApi.declarativeNetRequest.updateDynamicRules({
@@ -35,4 +41,15 @@ export async function syncBlockingRules(chromeApi = globalThis.chrome, fetchImpl
     addRules: rules,
   });
   return { updated: true, count: rules.length };
+}
+
+export async function syncBlockingRulesWithStatus(chromeApi = globalThis.chrome, fetchImpl = globalThis.fetch) {
+  let result;
+  try {
+    result = await syncBlockingRules(chromeApi, fetchImpl);
+  } catch (error) {
+    result = { updated: false, reason: error.message || 'Policy sync failed' };
+  }
+  await chromeApi.storage.local.set({ dp_policy_sync: { ...result, checkedAt: new Date().toISOString() } });
+  return result;
 }

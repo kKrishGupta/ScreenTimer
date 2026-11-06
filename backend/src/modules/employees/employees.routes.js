@@ -136,15 +136,23 @@ export default async function employeeRoutes(fastify) {
       });
     }
 
-    const orgId = user.role === Roles.SUPER_ADMIN && req.query?.organizationId
-      ? req.query.organizationId
-      : user.organizationId;
-    if (user.role !== Roles.SUPER_ADMIN && !orgId) {
-      return reply.status(403).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'An organization scope is required to view employee activity' } });
+    const userRole = normalizeRole(user.role);
+
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before viewing this data',
+        },
+      });
     }
 
     let list = await fetchEmployees(orgId);
-    const userRole = normalizeRole(user.role);
 
     if (userRole === Roles.EMPLOYEE) {
       list = list.filter(
@@ -152,15 +160,6 @@ export default async function employeeRoutes(fastify) {
           e.id === user.id ||
           (e.companyEmail && user.email && e.companyEmail.toLowerCase() === user.email.toLowerCase()) ||
           (e.email && user.email && e.email.toLowerCase() === user.email.toLowerCase()),
-      );
-    } else if (userRole === Roles.MANAGER) {
-      list = list.filter(
-        (e) =>
-          e.id === user.id ||
-          (e.companyEmail && user.email && e.companyEmail.toLowerCase() === user.email.toLowerCase()) ||
-          e.managerId === user.id ||
-          (user.departmentId && e.departmentId === user.departmentId) ||
-          (user.department && e.department && e.department.toLowerCase() === user.department.toLowerCase()),
       );
     }
 
@@ -295,15 +294,23 @@ export default async function employeeRoutes(fastify) {
       });
     }
 
-    const orgId = user.role === Roles.SUPER_ADMIN && req.query?.organizationId
-      ? req.query.organizationId
-      : user.organizationId;
-    if (user.role !== Roles.SUPER_ADMIN && !orgId) {
-      return reply.status(403).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'An organization scope is required to view employees' } });
+    const userRole = normalizeRole(user.role);
+
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before viewing this data',
+        },
+      });
     }
 
     let list = await fetchEmployees(orgId);
-    const userRole = normalizeRole(user.role);
 
     // Enforce role-based access control
     if (userRole === Roles.EMPLOYEE) {
@@ -313,16 +320,6 @@ export default async function employeeRoutes(fastify) {
           e.id === user.id ||
           (e.companyEmail && user.email && e.companyEmail.toLowerCase() === user.email.toLowerCase()) ||
           (e.email && user.email && e.email.toLowerCase() === user.email.toLowerCase()),
-      );
-    } else if (userRole === Roles.MANAGER) {
-      // Managers may access only employees within their assigned scope
-      list = list.filter(
-        (e) =>
-          e.id === user.id ||
-          (e.companyEmail && user.email && e.companyEmail.toLowerCase() === user.email.toLowerCase()) ||
-          e.managerId === user.id ||
-          (user.departmentId && e.departmentId === user.departmentId) ||
-          (user.department && e.department && e.department.toLowerCase() === user.department.toLowerCase()),
       );
     }
 
@@ -368,7 +365,20 @@ export default async function employeeRoutes(fastify) {
     }
 
     const { id } = req.params;
-    const orgId = user.role === Roles.SUPER_ADMIN ? null : user.organizationId;
+    const userRole = normalizeRole(user.role);
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before viewing this employee',
+        },
+      });
+    }
     const list = await fetchEmployees(orgId);
     const emp = list.find((e) => e.id === id || e.employeeId === id || e.companyEmail === id);
 
@@ -385,8 +395,6 @@ export default async function employeeRoutes(fastify) {
       });
     }
 
-    const userRole = normalizeRole(user.role);
-
     // Scope check: Employee can only access their own profile
     if (userRole === Roles.EMPLOYEE) {
       const isSelf =
@@ -398,22 +406,6 @@ export default async function employeeRoutes(fastify) {
       if (!isSelf) {
         return reply.code(403).send({
           error: { code: 'FORBIDDEN', message: 'Employees may access only their own authorized records' },
-        });
-      }
-    }
-
-    // Scope check: Manager can only access assigned employees
-    if (userRole === Roles.MANAGER) {
-      const isAssigned =
-        emp.id === user.id ||
-        (emp.companyEmail && user.email && emp.companyEmail.toLowerCase() === user.email.toLowerCase()) ||
-        emp.managerId === user.id ||
-        (user.departmentId && emp.departmentId === user.departmentId) ||
-        (user.department && emp.department && emp.department.toLowerCase() === user.department.toLowerCase());
-
-      if (!isAssigned) {
-        return reply.code(403).send({
-          error: { code: 'FORBIDDEN', message: 'Managers may access only employees within their assigned scope' },
         });
       }
     }
@@ -496,12 +488,21 @@ export default async function employeeRoutes(fastify) {
     const user = req.user;
     if (!user) return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
     const role = normalizeRole(user.role);
-    if (![Roles.ORGANIZATION_ADMIN, Roles.MANAGER, Roles.SUPER_ADMIN].includes(role)) {
-      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only an administrator or manager can send a setup reminder' } });
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(role)) {
+      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only an administrator can send a setup reminder' } });
     }
-    const orgId = role === Roles.SUPER_ADMIN ? null : user.organizationId;
-    if (role !== Roles.SUPER_ADMIN && !orgId) {
-      return reply.code(403).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'An organization scope is required to send a setup reminder' } });
+    const orgId =
+      role === Roles.SUPER_ADMIN
+        ? req.query?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before sending a setup reminder',
+        },
+      });
     }
     if (!prisma?.user?.findFirst || !prisma?.invitation?.findFirst) {
       return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'Employee and invitation storage is unavailable' } });
@@ -513,7 +514,7 @@ export default async function employeeRoutes(fastify) {
         where: {
           id: req.params.employeeId,
           role: Roles.EMPLOYEE,
-          ...(orgId ? { organizationId: orgId } : {}),
+          organizationId: orgId,
         },
         select: {
           id: true,
@@ -535,9 +536,6 @@ export default async function employeeRoutes(fastify) {
     if (!employee || (orgId && employee.organizationId !== orgId)) {
       return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Employee not found' } });
     }
-    if (role === Roles.MANAGER && employee.managerId !== user.id && !(user.departmentId && employee.departmentId === user.departmentId)) {
-      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Managers may send reminders only within their assigned scope' } });
-    }
 
     if (String(employee.employmentStatus || '').toLowerCase() !== 'active' || !employee.passwordHash) {
       return reply.code(409).send({
@@ -553,7 +551,7 @@ export default async function employeeRoutes(fastify) {
     try {
       pendingInvitation = await prisma.invitation.findFirst({
         where: {
-          organizationId: employee.organizationId,
+          organizationId: orgId,
           email: employee.email,
           acceptedAt: null,
           revokedAt: null,
@@ -640,8 +638,13 @@ export default async function employeeRoutes(fastify) {
     }
 
     const userRole = normalizeRole(user.role);
-    if (![Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN, Roles.MANAGER].includes(userRole)) {
-      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only an organization admin or manager can invite an employee' } });
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
+      return reply.code(403).send({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Only administrators can invite employees',
+        },
+      });
     }
     const body = req.body ?? {};
     const displayName = body.displayName || `${body.firstName || ''} ${body.lastName || ''}`.trim();
@@ -678,9 +681,9 @@ export default async function employeeRoutes(fastify) {
     }
   });
 
-  // PATCH /api/v1/employees/:id (Protected: Admin or Manager within scope)
+  // PATCH /api/v1/employees/:id (Protected: Admin or Super Admin within organization scope)
   fastify.patch('/employees/:id/monitoring-authorization', {
-    preHandler: [fastify.authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN)],
+    preHandler: [fastify.authMiddleware.requireRole(Roles.ADMIN)],
   }, async (req, reply) => {
     const authorized = req.body?.authorized;
     if (typeof authorized !== 'boolean') {
@@ -737,7 +740,19 @@ export default async function employeeRoutes(fastify) {
     }
 
     const { id } = req.params;
-    const orgId = user.role === Roles.SUPER_ADMIN ? null : user.organizationId;
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId || req.body?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before performing this operation',
+        },
+      });
+    }
     const list = await fetchEmployees(orgId);
     const emp = list.find((e) => e.id === id || e.employeeId === id);
 
@@ -750,12 +765,6 @@ export default async function employeeRoutes(fastify) {
     if (orgId && emp.organizationId && emp.organizationId !== orgId) {
       return reply.code(403).send({
         error: { code: 'CROSS_TENANT_FORBIDDEN', message: 'Access denied: employee belongs to another organization' },
-      });
-    }
-
-    if (userRole === Roles.MANAGER && emp.managerId !== user.id && emp.departmentId !== user.departmentId) {
-      return reply.code(403).send({
-        error: { code: 'FORBIDDEN', message: 'Managers may access only employees within their assigned scope' },
       });
     }
 
@@ -800,14 +809,26 @@ export default async function employeeRoutes(fastify) {
     }
 
     const userRole = normalizeRole(user.role);
-    if (userRole === Roles.EMPLOYEE || userRole === Roles.MANAGER) {
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
       return reply.status(403).send({
         error: { code: 'FORBIDDEN', message: 'Only administrators may delete employee records' },
       });
     }
 
     const { id } = req.params;
-    const orgId = user.role === Roles.SUPER_ADMIN ? null : user.organizationId;
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId || req.body?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before performing this operation',
+        },
+      });
+    }
     const list = await fetchEmployees(orgId);
     const emp = list.find((e) => e.id === id || e.employeeId === id);
 
@@ -832,7 +853,7 @@ export default async function employeeRoutes(fastify) {
     return { success: true, deactivatedId: emp.id };
   });
 
-  // POST /api/v1/employees/:id/devices (Protected: Admin or Manager within scope)
+  // POST /api/v1/employees/:id/devices (Protected: Admin or Super Admin within organization scope)
   fastify.post('/employees/:id/devices', async (req, reply) => {
     const user = req.user;
     if (!user) {
@@ -841,7 +862,9 @@ export default async function employeeRoutes(fastify) {
       });
     }
 
-    if (normalizeRole(user.role) === Roles.EMPLOYEE) {
+    const userRole = normalizeRole(user.role);
+
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
       return reply.status(403).send({
         error: { code: 'FORBIDDEN', message: 'Employees are not authorized to assign devices' },
       });
@@ -855,7 +878,19 @@ export default async function employeeRoutes(fastify) {
       });
     }
 
-    const orgId = user.role === Roles.SUPER_ADMIN ? null : user.organizationId;
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId || req.body?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before performing this operation',
+        },
+      });
+    }
     const list = await fetchEmployees(orgId);
     const emp = list.find((e) => e.id === id || e.employeeId === id);
 
@@ -865,17 +900,51 @@ export default async function employeeRoutes(fastify) {
       });
     }
 
-    if (!prisma?.device?.findFirst || !prisma?.device?.update) return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'Device assignment storage is unavailable' } });
-    const device = await prisma.device.findFirst({ where: { id: deviceId, organizationId: emp.organizationId, isRevoked: false, OR: [{ userId: null }, { userId: emp.id }] } });
-    if (!device) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Active device not found in this organization' } });
-    await prisma.device.update({ where: { id: deviceId }, data: { userId: emp.id } });
+    if (!prisma?.device?.updateMany) return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'Device assignment storage is unavailable' } });
+    const assigned = await prisma.device.updateMany({
+      where: {
+        id: deviceId,
+        organizationId: orgId,
+        isRevoked: false,
+        OR: [{ userId: null }, { userId: emp.id }],
+      },
+      data: { userId: emp.id },
+    });
+
+    if (assigned.count !== 1) {
+      return reply.code(404).send({
+        error: {
+          code: 'DEVICE_NOT_AVAILABLE',
+          message: 'Active device not found or unavailable in this organization',
+        },
+      });
+    }
     return { success: true, assignedDeviceIds: [...new Set([...(emp.assignedDeviceIds || []), deviceId])] };
   });
 
   // BACKWARD COMPATIBILITY ALIASES for /family/members
   fastify.get('/family/members', async (req, reply) => {
     const user = req.user;
-    const orgId = user?.organizationId;
+    if (!user) {
+      return reply.code(401).send({
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+      });
+    }
+    const userRole = normalizeRole(user.role);
+
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before viewing members',
+        },
+      });
+    }
     let list = await fetchEmployees(orgId);
 
     if (user && normalizeRole(user.role) === Roles.EMPLOYEE) {
@@ -894,10 +963,41 @@ export default async function employeeRoutes(fastify) {
   });
 
   fastify.post('/family/members', async (req, reply) => {
+    const user = req.user;
+    if (!user) {
+      return reply.code(401).send({
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+      });
+    }
+    const userRole = normalizeRole(user?.role);
+
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
+      return reply.code(403).send({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Only administrators can manage employees',
+        },
+      });
+    }
+
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId || req.body?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before performing this operation',
+        },
+      });
+    }
+
     const { displayName, email } = req.body ?? {};
     if (!displayName || !email) return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'Name and email are required to invite a member' } });
     try {
-      const result = await fastify.authService.createInvitation({ organizationId: req.user.organizationId, email, displayName, invitedBy: req.user.email });
+      const result = await fastify.authService.createInvitation({ organizationId: orgId, email, displayName, invitedBy: req.user.email });
       return reply.code(201).send({ success: true, invitation: result });
     } catch (error) {
       return reply.code(error.statusCode || 503).send({ error: { code: 'INVITATION_FAILED', message: error.message } });
@@ -905,8 +1005,37 @@ export default async function employeeRoutes(fastify) {
   });
 
   fastify.patch('/family/members/:id', async (req, reply) => {
+    const user = req.user;
+    if (!user) {
+      return reply.code(401).send({
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+      });
+    }
+    const userRole = normalizeRole(user?.role);
+
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
+      return reply.code(403).send({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Only administrators can manage employees',
+        },
+      });
+    }
+
     const { id } = req.params;
-    const orgId = req.user?.organizationId;
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId || req.body?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before performing this operation',
+        },
+      });
+    }
     const list = await fetchEmployees(orgId);
     const emp = list.find((e) => e.id === id || e.employeeId === id);
 
@@ -926,8 +1055,37 @@ export default async function employeeRoutes(fastify) {
   });
 
   fastify.delete('/family/members/:id', async (req, reply) => {
+    const user = req.user;
+    if (!user) {
+      return reply.code(401).send({
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+      });
+    }
+    const userRole = normalizeRole(user?.role);
+
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
+      return reply.code(403).send({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Only administrators can manage employees',
+        },
+      });
+    }
+
     const { id } = req.params;
-    const orgId = req.user?.organizationId;
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId || req.body?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before performing this operation',
+        },
+      });
+    }
     const list = await fetchEmployees(orgId);
     const emp = list.find((e) => e.id === id || e.employeeId === id);
 
@@ -943,6 +1101,23 @@ export default async function employeeRoutes(fastify) {
   });
 
   fastify.post('/family/members/:id/devices', async (req, reply) => {
+    const user = req.user;
+    if (!user) {
+      return reply.code(401).send({
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+      });
+    }
+    const userRole = normalizeRole(user.role);
+
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
+      return reply.code(403).send({
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Only administrators can manage employees',
+        },
+      });
+    }
+
     const { id } = req.params;
     const { deviceId } = req.body ?? {};
     if (!deviceId) {
@@ -951,7 +1126,19 @@ export default async function employeeRoutes(fastify) {
       });
     }
 
-    const orgId = req.user?.organizationId;
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId || req.body?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before performing this operation',
+        },
+      });
+    }
     const list = await fetchEmployees(orgId);
     const emp = list.find((e) => e.id === id || e.employeeId === id);
 
@@ -961,89 +1148,171 @@ export default async function employeeRoutes(fastify) {
       });
     }
 
-    if (!emp.assignedDeviceIds.includes(deviceId)) {
-      emp.assignedDeviceIds.push(deviceId);
+    if (!prisma?.device?.updateMany) {
+      return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'Device assignment storage is unavailable' } });
     }
 
-    if (prisma?.device?.update) {
-      try {
-        await prisma.device.update({
-          where: { id: deviceId },
-          data: { userId: emp.id },
-        });
-      } catch {
-        // Safe
-      }
+    const assigned = await prisma.device.updateMany({
+      where: {
+        id: deviceId,
+        organizationId: orgId,
+        isRevoked: false,
+        OR: [{ userId: null }, { userId: emp.id }],
+      },
+      data: { userId: emp.id },
+    });
+
+    if (assigned.count !== 1) {
+      return reply.code(404).send({
+        error: {
+          code: 'DEVICE_NOT_AVAILABLE',
+          message: 'Active device not found or unavailable in this organization',
+        },
+      });
+    }
+
+    if (!emp.assignedDeviceIds.includes(deviceId)) {
+      emp.assignedDeviceIds.push(deviceId);
     }
 
     return { success: true, assignedDeviceIds: emp.assignedDeviceIds };
   });
 
   // GET /api/v1/departments
-  fastify.get('/departments', async (req) => {
-    const orgId = req.user?.organizationId;
+  fastify.get('/departments', async (req, reply) => {
+    const user = req.user;
+    if (!user) {
+      return reply.code(401).send({
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+      });
+    }
+    const userRole = normalizeRole(user.role);
+
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before viewing departments',
+        },
+      });
+    }
     if (!prisma?.department?.findMany) throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Department storage is unavailable');
-    const where = {};
-    if (orgId) where.organizationId = orgId;
+    const where = { organizationId: orgId };
     const departments = await prisma.department.findMany({ where, orderBy: { name: 'asc' } });
     return { departments, count: departments.length };
   });
 
-  // POST /api/v1/departments (Admin or Manager)
+  // POST /api/v1/departments (Admin or Super Admin)
   fastify.post('/departments', async (req, reply) => {
     const userRole = normalizeRole(req.user?.role);
-    if (userRole === Roles.EMPLOYEE) {
+
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
       return reply.code(403).send({
-        error: { code: 'FORBIDDEN', message: 'Insufficient privileges to create departments' },
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Insufficient privileges to create departments',
+        },
       });
     }
 
-    const { name, siteId } = req.body || {};
+    const { name, siteId, organizationId: requestedOrganizationId } = req.body || {};
+
     if (!name || typeof name !== 'string' || !name.trim()) {
       return reply.code(400).send({
-        error: { code: 'INVALID_INPUT', message: 'Department name is required' },
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Department name is required',
+        },
       });
     }
 
-    const orgId = req.user?.organizationId;
-    const cleanName = name.trim();
+    // Admins are restricted to their own organization.
+    // Super Admins must explicitly select an organization.
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? requestedOrganizationId
+        : req.user.organizationId;
 
-    if (!orgId || !prisma?.department?.create) return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'Department storage is unavailable' } });
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'A valid organization must be selected',
+        },
+      });
+    }
+
+    if (!prisma?.department?.create) {
+      return reply.code(503).send({
+        error: {
+          code: 'STORAGE_UNAVAILABLE',
+          message: 'Department storage is unavailable',
+        },
+      });
+    }
+
     try {
-        const dept = await prisma.department.create({
-          data: {
-            organizationId: orgId,
-            name: cleanName,
-            siteId: siteId || null,
+      const dept = await prisma.department.create({
+        data: {
+          organizationId: orgId,
+          name: name.trim(),
+          siteId: siteId || null,
+        },
+      });
+
+      return reply.code(201).send({ department: dept });
+    } catch (err) {
+      if (err.code === 'P2002') {
+        return reply.code(409).send({
+          error: {
+            code: 'DUPLICATE_DEPARTMENT',
+            message: 'A department with this name already exists in this organization',
           },
         });
-        return reply.code(201).send({ department: dept });
-    } catch (err) {
-        if (err.code === 'P2002') {
-          return reply.code(409).send({
-            error: { code: 'DUPLICATE_DEPARTMENT', message: 'A department with this name already exists in your organization' },
-          });
-        }
-        throw err;
       }
+
+      throw err;
+    }
   });
 
   // DELETE /api/v1/departments/:id (Admin only)
   fastify.delete('/departments/:id', async (req, reply) => {
-    const userRole = normalizeRole(req.user?.role);
-    if (userRole !== Roles.ORGANIZATION_ADMIN && userRole !== Roles.SUPER_ADMIN && userRole !== Roles.FAMILY_OWNER) {
+    const user = req.user;
+    if (!user) {
+      return reply.code(401).send({
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+      });
+    }
+    const userRole = normalizeRole(user.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
       return reply.code(403).send({
         error: { code: 'FORBIDDEN', message: 'Only administrators can delete departments' },
       });
     }
 
     const { id } = req.params;
-    const orgId = req.user?.organizationId;
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? req.query?.organizationId || req.body?.organizationId
+        : user.organizationId;
+
+    if (!orgId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before performing this operation',
+        },
+      });
+    }
 
     if (!prisma?.department?.deleteMany) return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'Department storage is unavailable' } });
     try {
-        const where = { id };
-        if (orgId) where.organizationId = orgId;
+        const where = { id, organizationId: orgId };
         const res = await prisma.department.deleteMany({ where });
         if (res.count === 0) {
           return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Department not found' } });

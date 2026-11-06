@@ -22,26 +22,47 @@ function invalidResetLink() {
 
 export const Roles = {
   SUPER_ADMIN: 'SUPER_ADMIN',
-  ORGANIZATION_ADMIN: 'ORGANIZATION_ADMIN',
-  ORG_ADMIN: 'ORGANIZATION_ADMIN',
-  MANAGER: 'MANAGER',
+  ADMIN: 'ADMIN',
   EMPLOYEE: 'EMPLOYEE',
-  FAMILY_OWNER: 'FAMILY_OWNER',
-  ADULT_MEMBER: 'ADULT_MEMBER',
-  SUPERVISED_MEMBER: 'SUPERVISED_MEMBER',
-  OWNER: 'OWNER',
-  MEMBER: 'MEMBER',
 };
 
 /**
- * Normalizes roles to canonical enterprise roles: SUPER_ADMIN, ORGANIZATION_ADMIN, MANAGER, EMPLOYEE.
+ * Normalizes legacy database/API role names to the
+ * three canonical DigitalPulse roles.
  */
 export function normalizeRole(role) {
   if (!role) return Roles.EMPLOYEE;
+
   const upper = String(role).toUpperCase();
-  if (upper === 'SUPER_ADMIN') return Roles.SUPER_ADMIN;
-  if (['ORGANIZATION_ADMIN', 'ORG_ADMIN', 'FAMILY_OWNER', 'OWNER'].includes(upper)) return Roles.ORGANIZATION_ADMIN;
-  if (upper === 'MANAGER') return Roles.MANAGER;
+
+  if (upper === 'SUPER_ADMIN') {
+    return Roles.SUPER_ADMIN;
+  }
+
+  if (
+    [
+      'ADMIN',
+      'ORG_ADMIN',
+      'ORGANIZATION_ADMIN',
+      'OWNER',
+      'FAMILY_OWNER',
+      'MANAGER',
+    ].includes(upper)
+  ) {
+    return Roles.ADMIN;
+  }
+
+  if (
+    [
+      'EMPLOYEE',
+      'MEMBER',
+      'ADULT_MEMBER',
+      'SUPERVISED_MEMBER',
+    ].includes(upper)
+  ) {
+    return Roles.EMPLOYEE;
+  }
+
   return Roles.EMPLOYEE;
 }
 
@@ -285,7 +306,7 @@ export class AuthService {
     userId = 'test-user-admin-1',
     email = 'admin@enterprise.local',
     displayName = 'Enterprise Admin',
-    role = Roles.ORGANIZATION_ADMIN,
+    role = Roles.ADMIN,
     organizationId = '00000000-0000-0000-0000-000000000000',
     ...rest
   } = {}) {
@@ -322,7 +343,7 @@ export class AuthService {
     }
     const cleanEmail = email.toLowerCase().trim();
     const { hash, salt } = hashPassword(password);
-    const assignedRole = Roles.ORGANIZATION_ADMIN;
+    const assignedRole = Roles.ADMIN;
 
     if (this.isProduction && (!this.prisma?.user?.findFirst || !this.prisma?.user?.create || !this.prisma?.organization?.create || !this.prisma?.$transaction)) {
       const unavailable = new Error('Transactional registration storage is unavailable');
@@ -356,7 +377,7 @@ export class AuthService {
               displayName: displayName || cleanEmail.split('@')[0],
               // Persist the canonical organization-admin enum value. The API
               // normalizes legacy OWNER/FAMILY_OWNER aliases on read.
-              role: 'ORG_ADMIN',
+              role: 'ADMIN',
               passwordHash: hash,
               passwordSalt: salt,
             },
@@ -413,7 +434,7 @@ export class AuthService {
   async _registerInvitedUser({ email, password, displayName, organizationId, role, departmentId, employeeNumber, shiftStart, shiftEnd, workingDays, shiftTimezone }) {
     const cleanEmail = email.toLowerCase().trim();
     const { hash, salt } = hashPassword(password);
-    const assignedRole = normalizeRole(role) === Roles.MANAGER ? Roles.MANAGER : Roles.EMPLOYEE;
+    const assignedRole = Roles.EMPLOYEE;
 
     if (this.isProduction && (!this.prisma?.user?.findFirst || !this.prisma?.user?.create || !this.prisma?.$transaction)) {
       const unavailable = new Error('Transactional employee registration storage is unavailable');
@@ -490,7 +511,14 @@ export class AuthService {
   /**
    * Authenticates credentials, creates a session token, and returns user session.
    */
-  async login({ email, password, rememberMe = true, ipAddress = '127.0.0.1', userAgent = 'DigitalPulse Client' }) {
+  async login({
+    email,
+    password,
+    rememberMe = true,
+    ipAddress = '127.0.0.1',
+    userAgent = 'DigitalPulse Client',
+    expectedRole = null,
+  }) {
     if (!email || !password) {
       const err = new Error('Email and password are required');
       err.statusCode = 400;
@@ -568,14 +596,34 @@ export class AuthService {
       throw err;
     }
 
+    const normalizedRole = normalizeRole(user.role);
+
+    if (expectedRole && normalizedRole !== normalizeRole(expectedRole)) {
+      await this._recordFailedLogin(cleanEmail);
+
+      await this.logAuthEvent({
+        organizationId: user.organizationId,
+        action: 'LOGIN_FAILED',
+        actor: cleanEmail,
+        details: {
+          reason: 'Login portal role mismatch',
+          expectedRole,
+          actualRole: normalizedRole,
+          ipAddress,
+        },
+      });
+
+      const err = new Error('Invalid email or password');
+      err.statusCode = 401;
+      throw err;
+    }
+
     // Success: clear rate limit counter
     await this._clearLoginThrottling(cleanEmail);
 
     const token = crypto.randomBytes(32).toString('hex');
     const sessionLifetimeMs = rememberMe ? 7 * 24 * 60 * 60 * 1000 : 12 * 60 * 60 * 1000;
     const expiresAt = new Date(Date.now() + sessionLifetimeMs);
-    const normalizedRole = normalizeRole(user.role);
-
     const sessionData = {
       id: crypto.randomUUID(),
       userId: user.id,
@@ -1083,7 +1131,13 @@ export class AuthService {
       err.statusCode = 503;
       throw err;
     }
-    const roleValue = normalizeRole(role) === Roles.MANAGER ? 'MANAGER' : 'EMPLOYEE';
+    if (role && normalizeRole(role) !== Roles.EMPLOYEE) {
+      const err = new Error('Only Employee invitations are permitted.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const roleValue = Roles.EMPLOYEE;
     if (this.prisma.invitation.findFirst) {
       const active = await this.prisma.invitation.findFirst({ where: { organizationId, email: cleanEmail, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } } });
       if (active) {
@@ -1193,7 +1247,7 @@ export class AuthService {
       invitation: {
         displayName: invitation.displayName,
         email: invitation.email,
-        role: normalizeRole(invitation.role) === Roles.MANAGER ? Roles.MANAGER : Roles.EMPLOYEE,
+        role: Roles.EMPLOYEE,
         department: department?.name || null,
         shiftStart: invitation.shiftStart,
         shiftEnd: invitation.shiftEnd,
@@ -1250,7 +1304,7 @@ export class AuthService {
       invitation: {
         id: invitation.id,
         email: invitation.email,
-        role: normalizeRole(invitation.role) === Roles.MANAGER ? Roles.MANAGER : Roles.EMPLOYEE,
+        role: Roles.EMPLOYEE,
         displayName: invitation.displayName,
       },
       organizationId: invitation.organizationId,
@@ -1320,7 +1374,7 @@ export class AuthService {
           },
         });
 
-        const invitedRole = normalizeRole(invitation.role) === Roles.MANAGER ? Roles.MANAGER : Roles.EMPLOYEE;
+        const invitedRole = Roles.EMPLOYEE;
         if (existingUsers.length > 0) {
           if (!authenticatedUser) {
             return { kind: 'existing-account-sign-in-required' };

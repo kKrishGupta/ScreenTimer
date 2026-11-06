@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 export default function EmployeesPage() {
   const { user } = useAuth();
-  const canAuthorizeMonitoring = ['ORG_ADMIN', 'ORGANIZATION_ADMIN'].includes(user?.role);
+  const canAuthorizeMonitoring = user?.role === 'ADMIN';
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
@@ -481,7 +481,7 @@ export default function EmployeesPage() {
             <div className="flex items-start justify-between"><div><h2 className="text-lg font-bold text-white">Invite employee</h2><p className="mt-1 text-xs text-slate-400">They set their password when they accept. The link expires in seven days.</p></div><button type="button" onClick={() => { setShowInviteModal(false); setInviteCreated(false); setInviteLink(''); setInviteError(''); }} className="text-slate-400 hover:text-white">×</button></div>
             <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Employee name" required className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" />
             <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="employee@company.com" required className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" />
-            <div className="grid grid-cols-2 gap-3"><input value={inviteDepartment} onChange={(e) => setInviteDepartment(e.target.value)} placeholder="Department" required className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /><select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"><option value="EMPLOYEE">Employee</option><option value="MANAGER">Manager</option></select></div>
+            <div className="grid grid-cols-2 gap-3"><input value={inviteDepartment} onChange={(e) => setInviteDepartment(e.target.value)} placeholder="Department" required className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /><select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"><option value="EMPLOYEE">Employee</option></select></div>
             <div className="grid grid-cols-2 gap-3"><label className="text-xs text-slate-400">Starts<input type="time" value={newShiftStart} onChange={(e) => setNewShiftStart(e.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /></label><label className="text-xs text-slate-400">Ends<input type="time" value={newShiftEnd} onChange={(e) => setNewShiftEnd(e.target.value)} className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /></label></div>
             {inviteError && <p role="status" className="text-sm text-amber-200">{inviteError}</p>}
             {inviteLink && <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-100"><p className="mb-2">Copy this one-time invitation link:</p><code className="break-all">{inviteLink}</code><button type="button" onClick={() => handleCopyInvitationLink(inviteLink)} className="ml-3 text-emerald-300 underline">Copy</button></div>}
@@ -674,7 +674,6 @@ export default function EmployeesPage() {
                     />
                     <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white">
                       <option value="EMPLOYEE">Employee</option>
-                      <option value="MANAGER">Manager</option>
                     </select>
                     <Button type="submit" disabled={busy} className="w-full bg-emerald-600 text-white">
                       {busy ? 'Sending…' : 'Send invitation'}

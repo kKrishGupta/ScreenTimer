@@ -62,7 +62,7 @@ test('requires secure, explicit HTTPS origins and reset URLs in production', () 
   const cfg = loadConfig(production);
   assert.equal(cfg.host, '0.0.0.0');
   assert.equal(cfg.secureSessionCookies, true);
-  assert.equal(cfg.trustProxy, true);
+  assert.equal(cfg.trustProxy, false);
   assert.equal(cfg.invitationAcceptUrl, 'https://digitalpulse.example.test/accept-invitation');
   assert.equal(cfg.passwordResetUrl, 'https://digitalpulse.example.test/reset-password');
   assert.throws(() => loadConfig({ ...production, CORS_ORIGINS: 'http://digitalpulse.example.test' }), /HTTPS origins/);
@@ -70,4 +70,12 @@ test('requires secure, explicit HTTPS origins and reset URLs in production', () 
   assert.throws(() => loadConfig({ ...production, PUBLIC_APP_URL: undefined }), /PUBLIC_APP_URL is required/);
   assert.throws(() => loadConfig({ ...production, PUBLIC_APP_DOMAIN: 'other.example.test' }), /match the PUBLIC_APP_URL hostname/);
   assert.throws(() => loadConfig({ ...production, DATABASE_URL: 'postgresql://user:pass@db.example.test:5432/dp' }), /sslmode/);
+});
+
+test('proxy trust requires explicit IPs or CIDRs and ports reject trailing junk', () => {
+  assert.deepEqual(loadConfig({ ...base, TRUSTED_PROXIES: '127.0.0.1,10.0.0.0/24' }).trustProxy, ['127.0.0.1', '10.0.0.0/24']);
+  for (const value of ['true', '1', 'example.com', '10.0.0.1/99']) {
+    assert.throws(() => loadConfig({ ...base, TRUSTED_PROXIES: value }), /TRUSTED_PROXIES/);
+  }
+  assert.throws(() => loadConfig({ ...base, PORT: '3001junk' }), /PORT/);
 });

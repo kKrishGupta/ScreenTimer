@@ -1,4 +1,4 @@
-import { normalizeBackendUrl } from '../shared/backend-settings.js';
+import { resolveBackendUrl } from '../shared/backend-settings.js';
 
 export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) {
   const notEnrolledMessage = 'Enroll this device with the one-time token from your DigitalPulse account before monitoring can start.';
@@ -63,7 +63,7 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
     if (stored.dp_device_secret && stored[config.DEVICE_STORAGE_KEY]) {
       return { success: true, deviceId: stored[config.DEVICE_STORAGE_KEY], alreadyEnrolled: true };
     }
-    const backendUrl = normalizeBackendUrl(stored[config.SETTINGS_STORAGE_KEY]?.backendUrl || config.DEFAULT_BACKEND_URL);
+    const backendUrl = resolveBackendUrl(stored, config);
     let response;
     try {
       response = await fetchImpl(`${backendUrl}/api/v1/devices/enroll`, {
@@ -87,6 +87,7 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
     if (!response.ok || !result.deviceSecret) throw new Error(result.error?.message || `Enrollment was rejected by the backend (HTTP ${response.status}).`);
     await chromeApi.storage.local.set({
       [config.DEVICE_STORAGE_KEY]: result.deviceId,
+      [config.SETTINGS_STORAGE_KEY]: { ...stored[config.SETTINGS_STORAGE_KEY], backendUrl },
       dp_device_secret: result.deviceSecret,
       dp_enrollment_status: 'enrolled',
       dp_device_connection_status: 'waiting',
@@ -109,7 +110,7 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
     const deviceId = stored[config.DEVICE_STORAGE_KEY];
     const deviceSecret = stored.dp_device_secret;
     let backendUrl;
-    try { backendUrl = normalizeBackendUrl(stored[config.SETTINGS_STORAGE_KEY]?.backendUrl || config.DEFAULT_BACKEND_URL); }
+    try { backendUrl = resolveBackendUrl(stored, config); }
     catch (error) {
       await chromeApi.storage.local.set({ dp_monitoring_allowed: false, dp_monitoring_allowed_until: null, dp_device_connection_status: 'offline', dp_sync_error: error.message });
       return { ok: false, error: error.message };
@@ -182,7 +183,7 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
     if (audit.candidates.length === 0) return { ok: false, queued: queue.length, synced: 0, audit, error: 'No pending events passed local validation. All queued records are retained for review.' };
 
     let backendUrl;
-    try { backendUrl = normalizeBackendUrl(stored[config.SETTINGS_STORAGE_KEY]?.backendUrl || config.DEFAULT_BACKEND_URL); }
+    try { backendUrl = resolveBackendUrl(stored, config); }
     catch (error) { return { ok: false, error: error.message }; }
     const events = audit.candidates.slice(0, 50);
     const batch = {

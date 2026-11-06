@@ -1,5 +1,5 @@
 import { CONFIG } from '../shared/constants.js';
-import { normalizeBackendUrl, saveBackendUrl } from '../shared/backend-settings.js';
+import { normalizeBackendUrl } from '../shared/backend-settings.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const statusBadge = document.getElementById('status-badge');
@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const lastHeartbeatEl = document.getElementById('last-heartbeat');
   const connectionKeys = [
     'dp_device_connection_status', 'dp_last_heartbeat_at', 'dp_last_successful_sync_at',
-    'dp_sync_error', 'dp_monitoring_allowed', 'dp_monitoring_allowed_until', 'dp_monitoring_reason',
+    'dp_sync_error', 'dp_monitoring_allowed', 'dp_monitoring_allowed_until', 'dp_monitoring_reason', 'dp_policy_sync',
   ];
 
   const stored = await chrome.storage.local.get([
@@ -46,6 +46,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function renderConnection(state) {
     updateEnrollmentForm();
+    const policy = state.dp_policy_sync;
+    const policyStatus = document.getElementById('policy-status');
+    if (policyStatus) policyStatus.textContent = policy?.updated
+      ? `Website blocking: ${policy.count} rules installed. Reload the website to test.`
+      : `Website blocking: ${policy?.reason || 'waiting for policy sync'}. Check enrollment and that the backend matches your organization dashboard.`;
     const heartbeatAge = Date.now() - Date.parse(state.dp_last_heartbeat_at || '');
     const connected = isEnrolled && state.dp_device_connection_status === 'connected' && heartbeatAge >= 0 && heartbeatAge < 120000;
     const monitoringActive = state.dp_monitoring_allowed === true && Date.now() < Date.parse(state.dp_monitoring_allowed_until || '');
@@ -125,24 +130,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   renderAudit((await chrome.runtime.sendMessage({ action: 'audit_queue' }).catch(() => null)) || {});
   let backendUrl;
-  try { backendUrl = normalizeBackendUrl(stored[CONFIG.SETTINGS_STORAGE_KEY]?.backendUrl || CONFIG.DEFAULT_BACKEND_URL); }
+  try { backendUrl = normalizeBackendUrl(CONFIG.DEFAULT_BACKEND_URL); }
   catch (error) { backendUrl = ''; enrollmentStatus.textContent = error.message; }
   document.getElementById('backend-url').textContent = backendUrl;
-  document.getElementById('backend-input').value = backendUrl;
-  document.getElementById('save-backend').addEventListener('click', async () => {
-    const button = document.getElementById('save-backend');
-    const feedback = document.getElementById('backend-settings-status');
-    button.disabled = true;
-    try {
-      backendUrl = await saveBackendUrl(chrome, document.getElementById('backend-input').value);
-      document.getElementById('backend-url').textContent = backendUrl;
-      document.getElementById('backend-input').value = backendUrl;
-      feedback.textContent = 'Backend saved. Checking connection...';
-      await checkBackend();
-      feedback.textContent = statusBadge.textContent === 'Online' ? 'Backend saved and reachable.' : 'Backend saved; connection is unavailable. Check that the server is running.';
-    } catch (error) { feedback.textContent = error.message || 'Backend settings could not be saved.'; }
-    finally { button.disabled = false; }
-  });
   renderConnection(stored);
 
   async function checkBackend() {

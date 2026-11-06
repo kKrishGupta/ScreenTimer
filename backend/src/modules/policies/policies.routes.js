@@ -35,7 +35,7 @@ export default async function policyRoutes(fastify) {
 
   function isPolicyAdministrator(user) {
     const role = normalizeRole(user?.role);
-    return role === Roles.ORGANIZATION_ADMIN || role === Roles.SUPER_ADMIN;
+    return role === Roles.ADMIN || role === Roles.SUPER_ADMIN;
   }
 
   function requirePolicyAdministrator(req, reply) {
@@ -824,14 +824,7 @@ export default async function policyRoutes(fastify) {
   // POST /api/v1/policies/grace/reset (Protected: Admin only)
   fastify.post('/policies/grace/reset', async (req, reply) => {
     const user = req.user;
-    if (user) {
-      const userRole = normalizeRole(user.role);
-      if (userRole === Roles.EMPLOYEE || userRole === Roles.MANAGER) {
-        return reply.status(403).send({
-          error: { code: 'FORBIDDEN', message: 'Only administrators may reset grace periods' },
-        });
-      }
-    }
+    if (!requirePolicyAdministrator(req, reply)) return;
 
     const { domain, resetBy = 'Admin', additionalMinutes = 15 } = req.body ?? {};
     if (!domain) return reply.code(400).send({ error: { message: 'domain is required' } });

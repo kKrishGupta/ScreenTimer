@@ -1,16 +1,19 @@
 [CmdletBinding()]
-param([switch]$Overwrite)
+param([switch]$Overwrite, [switch]$ExtensionsOnly)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+& node (Join-Path $repoRoot 'scripts/configure-browser-extension.mjs')
+if ($LASTEXITCODE -ne 0) { throw 'Extension backend configuration failed. No downloads published.' }
 $downloadDir = Join-Path $repoRoot 'apps\dashboard\public\downloads'
 $extensionSource = Join-Path $repoRoot 'apps\browser-extension'
 $binary = Join-Path $repoRoot 'desktop-agent\target\release\dp-user-agent.exe'
 $manifestPath = Join-Path $extensionSource 'manifest.json'
 $packageNames = @('digitalpulse-windows-agent', 'digitalpulse-chrome-extension', 'digitalpulse-edge-extension')
+if ($ExtensionsOnly) { $packageNames = @('digitalpulse-chrome-extension', 'digitalpulse-edge-extension') }
 $outputs = @($packageNames | ForEach-Object { "${_}.zip"; "${_}.zip.sha256" })
 foreach ($name in $outputs) {
     if ((Test-Path -LiteralPath (Join-Path $downloadDir $name)) -and -not $Overwrite) {
@@ -35,6 +38,7 @@ foreach ($relative in @($manifest.background.service_worker, $manifest.action.de
     if (-not (Test-Path -LiteralPath (Join-Path $extensionSource $relative) -PathType Leaf)) { throw "Manifest runtime file is missing: $relative" }
 }
 
+if (-not $ExtensionsOnly) {
 Push-Location -LiteralPath (Join-Path $repoRoot 'desktop-agent')
 try {
     # rustup selects the checked-in GNU toolchain from this directory. Merely
@@ -45,6 +49,7 @@ try {
 if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw 'The Windows release executable is missing.' }
 & $binary --version
 if ($LASTEXITCODE -ne 0) { throw 'The release executable did not start successfully.' }
+}
 
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
 $stageName = 'digitalpulse-employee-package-' + [guid]::NewGuid().ToString('N')

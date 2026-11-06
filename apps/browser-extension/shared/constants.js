@@ -1,6 +1,7 @@
+import { BACKEND_URL } from './deployment.js';
 // Shared constants for the browser extension
 export const CONFIG = {
-  DEFAULT_BACKEND_URL: 'http://127.0.0.1:3001',
+  DEFAULT_BACKEND_URL: BACKEND_URL,
   DEFAULT_SYNC_INTERVAL_SECS: 30,
   IDLE_THRESHOLD_SECS: 60,
   ENROLLMENT_UI_ENABLED: true,

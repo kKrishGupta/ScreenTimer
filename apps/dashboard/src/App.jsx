@@ -45,6 +45,7 @@ function AdminOnly({ children }) {
   if (loading) return <AuthLoading />;
   if (!isAuthenticated) return <Navigate replace to="/login" />;
   if (user?.role === 'EMPLOYEE') return <Navigate replace to="/employee-portal" />;
+  if (!['ADMIN', 'SUPER_ADMIN'].includes(user?.role)) return <Navigate replace to="/login" />;
   return children;
 }
 
@@ -65,8 +66,10 @@ export default function App() {
   return (
     <AuthProvider>
       <Routes>
-        <Route path="login" element={<PublicOnly><LoginPage /></PublicOnly>} />
-        <Route path="register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
+        <Route path="login" element={<PublicOnly><LoginPage mode="employee" /></PublicOnly>} />
+        <Route path="organization/login" element={<PublicOnly><LoginPage mode="admin" /></PublicOnly>} />
+        <Route path="super-admin/login" element={<PublicOnly><LoginPage mode="super-admin" /></PublicOnly>} />
+        <Route path="organization/register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
         <Route path="forgot-password" element={<PublicOnly><ForgotPasswordPage /></PublicOnly>} />
         {/* Capture and scrub reset credentials before the session lookup finishes. */}
         <Route path="reset-password" element={<ResetPasswordPage />} />

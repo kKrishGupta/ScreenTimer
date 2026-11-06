@@ -92,7 +92,7 @@ export default async function devicesRoutes(app) {
   // their own account. The organization and target are derived from the
   // authenticated session, so a caller cannot change another user's policy.
   app.patch('/devices/my-monitoring-authorization', {
-    preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN)],
+    preHandler: [authMiddleware.requireRole(Roles.ADMIN)],
   }, async (request, reply) => {
     const { authorized } = request.body || {};
     if (typeof authorized !== 'boolean') {
@@ -153,10 +153,10 @@ export default async function devicesRoutes(app) {
   });
 
   app.patch('/devices/organization-timezone', {
-    preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN)],
+    preHandler: [authMiddleware.requireRole(Roles.ADMIN)],
   }, async (request, reply) => {
-    const timezone = request.body?.timezone;
-    if (typeof timezone !== 'string' || timezone.length > 64) {
+    const timezone = typeof request.body?.timezone === 'string' ? request.body.timezone.trim() : '';
+    if (!timezone || timezone.length > 64) {
       return reply.code(400).send({ error: { code: 'INVALID_TIMEZONE', message: 'Enter a valid organization time zone' } });
     }
     try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }); }
@@ -183,20 +183,28 @@ export default async function devicesRoutes(app) {
       });
     }
 
-    const orgId = user.role === Roles.SUPER_ADMIN && request.query?.organizationId
-      ? request.query.organizationId
-      : user.organizationId;
+    const userRole = normalizeRole(user.role);
 
-    let targetUserId = null;
-    if (![Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN].includes(normalizeRole(user.role))) {
-      targetUserId = user.id;
+    const orgId =
+      userRole === Roles.SUPER_ADMIN
+        ? request.query?.organizationId
+        : user.organizationId;
+
+    if (userRole === Roles.SUPER_ADMIN && !orgId) {
+      return reply.code(400).send({
+        error: 'ORGANIZATION_SCOPE_REQUIRED',
+        message: 'Select an organization to view its devices',
+      });
     }
+
+    const targetUserId =
+      userRole === Roles.EMPLOYEE ? user.id : null;
 
     const devices = await deviceService.listDevices(orgId, targetUserId);
     return reply.send({ devices, totalCount: devices.length });
   });
 
-  // POST /api/v1/devices/enrollment-tokens (Protected: Admin or Manager only)
+  // POST /api/v1/devices/enrollment-tokens (Protected: Admin or Super Admin only)
   app.post(
     '/devices/enrollment-tokens',
     async (request, reply) => {
@@ -207,18 +215,27 @@ export default async function devicesRoutes(app) {
         });
       }
 
-      // Enforce role: EMPLOYEE cannot create enrollment tokens
-      const userRole = user.role;
-      if (userRole === Roles.EMPLOYEE || userRole === Roles.MEMBER || userRole === Roles.ADULT_MEMBER || userRole === Roles.SUPERVISED_MEMBER) {
-        return reply.status(403).send({
-          error: { code: 'FORBIDDEN', message: 'Employees are not authorized to generate device enrollment tokens' },
+      const userRole = normalizeRole(user.role);
+
+      if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
+        return reply.code(403).send({
+          error: 'FORBIDDEN',
+          message: 'Only administrators can create enrollment tokens',
         });
       }
 
       const { userId, deviceKind, expiresInHours } = request.body || {};
-      const orgId = user.role === Roles.SUPER_ADMIN && request.body?.organizationId
-        ? request.body.organizationId
-        : user.organizationId;
+      const orgId =
+        userRole === Roles.SUPER_ADMIN
+          ? request.body?.organizationId
+          : user.organizationId;
+
+      if (!orgId) {
+        return reply.code(400).send({
+          error: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Organization ID is required',
+        });
+      }
 
       try {
         const tokenInfo = await deviceService.createEnrollmentToken({
@@ -239,10 +256,10 @@ export default async function devicesRoutes(app) {
   // Employees and organization administrators may create a short-lived token
   // only for their own device. Scope always comes from the authenticated user.
   app.post('/devices/my-enrollment-token', {
-    preHandler: [authMiddleware.requireRole(Roles.EMPLOYEE, Roles.ORGANIZATION_ADMIN)],
+    preHandler: [authMiddleware.requireRole(Roles.EMPLOYEE, Roles.ADMIN)],
   }, async (request, reply) => {
     const role = normalizeRole(request.user?.role);
-    if (![Roles.EMPLOYEE, Roles.ORGANIZATION_ADMIN].includes(role)) {
+    if (![Roles.EMPLOYEE, Roles.ADMIN].includes(role)) {
       return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only an employee or organization administrator may enroll their own device' } });
     }
     const { deviceKind } = request.body || {};
@@ -327,14 +344,20 @@ export default async function devicesRoutes(app) {
         });
       }
 
-      if (user.role === Roles.EMPLOYEE || user.role === Roles.MEMBER) {
-        return reply.status(403).send({
-          error: { code: 'FORBIDDEN', message: 'Employees are not authorized to revoke devices' },
+      const userRole = normalizeRole(user.role);
+
+      if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
+        return reply.code(403).send({
+          error: 'FORBIDDEN',
+          message: 'Only administrators can revoke devices',
         });
       }
 
       const { id } = request.params;
-      const orgId = user.role === Roles.SUPER_ADMIN ? null : user.organizationId;
+      const orgId =
+        userRole === Roles.SUPER_ADMIN
+          ? null
+          : user.organizationId;
 
       try {
         const result = await deviceService.revokeDevice(id, orgId, user.email || user.displayName || 'Administrator');
@@ -357,8 +380,16 @@ export default async function devicesRoutes(app) {
       request.body?.deviceSecret ||
       request.body?.secret;
 
-    const isUserAdmin = user && (user.role === Roles.ORGANIZATION_ADMIN || user.role === Roles.SUPER_ADMIN);
-    const orgId = user?.organizationId;
+    const userRole = user ? normalizeRole(user.role) : null;
+
+    const isUserAdmin =
+      user && [Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole);
+
+    const orgId = isUserAdmin
+      ? userRole === Roles.SUPER_ADMIN
+        ? null
+        : user.organizationId
+      : user?.organizationId;
 
     if (!isUserAdmin && !secret) {
       return reply.status(401).send({

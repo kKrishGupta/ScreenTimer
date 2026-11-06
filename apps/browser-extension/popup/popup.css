@@ -5,7 +5,7 @@
 body {
   margin: 0;
   padding: 14px;
-  width: 280px;
+  width: 340px;
   background-color: #0b1220;
   color: #e2e8f0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -100,4 +100,14 @@ h1 {
 .btn:hover {
   background: rgba(34, 211, 238, 0.15);
 }
+
+details { padding: 12px; border: 1px solid #243247; border-radius: 8px; background: #101a2b; }
+summary { cursor: pointer; color: #38bdf8; font-weight: 600; }
+details label { display: block; margin: 12px 0 6px; }
+#backend-input { box-sizing: border-box; width: 100%; padding: 9px; color: #f1f5f9; background: #0b1220; border: 1px solid #475569; border-radius: 6px; }
+#save-backend { margin-top: 8px; }
+details p, #policy-status { color: #94a3b8; line-height: 1.5; overflow-wrap: anywhere; }
+#backend-settings-status { color: #e2e8f0; }
+.btn:disabled { opacity: 0.5; cursor: wait; }
+input:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
 

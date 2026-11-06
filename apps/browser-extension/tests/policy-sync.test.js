@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { syncBlockingRules } from '../background/policy-sync.js';
+import { syncBlockingRules, syncBlockingRulesWithStatus } from '../background/policy-sync.js';
 
 function createChrome(existingRules = []) {
   const updates = [];
@@ -64,4 +64,29 @@ test('does not alter rules when the device is not enrolled', async () => {
 
   assert.deepEqual(result, { updated: false, reason: 'device-not-enrolled' });
   assert.deepEqual(chromeApi.updates, []);
+});
+
+test('converts backend redirects to native blocks without requiring website host access', async () => {
+  const chromeApi = createChrome();
+  const rule = { id: 1, priority: 1, condition: { urlFilter: '||instagram.com', resourceTypes: ['main_frame'] }, action: { type: 'redirect', redirect: { url: 'http://localhost:5173/blocked' } } };
+  await syncBlockingRules(chromeApi, async () => ({ ok: true, json: async () => ({ rules: [rule] }) }));
+  assert.deepEqual(chromeApi.updates[0].addRules, [{ ...rule, action: { type: 'block' } }]);
+});
+
+test('failed or malformed policy responses preserve installed rules', async () => {
+  for (const response of [{ ok: false, status: 401 }, { ok: true, json: async () => ({}) }]) {
+    const chromeApi = createChrome([{ id: 1 }]);
+    assert.equal((await syncBlockingRules(chromeApi, async () => response)).updated, false);
+    assert.deepEqual(chromeApi.updates, []);
+  }
+});
+
+test('stores policy installation errors for popup diagnostics', async () => {
+  const chromeApi = createChrome();
+  let stored;
+  chromeApi.storage.local.set = async (value) => { stored = value; };
+  chromeApi.declarativeNetRequest.updateDynamicRules = async () => { throw new Error('Rule installation failed'); };
+  const result = await syncBlockingRulesWithStatus(chromeApi, async () => ({ ok: true, json: async () => ({ rules: [] }) }));
+  assert.equal(result.updated, false);
+  assert.equal(stored.dp_policy_sync.reason, 'Rule installation failed');
 });

@@ -78,8 +78,10 @@ async function resolveEmployeeScope(prisma, { organizationId, userId, department
     throw error;
   }
   const where = { id: employeeId, organizationId };
-  if (role === 'MANAGER') where.OR = [{ id: userId }, { managerId: userId }, ...(departmentId ? [{ departmentId }] : [])];
-  const employee = await prisma.user.findFirst({ where, select: { id: true } });
+  const employee = await prisma.user.findFirst({
+    where,
+    select: { id: true },
+  });
   if (!employee) {
     const error = new Error('Employee is outside your reporting scope');
     error.statusCode = 403;
@@ -143,13 +145,24 @@ export class AnalyticsService {
 
     if (this.prisma?.activitySession?.findMany) {
       try {
-        const where = { organizationId, startedAt: { gte: startOfDay, lt: endOfDay } };
-        const scopedEmployeeId = await resolveEmployeeScope(this.prisma, { organizationId, userId, departmentId, role, employeeId });
-        if (role === 'MANAGER') {
-          where.OR = [{ device: { user: { id: userId } } }, { device: { user: { managerId: userId } } }, ...(departmentId ? [{ device: { user: { departmentId } } }] : [])];
+        const where = {
+          organizationId,
+          startedAt: { gte: startOfDay, lt: endOfDay },
+        };
+
+        const scopedEmployeeId = await resolveEmployeeScope(this.prisma, {
+          organizationId,
+          userId,
+          departmentId,
+          role,
+          employeeId,
+        });
+
+        if (scopedEmployeeId) {
+          where.device = { userId: scopedEmployeeId };
+        } else if (role === 'EMPLOYEE') {
+          where.device = { userId };
         }
-        if (scopedEmployeeId) where.device = { userId: scopedEmployeeId };
-        else if (role === 'EMPLOYEE') where.device = { userId };
 
         const sessions = await this.prisma.activitySession.findMany({
           where,
@@ -322,12 +335,20 @@ export class AnalyticsService {
     if (this.prisma?.activitySession?.findMany) {
       try {
         const where = { organizationId };
-        const scopedEmployeeId = await resolveEmployeeScope(this.prisma, { organizationId, userId, departmentId, role, employeeId });
-        if (role === 'MANAGER') {
-          where.OR = [{ device: { user: { id: userId } } }, { device: { user: { managerId: userId } } }, ...(departmentId ? [{ device: { user: { departmentId } } }] : [])];
+
+        const scopedEmployeeId = await resolveEmployeeScope(this.prisma, {
+          organizationId,
+          userId,
+          departmentId,
+          role,
+          employeeId,
+        });
+
+        if (scopedEmployeeId) {
+          where.device = { userId: scopedEmployeeId };
+        } else if (role === 'EMPLOYEE') {
+          where.device = { userId };
         }
-        if (scopedEmployeeId) where.device = { userId: scopedEmployeeId };
-        else if (role === 'EMPLOYEE') where.device = { userId };
         if (startDate || endDate) {
           where.startedAt = {};
           if (startDate) where.startedAt.gte = rangeForDate(startDate).start;

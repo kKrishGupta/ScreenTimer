@@ -14,8 +14,8 @@ export default async function authRoutes(fastify) {
   }
 
   // Register
-  fastify.post('/auth/register', async (req, reply) => {
-    if (fastify.config.nodeEnv === 'production') {
+  fastify.post('/organization/register', async (req, reply) => {
+    if (!fastify.config.allowPublicRegistration) {
       return reply.code(403).send({
         error: { code: 'PUBLIC_REGISTRATION_DISABLED', message: 'Public organization registration is disabled. Ask your workspace owner for an invitation.' },
       });
@@ -36,31 +36,63 @@ export default async function authRoutes(fastify) {
     }
   });
 
-  // Login
-  fastify.post('/auth/login', async (req, reply) => {
+  // Shared login handler for role-specific portals.
+  const createLoginHandler = (expectedRole) => async (req, reply) => {
     const { email, password } = req.body || {};
     const rememberMe = req.body?.rememberMe !== false;
     const ipAddress = req.ip || '127.0.0.1';
     const userAgent = req.headers['user-agent'] || 'Unknown Client';
 
     try {
-      const session = await authService.login({ email, password, rememberMe, ipAddress, userAgent });
+      const session = await authService.login({
+        email,
+        password,
+        rememberMe,
+        ipAddress,
+        userAgent,
+        expectedRole,
+      });
+
       reply.header('Set-Cookie', serializeSessionCookie(session.token, {
         secure: Boolean(fastify.config.secureSessionCookies),
         maxAgeSeconds: session.rememberMe ? 7 * 24 * 60 * 60 : undefined,
       }));
-      const publicSession = {
+
+      return reply.send({
+        success: true,
         expiresAt: session.expiresAt,
         rememberMe: session.rememberMe,
         user: session.user,
-      };
-      return reply.send({ success: true, ...publicSession });
+      });
     } catch (err) {
       return reply.status(err.statusCode || 401).send({
-        error: { code: err.statusCode === 429 ? 'RATE_LIMITED' : 'INVALID_CREDENTIALS', message: err.message },
+        error: {
+          code: err.statusCode === 429 ? 'RATE_LIMITED' : 'INVALID_CREDENTIALS',
+          message: err.statusCode === 429
+            ? err.message
+            : 'Invalid email or password',
+        },
       });
     }
-  });
+  };
+
+  // Employee portal
+  fastify.post(
+    '/auth/login',
+    createLoginHandler(Roles.EMPLOYEE)
+  );
+
+  // Organization administrator portal
+  fastify.post(
+    '/organization/login',
+    createLoginHandler(Roles.ADMIN)
+  );
+
+  // Platform super administrator portal
+  fastify.post(
+    '/super-admin/login',
+    createLoginHandler(Roles.SUPER_ADMIN)
+  );
 
   // Logout
   fastify.post('/auth/logout', async (req, reply) => {
@@ -159,7 +191,7 @@ export default async function authRoutes(fastify) {
     }
   });
 
-  // Create Invitation (Protected: Admin or Manager)
+  // Create Invitation (Protected: Admin or Super Admin)
   const inviteHandler = async (req, reply) => {
     const { email, role, departmentId, department, displayName, shiftStart, shiftEnd, workingDays, shiftTimezone } = req.body || {};
     try {
@@ -169,14 +201,16 @@ export default async function authRoutes(fastify) {
       if (!shiftStart || !shiftEnd || !Array.isArray(workingDays) || !workingDays.length || !shiftTimezone) {
         return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'Working hours, at least one working day, and a time zone are required' } });
       }
-      if (role && !['EMPLOYEE', 'MANAGER'].includes(String(role).toUpperCase())) {
-        return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'Invitations may assign only Employee or Manager access' } });
+      if (role && String(role).toUpperCase() !== Roles.EMPLOYEE) {
+        return reply.code(400).send({
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'Invitations may assign only Employee access',
+          },
+        });
       }
       let resolvedDepartmentId = departmentId || req.user.departmentId;
       if (department?.trim()) {
-        if (req.user.role === Roles.MANAGER && department.trim().toLowerCase() !== String(req.user.department || '').toLowerCase()) {
-          return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Managers can only invite employees in their own department' } });
-        }
         const existing = await fastify.prisma.department.findFirst({ where: { organizationId: req.user.organizationId, name: department.trim() } });
         const saved = existing || await fastify.prisma.department.create({ data: { organizationId: req.user.organizationId, name: department.trim() } });
         resolvedDepartmentId = saved.id;
@@ -208,16 +242,16 @@ export default async function authRoutes(fastify) {
     }
   };
 
-  fastify.post('/auth/invitations', { preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN, Roles.MANAGER)] }, inviteHandler);
-  fastify.post('/invitations', { preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN, Roles.MANAGER)] }, inviteHandler);
+  fastify.post('/auth/invitations', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, inviteHandler);
+  fastify.post('/invitations', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, inviteHandler);
 
-  // List Invitations (Protected: Admin or Manager)
+  // List Invitations (Protected: Admin or Super Admin)
   const listInvitationsHandler = async (req) => {
     const invitations = await authService.listInvitations(req.user?.organizationId);
     return { invitations, count: invitations.length };
   };
-  fastify.get('/auth/invitations', { preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN, Roles.MANAGER)] }, listInvitationsHandler);
-  fastify.get('/invitations', { preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN, Roles.MANAGER)] }, listInvitationsHandler);
+  fastify.get('/auth/invitations', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, listInvitationsHandler);
+  fastify.get('/invitations', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, listInvitationsHandler);
 
   // Revoke Invitation (Protected: Admin only)
   const revokeInvitationHandler = async (req, reply) => {
@@ -228,8 +262,8 @@ export default async function authRoutes(fastify) {
     });
     return reply.send({ success: res.success, revokedId: id });
   };
-  fastify.delete('/auth/invitations/:id', { preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN)] }, revokeInvitationHandler);
-  fastify.delete('/invitations/:id', { preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN)] }, revokeInvitationHandler);
+  fastify.delete('/auth/invitations/:id', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, revokeInvitationHandler);
+  fastify.delete('/invitations/:id', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, revokeInvitationHandler);
 
   const resendInvitationHandler = async (req, reply) => {
     try {
@@ -243,7 +277,7 @@ export default async function authRoutes(fastify) {
       return reply.code(err.statusCode || 503).send({ error: { code: 'INVITATION_RESEND_FAILED', message: err.message } });
     }
   };
-  fastify.post('/invitations/:id/resend', { preHandler: [authMiddleware.requireRole(Roles.ORGANIZATION_ADMIN, Roles.SUPER_ADMIN)] }, resendInvitationHandler);
+  fastify.post('/invitations/:id/resend', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, resendInvitationHandler);
 
   // The token is submitted in the POST body so it does not appear in backend access logs.
   const validateInvitationHandler = async (req, reply) => {
@@ -274,43 +308,23 @@ export default async function authRoutes(fastify) {
   fastify.post('/invitations/accept', acceptHandler);
 
   // Available Roles & Permissions Metadata
-  fastify.get('/auth/roles', async (req, reply) => {
+  fastify.get('/auth/roles', async (_req, reply) => {
     return reply.send({
       roles: [
         {
           id: Roles.SUPER_ADMIN,
           title: 'Super Administrator',
-          description: 'Cross-tenant oversight, platform-level governance, and system-wide audits.',
+          description: 'Platform-wide administration, cross-organization oversight, governance and system audits.',
         },
         {
-          id: Roles.ORGANIZATION_ADMIN,
+          id: Roles.ADMIN,
           title: 'Organization Administrator',
-          description: 'Full tenant governance, policy enforcement, employee & device management, and audit inspection.',
-        },
-        {
-          id: Roles.MANAGER,
-          title: 'Department Manager',
-          description: 'Departmental analytics, supervised employee wellbeing, and team activity tracking.',
+          description: 'Full administration within the organization, including employees, devices, reports and policies.',
         },
         {
           id: Roles.EMPLOYEE,
           title: 'Employee',
-          description: 'Personal activity insights, time planning, digital wellbeing, and privacy charter visibility.',
-        },
-        {
-          id: Roles.FAMILY_OWNER,
-          title: 'Family Owner',
-          description: 'Full administrative governance, policy configuration, member & device management, and audit inspection.',
-        },
-        {
-          id: Roles.ADULT_MEMBER,
-          title: 'Adult Member',
-          description: 'Personal activity insights, time planning, personal wellbeing goals, and consensual monitoring controls.',
-        },
-        {
-          id: Roles.SUPERVISED_MEMBER,
-          title: 'Supervised Member',
-          description: 'Age-appropriate activity breakdown, daily screen-time visibility, and active family policy display.',
+          description: 'Personal activity insights, device management, time planning and digital wellbeing.',
         },
       ],
     });

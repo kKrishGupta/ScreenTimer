@@ -45,7 +45,7 @@ export default function Layout() {
         { to: '/digital-wellbeing', label: 'Digital Wellbeing', icon: HeartIcon },
         { to: '/settings', label: 'Privacy & Account', icon: SettingsIcon },
       ]
-    : NAV;
+    : ['ADMIN', 'SUPER_ADMIN'].includes(user?.role) ? NAV : [];
 
   async function handleLogout() {
     await logout();

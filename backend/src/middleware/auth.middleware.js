@@ -140,10 +140,10 @@ export function createAuthMiddleware(authService, deviceService) {
     },
 
     /**
-     * Enforces role-based permissions (SUPER_ADMIN, ORGANIZATION_ADMIN, MANAGER, EMPLOYEE).
+     * Enforces role-based permissions (SUPER_ADMIN, ADMIN, EMPLOYEE).
      */
     requireRole(...allowedRoles) {
-      const canonicalAllowed = allowedRoles.map(normalizeRole);
+      const canonicalAllowed = allowedRoles.filter((role) => typeof role === 'string' && role.trim()).map(normalizeRole);
       return async (req, reply) => {
         if (!req.user) {
           return reply.status(401).send({
