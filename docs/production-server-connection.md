@@ -2,10 +2,18 @@
 
 ## Administrator-managed extension builds
 
-Set `EXTENSION_BACKEND_URL` in `backend/.env`. Rebuild with:
+Set `EXTENSION_LOCAL_BACKEND_URL` and `EXTENSION_PRODUCTION_BACKEND_URL` in
+`backend/.env`. Local unpacked development uses the first URL; published employee
+downloads use the second. Configure the source extension locally with:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-employee-downloads.ps1 -ExtensionsOnly -Overwrite
+npm.cmd run extension:local
+```
+
+Build production downloads with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-employee-downloads.ps1 -ExtensionsOnly -Overwrite -Deployment Production
 ```
 
 The build embeds only this public URL and restricts manifest host permissions to

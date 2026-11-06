@@ -1,12 +1,16 @@
 [CmdletBinding()]
-param([switch]$Overwrite, [switch]$ExtensionsOnly)
+param(
+    [switch]$Overwrite,
+    [switch]$ExtensionsOnly,
+    [ValidateSet('Local', 'Production')][string]$Deployment = 'Production'
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-& node (Join-Path $repoRoot 'scripts/configure-browser-extension.mjs')
+& node (Join-Path $repoRoot 'scripts/configure-browser-extension.mjs') "--target=$($Deployment.ToLowerInvariant())"
 if ($LASTEXITCODE -ne 0) { throw 'Extension backend configuration failed. No downloads published.' }
 $downloadDir = Join-Path $repoRoot 'apps\dashboard\public\downloads'
 $extensionSource = Join-Path $repoRoot 'apps\browser-extension'
