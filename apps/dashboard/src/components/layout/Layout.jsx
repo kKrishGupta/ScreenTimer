@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { NavLink, Outlet } from 'react-router';
 import BackendStatus from './BackendStatus.jsx';
+import BlockedAttemptNotice from '../BlockedAttemptNotice.jsx';
 import {
   AppIcon,
   BellIcon,
@@ -63,6 +64,7 @@ export default function Layout() {
 
   return (
     <div className="flex min-h-full">
+      <BlockedAttemptNotice user={user} />
       {/* Desktop Persistent Sidebar */}
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-white/5 bg-surface-900/60 px-4 py-6 md:flex overflow-y-auto">
         <div className="mb-6 flex items-center gap-2 px-2">

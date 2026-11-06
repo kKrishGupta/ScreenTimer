@@ -664,9 +664,42 @@ export default async function policyRoutes(fastify) {
     };
   });
 
+  // Device identity, employee and tenant come exclusively from device authentication.
+  fastify.post('/policies/blocked-attempts', {
+    schema: { body: { type: 'object', additionalProperties: false, required: ['deviceId', 'domain', 'eventId'], properties: {
+      deviceId: { type: 'string', format: 'uuid' }, eventId: { type: 'string', format: 'uuid' },
+      domain: { type: 'string', maxLength: 253, pattern: '^[a-z0-9]+([.-][a-z0-9]+)*$' },
+    } } },
+  }, async (req, reply) => {
+    const device = req.device;
+    if (!device?.organizationId || !device.userId) return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'An assigned organization device is required' } });
+    const { domain, eventId } = req.body;
+    const policies = await getPolicies(device.organizationId);
+    const policy = policies.find((p) => p.active && p.action === 'block' && p.restrictedDomains.some((d) => domain === d || domain.endsWith(`.${d}`)));
+    if (!policy) return reply.code(409).send({ error: { code: 'POLICY_NOT_ACTIVE', message: 'No active blocking policy matches this domain' } });
+    const data = {
+      id: eventId, organizationId: device.organizationId, deviceId: device.id, userId: device.userId,
+      policyId: policy.id, target: domain, targetType: 'website', severity: 'critical',
+      actionTaken: 'BLOCKED', warningMessage: `Employee ${device.userId} attempted to open ${domain}; navigation was blocked.`,
+      acknowledged: false,
+    };
+    if (prisma?.policyViolation?.create) {
+      try { await prisma.policyViolation.create({ data }); }
+      catch (error) { if (error.code !== 'P2002') throw error; }
+    } else {
+      if (fastify.config.nodeEnv === 'production') return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'Audit storage unavailable' } });
+      if (!policyState.violations.some((v) => v.id === eventId)) {
+        policyState.violations.unshift({ ...data, timestamp: new Date().toISOString(), policyName: policy.name });
+        policyState.violations.length = Math.min(policyState.violations.length, 500);
+      }
+    }
+    return reply.code(201).send({ success: true });
+  });
+
   // GET /api/v1/policies/violations
-  fastify.get('/policies/violations', async (req) => {
-    const orgId = req.user?.organizationId;
+  fastify.get('/policies/violations', async (req, reply) => {
+    const orgId = normalizeRole(req.user?.role) === Roles.SUPER_ADMIN ? req.query?.organizationId : req.user?.organizationId;
+    if (!orgId) return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
 
     if (prisma?.policyViolation?.findMany) {
       try {
@@ -678,6 +711,7 @@ export default async function policyRoutes(fastify) {
         const rows = await prisma.policyViolation.findMany({
           where: whereClause,
           orderBy: { timestamp: 'desc' },
+          take: 100,
         });
         if (rows) {
           return {
@@ -693,7 +727,7 @@ export default async function policyRoutes(fastify) {
 
     let list = policyState.violations;
     if (orgId) {
-      list = list.filter((v) => !v.organizationId || v.organizationId === orgId);
+      list = list.filter((v) => v.organizationId === orgId);
     }
     if (req.user && normalizeRole(req.user.role) === Roles.EMPLOYEE) {
       list = list.filter((v) => v.userId === req.user.id || v.employee === req.user.displayName || v.employee === req.user.email);

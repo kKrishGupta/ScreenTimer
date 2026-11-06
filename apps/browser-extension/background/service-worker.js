@@ -1,4 +1,5 @@
 import { CONFIG } from '../shared/constants.js';
+import { recordBlockedAttempt, flushBlockedAttempts } from './blocked-attempts.js';
 import { TabManager } from './tab-manager.js';
 import { ActivityManager } from './activity-manager.js';
 import { syncBlockingRulesWithStatus as syncBlockingRules } from './policy-sync.js';
@@ -74,6 +75,7 @@ async function initializeWorker() {
     } catch { return null; }
   };
   const performPeriodicSync = async () => {
+    await flushBlockedAttempts().catch((error) => console.debug('[DigitalPulse] Blocked attempt sync:', error.message));
     // Policy enforcement must not depend on activity upload or work hours.
     await syncBlockingRules();
     try {
@@ -91,6 +93,9 @@ async function initializeWorker() {
 
 // Chrome requires event listeners to be registered as the worker evaluates.
 const runtime = initializeWorker();
+chrome.webNavigation.onErrorOccurred.addListener((details) => {
+  recordBlockedAttempt(details).then(() => flushBlockedAttempts()).catch((error) => console.debug('[DigitalPulse] Blocked attempt:', error.message));
+});
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'get_enrollment_state') { chrome.storage.local.get(['dp_device_secret']).then((stored) => sendResponse({ enrolled: Boolean(stored.dp_device_secret) })); return true; }
   if (message.action === 'get_device_id') { deviceIdPromise.then((deviceId) => sendResponse({ deviceId })); return true; }

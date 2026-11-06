@@ -142,7 +142,7 @@ export async function buildApp({ config, prisma, logger }) {
         const isDeviceIngest = urlPath === '/api/v1/activity/events/batch' || urlPath === '/api/v1/activity/events';
         const isDeviceHeartbeat = /^\/api\/v1\/devices\/[^/]+\/heartbeat$/.test(urlPath);
 
-        if (isDeviceIngest || isDeviceHeartbeat) {
+        if (isDeviceIngest || isDeviceHeartbeat || urlPath === '/api/v1/policies/blocked-attempts') {
           return authMiddleware.authenticateDevice(req, reply);
         }
 
