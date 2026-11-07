@@ -56,6 +56,7 @@ async function submit(event) {
     navigate(target, { replace: true });
 
   } catch {
+    setPassword('');
     setError('Unable to sign in. Check your credentials and try again.');
   } finally {
     setBusy(false);
@@ -66,9 +67,8 @@ async function submit(event) {
   function roleDestination(role) {
     if (role === 'EMPLOYEE') return '/employee-portal';
 
-    if (role === 'ADMIN' || role === 'SUPER_ADMIN') {
-      return '/';
-    }
+    if (role === 'ADMIN') return '/organization/';
+    if (role === 'SUPER_ADMIN') return '/';
 
     throw new Error('Unsupported account role.');
   }

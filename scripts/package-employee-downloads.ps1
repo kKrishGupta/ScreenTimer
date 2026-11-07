@@ -2,6 +2,7 @@
 param(
     [switch]$Overwrite,
     [switch]$ExtensionsOnly,
+    [string]$OutputDirectory,
     [ValidateSet('Local', 'Production')][string]$Deployment = 'Production'
 )
 
@@ -10,9 +11,8 @@ Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.IO.Compression
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-& node (Join-Path $repoRoot 'scripts/configure-browser-extension.mjs') "--target=$($Deployment.ToLowerInvariant())"
-if ($LASTEXITCODE -ne 0) { throw 'Extension backend configuration failed. No downloads published.' }
 $downloadDir = Join-Path $repoRoot 'apps\dashboard\public\downloads'
+if ($OutputDirectory) { $downloadDir = [IO.Path]::GetFullPath($OutputDirectory) }
 $extensionSource = Join-Path $repoRoot 'apps\browser-extension'
 $binary = Join-Path $repoRoot 'desktop-agent\target\release\dp-user-agent.exe'
 $manifestPath = Join-Path $extensionSource 'manifest.json'
@@ -83,6 +83,8 @@ try {
                 if (@($entries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) { throw 'Extension runtime source must not contain symlinks or junctions.' }
                 Copy-Item -LiteralPath $source -Destination (Join-Path $folder $dir) -Recurse
             }
+            & node (Join-Path $repoRoot 'scripts/configure-browser-extension.mjs') "--target=$($Deployment.ToLowerInvariant())" "--output-dir=$folder"
+            if ($LASTEXITCODE -ne 0) { throw 'Staged extension configuration failed. No downloads published.' }
             $browser = if ($name -like '*chrome*') { 'Chrome' } else { 'Edge' }
             $slug = $browser.ToLowerInvariant()
             $readme = (Get-Content -LiteralPath (Join-Path $repoRoot 'docs\installation\browser-extension.txt') -Raw).Replace('__BROWSER__',$browser).Replace('__SLUG__',$slug).Replace('__EXTENSIONS_PAGE__',"${slug}://extensions")
@@ -90,6 +92,7 @@ try {
         }
         foreach ($textFile in Get-ChildItem -LiteralPath $folder -Recurse -File | Where-Object { $_.Extension -in @('.js','.json','.html','.css','.txt') }) {
             $content = [IO.File]::ReadAllText($textFile.FullName)
+            if ($Deployment -eq 'Production' -and $name -ne 'digitalpulse-windows-agent' -and $content -match '(?i)https?://(localhost|127\.0\.0\.1|\[::1\])') { throw "Loopback URL in production package: $($textFile.Name)" }
             if ($content -match '(?i)dp_(sec|enroll|inv)_[a-f0-9]{32,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|postgres(ql)?://[^\s/:]+:[^\s/@]+@') {
                 throw "Credential-like material detected in staged file $($textFile.Name). No packages were published."
             }
@@ -107,10 +110,23 @@ try {
         $zip = [IO.Compression.ZipFile]::OpenRead($zipPath)
         try {
             $files = @($zip.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
-            $required = if ($name -eq 'digitalpulse-windows-agent') { @('dp-user-agent.exe','README.txt') } else { @('manifest.json','README.txt',$manifest.background.service_worker,$manifest.action.default_popup,'icons/icon-16.png','icons/icon-48.png','icons/icon-128.png','shared/constants.js','shared/backend-settings.js') }
+            $required = if ($name -eq 'digitalpulse-windows-agent') { @('dp-user-agent.exe','README.txt') } else { @('manifest.json','README.txt',$manifest.background.service_worker,'background/screenshot-capture.js','background/sync-client.js',$manifest.action.default_popup,'icons/icon-16.png','icons/icon-48.png','icons/icon-128.png','shared/constants.js','shared/backend-settings.js') }
             foreach ($relative in $required) {
                 $entry = $zip.GetEntry("$name/$relative")
                 if ($null -eq $entry -or $entry.Length -eq 0) { throw "Archive $name is missing $relative" }
+            }
+            if ($name -ne 'digitalpulse-windows-agent') {
+                $manifestReader = [IO.StreamReader]::new($zip.GetEntry("$name/manifest.json").Open())
+                try { $packedManifest = $manifestReader.ReadToEnd() | ConvertFrom-Json } finally { $manifestReader.Dispose() }
+                if ($packedManifest.manifest_version -ne 3 -or $packedManifest.background.service_worker -ne 'background/service-worker.js' -or $packedManifest.background.type -ne 'module') { throw 'Incorrect packaged worker manifest.' }
+                if (@($packedManifest.optional_host_permissions).Count -ne 1 -or $packedManifest.optional_host_permissions[0] -ne '<all_urls>' -or $packedManifest.permissions -contains 'activeTab' -or $packedManifest.host_permissions -contains '<all_urls>') { throw 'Incorrect screenshot permission model.' }
+                $deploymentReader = [IO.StreamReader]::new($zip.GetEntry("$name/shared/deployment.js").Open())
+                try { $deploymentSource = $deploymentReader.ReadToEnd() } finally { $deploymentReader.Dispose() }
+                if ($Deployment -eq 'Production' -and ($deploymentSource -notmatch 'DEPLOYMENT = "production"' -or $packedManifest.host_permissions[0] -notmatch '^https://')) { throw 'Incorrect production backend configuration.' }
+                $workerEntry = $zip.GetEntry("$name/$($manifest.background.service_worker)")
+                $workerReader = [IO.StreamReader]::new($workerEntry.Open())
+                try { $workerSource = $workerReader.ReadToEnd() } finally { $workerReader.Dispose() }
+                if ($workerSource -notmatch "screenshot-capture\.js" -or $workerSource -notmatch "captureAuthorizedActiveTab") { throw "Archive $name service worker does not initialize screenshot capture." }
             }
             if ($name -eq 'digitalpulse-windows-agent' -and $files.Count -ne 2) { throw 'Windows ZIP must contain only the executable and README.' }
             foreach ($entry in $files) {

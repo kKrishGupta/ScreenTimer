@@ -1,30 +1,46 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useApi } from '../hooks/useApi.js';
 import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/States.jsx';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const POLICY_REASONS = {
+  DEVICE_NOT_ELIGIBLE: 'Device is revoked or is not an eligible Windows desktop agent.',
+  DEVICE_OWNER_REQUIRED: 'Assign this device to an employee in this organization.',
+  DEVICE_NOT_SELECTED: 'Select this device for screenshot monitoring.',
+  SCREEN_MONITORING_DISABLED: 'Organization screenshot monitoring is disabled.',
+  SCREEN_NOTICE_NOT_ACKNOWLEDGED: 'Employee screenshot notice acknowledgement is missing.',
+  USER_CONSENT_REQUIRED: 'Employee monitoring consent is missing or withdrawn.',
+  ADMIN_AUTHORIZATION_REQUIRED: 'Administrator monitoring authorization is missing.',
+  ACCOUNT_INACTIVE: 'Employee account is inactive.',
+  OUTSIDE_SCHEDULE: 'Outside the employee working schedule.',
+  OUTSIDE_SCREEN_MONITORING_SCHEDULE: 'Outside the screenshot monitoring schedule.',
+  ORGANIZATION_TIMEZONE_REQUIRED: 'Organization time zone must be configured.',
+  SCHEDULE_NOT_CONFIGURED: 'Employee working schedule must be configured.',
+};
 
 export default function ScreenMonitoringPage() {
   const [employeeId, setEmployeeId] = useState('');
   const [deviceId, setDeviceId] = useState('');
   const [date, setDate] = useState('');
   const [search, setSearch] = useState('');
+  const [captureSearch, setCaptureSearch] = useState('');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState(null);
+  const [formDraft, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
 
   const captureParams = useMemo(() => ({
     employeeId: employeeId || undefined,
     deviceId: deviceId || undefined,
+    search: captureSearch.trim() || undefined,
     from: date ? `${date}T00:00:00.000Z` : undefined,
     to: date ? `${date}T23:59:59.999Z` : undefined,
     page,
     pageSize: 24,
-  }), [employeeId, deviceId, date, page]);
+  }), [employeeId, deviceId, captureSearch, date, page]);
   const loadSettings = useCallback((opts) => api.screenSettings({}, opts), []);
   const loadEmployees = useCallback((opts) => api.screenEmployees({}, opts), []);
   const loadCaptures = useCallback((opts) => api.screenCaptures(captureParams, opts), [captureParams]);
@@ -32,9 +48,7 @@ export default function ScreenMonitoringPage() {
   const employees = useApi(loadEmployees, { intervalMs: 10000 });
   const captures = useApi(loadCaptures, { intervalMs: 15000 });
 
-  useEffect(() => {
-    if (settings.data?.settings) setForm((current) => current || { ...settings.data.settings, excludedApplications: settings.data.settings.excludedApplications?.join(', ') || '' });
-  }, [settings.data]);
+  const form = formDraft || (settings.data?.settings ? { ...settings.data.settings, excludedApplications: settings.data.settings.excludedApplications?.join(', ') || '' } : null);
 
   const visibleEmployees = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -108,15 +122,27 @@ export default function ScreenMonitoringPage() {
 
       <Card title="Authorized employee devices">
         <div className="mb-4 flex flex-wrap gap-3"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search employee or device" className="min-w-64 rounded-lg border border-white/10 bg-surface-950 px-3 py-2 text-sm" /></div>
-        {visibleEmployees.length === 0 ? <EmptyState title="No eligible Windows devices">Enroll and assign a desktop agent before enabling screenshot monitoring.</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{visibleEmployees.map((row) => <div key={row.deviceId} className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-white">{row.employeeName}</p><p className="text-sm text-slate-400">{row.deviceName}</p></div><Button disabled={busy || !row.acknowledgedAt} onClick={() => toggleDevice(row)}>{row.selected ? 'Disable' : 'Authorize'}</Button></div>
+        {visibleEmployees.length === 0 ? <EmptyState title={search ? 'No matching devices' : 'No eligible Windows devices'}>{search ? 'Try another employee or device name.' : <>
+          <p>No Windows desktop agent enrolled</p>
+          <p className="mt-1">
+            No desktop-agent registration was found in this organization.
+            Installing the application is not enrollment; use a Windows
+            Desktop Agent enrollment token and verify its first heartbeat.
+          </p>
+        </>}</EmptyState> : <div className="grid gap-3 lg:grid-cols-2">{visibleEmployees.map((row) => <div key={row.deviceId} className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+          <div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-white">{row.employeeName}</p><p className="text-sm text-slate-400">{row.deviceName} · Windows Desktop Agent</p><p className="text-xs text-slate-400">{row.email}</p></div><Button disabled={busy || row.revoked || (!row.selected && (!row.employeeId || !row.acknowledgedAt))} onClick={() => toggleDevice(row)}>{row.selected ? 'Disable' : 'Authorize'}</Button></div>
+          <p className="mt-2 text-sm text-amber-200">{row.revoked ? 'Device enrollment has been revoked.' : POLICY_REASONS[row.policyReason] || 'Screenshot authorization is unavailable.'}</p>
+          <p className="mt-1 text-xs text-slate-400">Policy authorization: {row.policyAllowed ? 'authorized' : 'not authorized'} · Capture pipeline: {row.lastCaptureAt ? 'has a verified capture' : row.lastFailure ? `failed (${row.lastFailure})` : 'no verified capture yet'}</p>
+          <p className="mt-2 text-xs text-slate-400">Last heartbeat: {row.lastSeenAt ? new Date(row.lastSeenAt).toLocaleString() : 'Never received'}{row.connectivity === 'offline' ? ' · Agent is offline; check its connection and enrollment.' : ''}</p>
           <div className="mt-3 flex flex-wrap gap-2 text-xs"><Status value={row.connectivity} /><Status value={row.acknowledgedAt ? 'notice acknowledged' : 'awaiting acknowledgement'} /><Status value={row.selected ? 'selected' : 'not selected'} /></div>
-          <p className="mt-3 text-xs text-slate-500">Last capture: {row.lastCaptureAt ? new Date(row.lastCaptureAt).toLocaleString() : 'None'}{row.lastFailure ? ` · Failure: ${row.lastFailure}` : ''}</p>
+          <p className="mt-3 text-xs text-slate-500">Last verified capture record: {row.lastCaptureAt ? new Date(row.lastCaptureAt).toLocaleString() : 'None'}{row.selected && row.lastCaptureAt ? ` · Next expected: ${new Date(new Date(row.lastCaptureAt).getTime() + Number(form?.captureIntervalSeconds || 300) * 1000).toLocaleString()}` : ''}{row.lastFailure ? ` · Failure: ${row.lastFailure}` : ''}</p>
+          {row.captureStatusMismatch && <p role="alert" className="mt-1 text-xs text-amber-300">The device capture status does not match stored screenshot records. Refresh or inspect backend logs.</p>}
         </div>)}</div>}
       </Card>
 
       <Card title="Screenshot gallery">
-        <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <input value={captureSearch} onChange={(event) => { setCaptureSearch(event.target.value); setPage(1); }} placeholder="Search employee" className="rounded-lg border border-white/10 bg-surface-950 px-3 py-2 text-sm" />
           <select value={employeeId} onChange={(event) => { setEmployeeId(event.target.value); setPage(1); }} className="rounded-lg border border-white/10 bg-surface-950 px-3 py-2 text-sm"><option value="">All employees</option>{[...new Map((employees.data?.employees || []).filter((row) => row.employeeId).map((row) => [row.employeeId, row])).values()].map((row) => <option key={row.employeeId} value={row.employeeId}>{row.employeeName}</option>)}</select>
           <select value={deviceId} onChange={(event) => { setDeviceId(event.target.value); setPage(1); }} className="rounded-lg border border-white/10 bg-surface-950 px-3 py-2 text-sm"><option value="">All devices</option>{(employees.data?.employees || []).map((row) => <option key={row.deviceId} value={row.deviceId}>{row.deviceName}</option>)}</select>
           <input type="date" value={date} onChange={(event) => { setDate(event.target.value); setPage(1); }} className="rounded-lg border border-white/10 bg-surface-950 px-3 py-2 text-sm" />
@@ -124,7 +150,7 @@ export default function ScreenMonitoringPage() {
         </div>
         {captures.loading && !captures.data ? <LoadingState label="Loading captures..." /> : captures.error ? <ErrorState error={captures.error} onRetry={captures.reload} /> : captureList.length === 0 ? <EmptyState title="No screenshots in this range">Captures appear here only after every authorization and schedule gate passes.</EmptyState> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{captureList.map((capture) => <button type="button" key={capture.id} onClick={() => setSelected(capture)} className="overflow-hidden rounded-xl border border-white/10 bg-surface-950 text-left hover:border-sky-400/40">
           <div className="aspect-video bg-black"><img loading="lazy" src={capture.imageUrl} alt={`Work screen captured for ${capture.employeeName}`} className="h-full w-full object-contain" /></div>
-          <div className="p-3"><p className="font-medium text-white">{capture.employeeName}</p><p className="text-xs text-slate-400">{capture.deviceName}</p><p className="mt-2 text-xs text-sky-300">{new Date(capture.capturedAt).toLocaleString()}</p></div>
+          <div className="p-3"><p className="font-medium text-white">{capture.employeeName}</p><p className="text-xs text-slate-400">{capture.deviceName} · {capture.collectorKind === 'BROWSER_EXTENSION' ? `${capture.browser === 'edge' ? 'Edge' : 'Chrome'} Browser Extension` : 'Windows Desktop Agent'}</p><p className="mt-2 text-xs text-sky-300">{new Date(capture.capturedAt).toLocaleString()}</p></div>
         </button>)}</div>}
         {(captures.data?.totalPages || 0) > 1 && <div className="mt-4 flex items-center justify-center gap-3"><Button disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button><span className="text-sm text-slate-400">Page {page} of {captures.data.totalPages}</span><Button disabled={page >= captures.data.totalPages} onClick={() => setPage(page + 1)}>Next</Button></div>}
       </Card>

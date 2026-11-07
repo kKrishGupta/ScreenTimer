@@ -36,15 +36,13 @@ ALTER TABLE "screen_captures" ADD COLUMN "created_at" TIMESTAMPTZ(3) NOT NULL DE
 UPDATE "screen_captures" sc SET
   "employee_id" = d."user_id",
   "capture_key" = sc."id"::text,
-  "storage_key" = sc."file_path",
+  "capture_status" = 'legacy',
   "expires_at" = sc."captured_at" + INTERVAL '30 days'
 FROM "devices" d WHERE d."id" = sc."device_id";
 
-DELETE FROM "screen_captures" WHERE "employee_id" IS NULL;
-ALTER TABLE "screen_captures" ALTER COLUMN "employee_id" SET NOT NULL;
 ALTER TABLE "screen_captures" ALTER COLUMN "capture_key" SET NOT NULL;
 ALTER TABLE "screen_captures" ALTER COLUMN "expires_at" SET NOT NULL;
-ALTER TABLE "screen_captures" ADD CONSTRAINT "screen_captures_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "screen_captures" ADD CONSTRAINT "screen_captures_employee_id_fkey" FOREIGN KEY ("employee_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 CREATE UNIQUE INDEX "screen_captures_device_id_capture_key_key" ON "screen_captures"("device_id", "capture_key");
 CREATE INDEX "screen_captures_employee_id_captured_at_idx" ON "screen_captures"("employee_id", "captured_at");
 CREATE INDEX "screen_captures_expires_at_idx" ON "screen_captures"("expires_at");

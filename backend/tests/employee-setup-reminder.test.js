@@ -80,7 +80,7 @@ async function createSession(app, options = {}) {
   return app.authService.createTestSession({
     userId: options.userId || 'admin-a',
     email: options.email || 'admin@example.com',
-    role: options.role || Roles.ORGANIZATION_ADMIN,
+      role: options.role || Roles.ADMIN,
     organizationId: options.organizationId || organizationId,
     departmentId: options.departmentId,
   });
@@ -132,17 +132,17 @@ describe('employee setup reminders', () => {
     }
   });
 
-  it('allows a manager only within direct-report or department scope', async () => {
+  it('allows an administrator only within the selected organization scope', async () => {
     const { app, prisma } = await createHarness();
     try {
-      const manager = await createSession(app, { userId: 'manager-a', role: Roles.MANAGER, departmentId: 'department-a' });
+      const manager = await createSession(app, { userId: 'manager-a', role: Roles.ADMIN, departmentId: 'department-a' });
       const allowed = await requestReminder(app, manager);
       assert.equal(allowed.statusCode, 202, allowed.body);
       assert.equal(allowed.json().deliveryStatus, 'queued');
 
-      const otherManager = await createSession(app, { userId: 'manager-b', role: Roles.MANAGER, departmentId: 'department-b' });
+      const otherManager = await createSession(app, { userId: 'manager-b', role: Roles.ADMIN, organizationId: 'other-org', departmentId: 'department-b' });
       const denied = await requestReminder(app, otherManager);
-      assert.equal(denied.statusCode, 403, denied.body);
+      assert.equal(denied.statusCode, 404, denied.body);
       assert.equal(prisma.__state.notifications.length, 1);
     } finally {
       await app.close();

@@ -11,6 +11,15 @@ const DEFAULT_WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 const DEFAULT_SCHEDULE = { shiftStart: '09:00', shiftEnd: '18:00', workingDays: DEFAULT_WORKING_DAYS };
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const roleIs = (role, ...values) => values.includes(String(role || '').toUpperCase());
+const TIMEZONE_OPTIONS = (() => {
+  try {
+    return typeof Intl.supportedValuesOf === 'function'
+      ? Intl.supportedValuesOf('timeZone')
+      : ['UTC', 'Asia/Kolkata', 'Europe/London', 'America/New_York', 'America/Los_Angeles'];
+  } catch {
+    return ['UTC', 'Asia/Kolkata', 'Europe/London', 'America/New_York', 'America/Los_Angeles'];
+  }
+})();
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : '—';
@@ -38,6 +47,7 @@ export default function DevicesPage() {
   const [timezone, setTimezone] = useState('');
   const scheduleDirty = useRef(false);
   const timezoneDirty = useRef(false);
+  const saving = useRef({ schedule: false, timezone: false });
   const [detectedTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || '');
   const [kind, setKind] = useState('BROWSER_EXTENSION');
   const [working, setWorking] = useState('');
@@ -62,11 +72,13 @@ export default function DevicesPage() {
       workingDays: Array.isArray(settings.workingDays) && settings.workingDays.length ? settings.workingDays : DEFAULT_WORKING_DAYS,
     });
     if (!timezoneDirty.current) setTimezone(settings.organizationTimezone || '');
-  }, [settings?.shiftStart, settings?.shiftEnd, settings?.workingDays?.join(','), settings?.organizationTimezone]);
+  }, [settings]);
 
   const refresh = () => { reload(); reloadMonitoring(); };
   const saveSchedule = async (event) => {
     event.preventDefault();
+    if (saving.current.schedule) return;
+    saving.current.schedule = true;
     setWorking('schedule'); setMessage('');
     try {
       if (!TIME_RE.test(schedule.shiftStart) || !TIME_RE.test(schedule.shiftEnd) || schedule.shiftStart === schedule.shiftEnd || schedule.workingDays.length === 0) {
@@ -82,11 +94,13 @@ export default function DevicesPage() {
       await Promise.all([reloadMonitoring(), reload()]);
       setMessage(`Schedule saved: ${saved.workingDays.join(', ')} · ${saved.shiftStart}–${saved.shiftEnd}${saved.organizationTimezone ? ` (${saved.organizationTimezone}).` : '. Monitoring remains paused until an administrator saves the organization time zone.'}`);
     } catch (err) { setMessage(err.message || 'The schedule could not be saved.'); }
-    finally { setWorking(''); }
+    finally { saving.current.schedule = false; setWorking(''); }
   };
 
   const saveTimezone = async (event) => {
     event.preventDefault();
+    if (saving.current.timezone) return;
+    saving.current.timezone = true;
     setWorking('timezone'); setMessage('');
     try {
       const selectedTimezone = timezone.trim();
@@ -100,7 +114,7 @@ export default function DevicesPage() {
       await reloadMonitoring();
       setMessage(`Organization time zone saved: ${saved.timezone}. Monitoring will still require valid consent and an active schedule.`);
     } catch (err) { setMessage(err.message || 'Organization time zone could not be saved.'); }
-    finally { setWorking(''); }
+    finally { saving.current.timezone = false; setWorking(''); }
   };
 
   const updateOwnAuthorization = async (authorized) => {
@@ -151,7 +165,7 @@ export default function DevicesPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <PageHeader
           title={isEmployee ? 'My Devices' : 'Device Status'}
-          description={isEmployee ? 'View your enrolled devices and control your monitoring consent.' : 'Review enrolled collectors and configure your own device monitoring.'}
+          description={isEmployee ? 'View your enrolled devices and control your monitoring consent.' : 'Review enrolled collectors and configure organization monitoring defaults.'}
         />
         <div className="flex flex-wrap gap-2 self-start">
           <Link to="/employee-setup" className="inline-flex items-center rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-500">Check my device</Link>
@@ -193,7 +207,7 @@ export default function DevicesPage() {
       {settings && <Card title="Working schedule">
         {!settings.organizationTimezone && <p className="mb-3 text-sm text-amber-200">You can save your hours now, but monitoring stays paused until {isOrgAdmin ? 'you save the organization time zone below.' : 'your organization administrator saves the organization time zone.'}</p>}
         <form onSubmit={saveSchedule} className="space-y-4">
-          <p className="text-xs text-slate-400">Collection uses your organization time zone. Overnight shifts are supported. No activity is collected outside these hours.</p>
+          <p className="text-xs text-slate-400">{isOrgAdmin ? 'This organization default is applied to employees who do not have an individual schedule override. ' : ''}Collection uses your organization time zone. Overnight shifts are supported. No activity is collected outside these hours.</p>
           {(!settings.shiftStart || !settings.shiftEnd) && <p className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-xs text-amber-200">No schedule has been saved yet. A 09:00–18:00 Monday–Friday template is ready below; review it and press Save my schedule.</p>}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs text-slate-400">Start<input aria-label="Monitoring shift start" type="time" value={schedule.shiftStart} onChange={(e) => { scheduleDirty.current = true; setSchedule((current) => ({ ...current, shiftStart: e.target.value })); }} className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /></label>
@@ -203,7 +217,7 @@ export default function DevicesPage() {
             const active = schedule.workingDays.includes(day);
             return <button key={day} type="button" aria-pressed={active} onClick={() => { scheduleDirty.current = true; setSchedule((current) => ({ ...current, workingDays: active ? current.workingDays.filter((value) => value !== day) : [...current.workingDays, day] })); }} className={`rounded-lg border px-3 py-1.5 text-xs ${active ? 'border-sky-400/50 bg-sky-400/10 text-sky-200' : 'border-white/10 text-slate-500'}`}>{day}</button>;
           })}</div>
-          <Button type="submit" disabled={working === 'schedule' || !TIME_RE.test(schedule.shiftStart) || !TIME_RE.test(schedule.shiftEnd) || schedule.shiftStart === schedule.shiftEnd || schedule.workingDays.length === 0}>{working === 'schedule' ? 'Saving…' : 'Save my schedule'}</Button>
+          <Button type="submit" disabled={working === 'schedule' || !TIME_RE.test(schedule.shiftStart) || !TIME_RE.test(schedule.shiftEnd) || schedule.shiftStart === schedule.shiftEnd || schedule.workingDays.length === 0}>{working === 'schedule' ? 'Saving…' : isOrgAdmin ? 'Save organization schedule' : 'Save my schedule'}</Button>
         </form>
       </Card>}
 
@@ -211,7 +225,7 @@ export default function DevicesPage() {
         <p className="mb-3 text-sm text-slate-400">Saved time zone: {settings?.organizationTimezone || 'Not configured'}. This setting applies to everyone in your organization.</p>
         {detectedTimezone && <Button className="mb-3" type="button" onClick={() => { timezoneDirty.current = true; setTimezone(detectedTimezone); }}>Use my time zone ({detectedTimezone})</Button>}
         <form onSubmit={saveTimezone} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="min-w-0 flex-1 text-xs text-slate-400">IANA time zone<input value={timezone} onChange={(e) => { timezoneDirty.current = true; setTimezone(e.target.value); }} required placeholder="Asia/Kolkata" className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /></label>
+          <label className="min-w-0 flex-1 text-xs text-slate-400">IANA time zone<input list="iana-timezones" value={timezone} onChange={(e) => { timezoneDirty.current = true; setTimezone(e.target.value); }} required placeholder="Search, for example Asia/Kolkata" className="mt-1 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white" /><datalist id="iana-timezones">{TIMEZONE_OPTIONS.map((value) => <option key={value} value={value} />)}</datalist></label>
           <Button type="submit" disabled={working === 'timezone' || !timezone.trim()}>{working === 'timezone' ? 'Saving…' : 'Save time zone'}</Button>
         </form>
       </Card>}

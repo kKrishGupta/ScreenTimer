@@ -36,6 +36,7 @@ pub struct ScreenMonitoringPolicy {
     pub interval_seconds: u64,
     pub excluded_applications: Vec<String>,
     pub visible_indicator: bool,
+    pub allowed_until: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,7 +199,13 @@ fn post_batch_response(backend_url: &str, body: &[u8]) -> Result<serde_json::Val
             headers.push(("X-Device-Secret".to_string(), secret.trim().to_string()));
         }
     }
-    let response = request_backend("POST", backend_url, "/api/v1/activity/events/batch", &headers, body)?;
+    let response = request_backend(
+        "POST",
+        backend_url,
+        "/api/v1/activity/events/batch",
+        &headers,
+        body,
+    )?;
     serde_json::from_slice(&response.body)
         .context("backend returned invalid JSON for activity sync")
 }
@@ -215,24 +222,42 @@ fn parse_url(raw: &str) -> Result<ParsedUrl> {
         Some(idx) => (&stripped[..idx], &stripped[idx..]),
         None => (stripped, ""),
     };
-    if host_port.contains(['?', '#', '@', '\\']) || path.contains(['?', '#', '\\']) || raw.chars().any(char::is_whitespace) {
+    if host_port.contains(['?', '#', '@', '\\'])
+        || path.contains(['?', '#', '\\'])
+        || raw.chars().any(char::is_whitespace)
+    {
         bail!("backend URL must not include credentials, whitespace, a query or fragment")
     }
     let (host, port) = if let Some(bracketed) = host_port.strip_prefix('[') {
-        let (host, suffix) = bracketed.split_once(']').context("invalid IPv6 backend host")?;
-        let port = if suffix.is_empty() { if scheme == "https" { 443 } else { 80 } }
-            else { suffix.strip_prefix(':').context("invalid IPv6 backend port")?.parse::<u16>().context("invalid backend port")? };
+        let (host, suffix) = bracketed
+            .split_once(']')
+            .context("invalid IPv6 backend host")?;
+        let port = if suffix.is_empty() {
+            if scheme == "https" {
+                443
+            } else {
+                80
+            }
+        } else {
+            suffix
+                .strip_prefix(':')
+                .context("invalid IPv6 backend port")?
+                .parse::<u16>()
+                .context("invalid backend port")?
+        };
         (host.to_owned(), port)
-    } else { match host_port.rsplit_once(':') {
-        Some((host, port)) => (
-            host.trim_matches(['[', ']']).to_string(),
-            port.parse::<u16>().context("invalid port in backend URL")?,
-        ),
-        None => (
-            host_port.trim_matches(['[', ']']).to_string(),
-            if scheme == "https" { 443 } else { 80 },
-        ),
-    }};
+    } else {
+        match host_port.rsplit_once(':') {
+            Some((host, port)) => (
+                host.trim_matches(['[', ']']).to_string(),
+                port.parse::<u16>().context("invalid port in backend URL")?,
+            ),
+            None => (
+                host_port.trim_matches(['[', ']']).to_string(),
+                if scheme == "https" { 443 } else { 80 },
+            ),
+        }
+    };
     if host.is_empty() || port == 0 {
         bail!("backend host is required");
     }
@@ -441,7 +466,13 @@ pub fn enroll_device_token(
     });
     let body = serde_json::to_vec(&payload)?;
     let headers = vec![("Content-Type".to_string(), "application/json".to_string())];
-    let response = request_backend("POST", backend_url, "/api/v1/devices/enroll", &headers, &body)?;
+    let response = request_backend(
+        "POST",
+        backend_url,
+        "/api/v1/devices/enroll",
+        &headers,
+        &body,
+    )?;
     let parsed: serde_json::Value = serde_json::from_slice(&response.body)
         .context("failed to parse JSON enrollment response")?;
     extract_device_secret(&parsed)
@@ -457,19 +488,53 @@ pub fn fetch_screen_monitoring_policy(
     let response = request_backend(
         "GET",
         backend_url,
-        &format!("/api/v1/screen-monitoring/device-policy?deviceId={}", device.id),
+        &format!(
+            "/api/v1/screen-monitoring/device-policy?deviceId={}",
+            device.id
+        ),
         &headers,
         &[],
     )?;
     let parsed: serde_json::Value = serde_json::from_slice(&response.body)
         .context("backend returned invalid screenshot policy JSON")?;
-    let policy = parsed.get("policy").context("screenshot policy response is missing policy")?;
+    let policy = parsed
+        .get("policy")
+        .context("screenshot policy response is missing policy")?;
+    info!(device_id = %device.id,
+        allowed = policy.get("allowed").and_then(serde_json::Value::as_bool).unwrap_or(false),
+        reason = policy.get("reason").and_then(serde_json::Value::as_str).unwrap_or("none"),
+        "SCREEN_POLICY_FETCHED");
     Ok(ScreenMonitoringPolicy {
         allowed: policy.get("allowed").and_then(serde_json::Value::as_bool) == Some(true),
-        reason: policy.get("reason").and_then(serde_json::Value::as_str).map(str::to_owned),
-        interval_seconds: policy.get("intervalSeconds").and_then(serde_json::Value::as_u64).unwrap_or(300).clamp(300, 3600),
-        excluded_applications: policy.get("excludedApplications").and_then(serde_json::Value::as_array).map(|items| items.iter().filter_map(serde_json::Value::as_str).map(str::to_lowercase).collect()).unwrap_or_default(),
-        visible_indicator: policy.get("visibleIndicator").and_then(serde_json::Value::as_bool) != Some(false),
+        reason: policy
+            .get("reason")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        interval_seconds: policy
+            .get("intervalSeconds")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(300)
+            .clamp(300, 3600),
+        excluded_applications: policy
+            .get("excludedApplications")
+            .and_then(serde_json::Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_lowercase)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        visible_indicator: policy
+            .get("visibleIndicator")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true),
+        allowed_until: policy
+            .get("allowedUntil")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc)),
     })
 }
 
@@ -489,6 +554,18 @@ pub fn upload_screen_capture(
 ) -> Result<()> {
     let secret = std::env::var("DP_DEVICE_SECRET")
         .context("device secret is not configured; enroll this agent first")?;
+    upload_screen_capture_authenticated(backend_url, device, capture, &secret)
+}
+
+fn upload_screen_capture_authenticated(
+    backend_url: &str,
+    device: &DeviceInfo,
+    capture: ScreenCaptureUpload<'_>,
+    secret: &str,
+) -> Result<()> {
+    if secret.trim().is_empty() {
+        bail!("device secret is not configured; enroll this agent first");
+    }
     let headers = vec![
         ("Content-Type".to_string(), "image/jpeg".to_string()),
         ("X-Device-Secret".to_string(), secret.trim().to_string()),
@@ -496,24 +573,57 @@ pub fn upload_screen_capture(
         ("X-Captured-At".to_string(), capture.captured_at.to_string()),
         ("X-Image-Width".to_string(), capture.width.to_string()),
         ("X-Image-Height".to_string(), capture.height.to_string()),
-        ("X-Application-Name".to_string(), capture.application_name.chars().filter(|c| !matches!(c, '\r' | '\n')).take(128).collect()),
+        (
+            "X-Application-Name".to_string(),
+            capture
+                .application_name
+                .chars()
+                .filter(|c| !matches!(c, '\r' | '\n'))
+                .take(128)
+                .collect(),
+        ),
     ];
-    request_backend(
+    let response = request_backend(
         "POST",
         backend_url,
         &format!("/api/v1/screen-monitoring/captures?deviceId={}", device.id),
         &headers,
         capture.jpeg,
     )?;
+    let ack: serde_json::Value = serde_json::from_slice(&response.body)
+        .context("screenshot upload returned invalid acknowledgement; queue retained")?;
+    if ack.get("success").and_then(serde_json::Value::as_bool) != Some(true)
+        || ack
+            .get("captureId")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.is_empty())
+            .is_none()
+    {
+        bail!("screenshot upload was not acknowledged; queue retained");
+    }
     Ok(())
 }
 
-pub fn report_screen_capture_failure(backend_url: &str, device: &DeviceInfo, code: &str) -> Result<()> {
+pub fn report_screen_capture_failure(
+    backend_url: &str,
+    device: &DeviceInfo,
+    code: &str,
+) -> Result<()> {
     let secret = std::env::var("DP_DEVICE_SECRET")
         .context("device secret is not configured; enroll this agent first")?;
-    let body = serde_json::to_vec(&serde_json::json!({ "deviceId": device.id, "failureCode": code }))?;
-    let headers = vec![("Content-Type".to_string(), "application/json".to_string()), ("X-Device-Secret".to_string(), secret.trim().to_string())];
-    request_backend("POST", backend_url, "/api/v1/screen-monitoring/failures", &headers, &body)?;
+    let body =
+        serde_json::to_vec(&serde_json::json!({ "deviceId": device.id, "failureCode": code }))?;
+    let headers = vec![
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("X-Device-Secret".to_string(), secret.trim().to_string()),
+    ];
+    request_backend(
+        "POST",
+        backend_url,
+        "/api/v1/screen-monitoring/failures",
+        &headers,
+        &body,
+    )?;
     Ok(())
 }
 
@@ -532,7 +642,8 @@ mod tests {
     use super::*;
     use dp_core::{AppInfo, EventSource, EventType};
     use dp_storage::StoredActivitySession;
-    use std::io::{BufRead, Write};
+    use std::collections::HashMap;
+    use std::io::{BufRead, Read, Write};
     use std::net::TcpListener;
     use std::thread;
     use uuid::Uuid;
@@ -541,7 +652,10 @@ mod tests {
     fn backend_parser_rejects_credentials_and_accepts_ipv6_loopback() {
         assert!(parse_url("https://user:secret@example.test").is_err());
         assert!(parse_url("http://localhost:3001/\r\nX-Header:secret").is_err());
-        assert_eq!(parse_local_url("http://[::1]:3001").unwrap(), ("::1".into(), 3001, String::new()));
+        assert_eq!(
+            parse_local_url("http://[::1]:3001").unwrap(),
+            ("::1".into(), 3001, String::new())
+        );
     }
 
     #[test]
@@ -556,6 +670,98 @@ mod tests {
         assert!(
             extract_device_secret(&serde_json::json!({ "deviceSecret": "not-a-secret" })).is_err()
         );
+    }
+
+    #[test]
+    fn screenshot_upload_matches_backend_http_contract() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let device_id = Uuid::new_v4();
+        let capture_key = "capture_key_1234567890";
+        let captured_at = "2026-11-07T04:30:00.000Z";
+        let jpeg = [0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0xff, 0xd9];
+        let expected_jpeg = jpeg;
+        let server_thread = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).unwrap();
+            assert_eq!(
+                request_line.trim_end(),
+                format!("POST /api/v1/screen-monitoring/captures?deviceId={device_id} HTTP/1.1")
+            );
+
+            let mut headers = HashMap::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.split_once(':').unwrap();
+                headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
+            }
+            assert_eq!(
+                headers.get("content-type").map(String::as_str),
+                Some("image/jpeg")
+            );
+            assert_eq!(
+                headers.get("x-device-secret").map(String::as_str),
+                Some("dp_sec_contract_test_123456789")
+            );
+            assert_eq!(
+                headers.get("x-capture-key").map(String::as_str),
+                Some(capture_key)
+            );
+            assert_eq!(
+                headers.get("x-captured-at").map(String::as_str),
+                Some(captured_at)
+            );
+            assert_eq!(
+                headers.get("x-image-width").map(String::as_str),
+                Some("1920")
+            );
+            assert_eq!(
+                headers.get("x-image-height").map(String::as_str),
+                Some("1080")
+            );
+            assert_eq!(
+                headers.get("x-application-name").map(String::as_str),
+                Some("Code.exeInjected")
+            );
+
+            let length = headers["content-length"].parse::<usize>().unwrap();
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            assert_eq!(body, expected_jpeg);
+            let body = r#"{"success":true,"captureId":"capture-test"}"#;
+            let response = format!("HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let device = DeviceInfo {
+            id: device_id,
+            kind: EventSource::DesktopAgent,
+            name: "Contract-PC".into(),
+            platform: "windows".into(),
+            browser: None,
+            agent_version: Some("0.1.0".into()),
+        };
+        upload_screen_capture_authenticated(
+            &format!("http://127.0.0.1:{port}"),
+            &device,
+            ScreenCaptureUpload {
+                capture_key,
+                captured_at,
+                width: 1920,
+                height: 1080,
+                application_name: "Code.exe\r\nInjected",
+                jpeg: &jpeg,
+            },
+            " dp_sec_contract_test_123456789 ",
+        )
+        .unwrap();
+        server_thread.join().unwrap();
     }
 
     #[test]

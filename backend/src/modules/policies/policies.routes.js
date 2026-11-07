@@ -712,12 +712,23 @@ export default async function policyRoutes(fastify) {
           where: whereClause,
           orderBy: { timestamp: 'desc' },
           take: 100,
+          include: {
+            user: { select: { displayName: true, email: true, employeeNumber: true } },
+            policy: { select: { name: true } },
+          },
         });
         if (rows) {
+          const violations = rows.map(({ user, policy, ...violation }) => ({
+            ...violation,
+            employee: user?.displayName || user?.email || 'Organization User',
+            username: user?.email || null,
+            employeeNumber: user?.employeeNumber || null,
+            policyName: policy?.name || 'Unknown Policy',
+          }));
           return {
-            violations: rows,
-            totalCount: rows.length,
-            unacknowledgedCount: rows.filter((v) => !v.acknowledged).length,
+            violations,
+            totalCount: violations.length,
+            unacknowledgedCount: violations.filter((v) => !v.acknowledged).length,
           };
         }
       } catch {

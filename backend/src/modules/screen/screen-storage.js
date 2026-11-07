@@ -2,8 +2,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { v2 as cloudinary } from 'cloudinary';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const MAX_STORED_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function encryptionKey() {
   const value = process.env.SCREENSHOT_ENCRYPTION_KEY || '';
@@ -27,7 +29,7 @@ function decrypt(bytes) {
 
 function safeSegment(value) {
   const text = String(value || '');
-  if (!/^[a-zA-Z0-9._-]+$/.test(text)) throw new Error('Unsafe screenshot object key');
+  if (!/^[a-zA-Z0-9._-]+$/.test(text) || text === '.' || text === '..') throw new Error('Unsafe screenshot object key');
   return text;
 }
 
@@ -65,66 +67,85 @@ class LocalEncryptedStore {
   }
 }
 
-function sha256(value) {
-  return crypto.createHash('sha256').update(value).digest('hex');
-}
-
 function hmac(key, value, encoding) {
   return crypto.createHmac('sha256', key).update(value).digest(encoding);
 }
 
-function awsEncode(value) {
-  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+export function cloudinaryAssetIdentity(key) {
+  const match = String(key || '').match(/^([a-zA-Z0-9._/-]+)\.(jpg|png)\.enc$/);
+  if (!match || match[1].split('/').some((segment) => !segment || segment === '.' || segment === '..')) {
+    throw new Error('Invalid Cloudinary screenshot object key');
+  }
+  return {
+    publicId: `digitalpulse/screenshots/${match[1]}`,
+    format: match[2],
+  };
 }
 
-class S3CompatibleStore {
+class CloudinaryAuthenticatedStore {
   constructor(config) {
-    this.endpoint = new URL(config.endpoint);
-    this.region = config.region;
-    this.bucket = config.bucket;
-    this.accessKey = config.accessKey;
-    this.secretKey = config.secretKey;
-    this.provider = 's3-compatible';
-  }
-
-  async request(method, key, body = Buffer.alloc(0)) {
-    const objectPath = `/${awsEncode(this.bucket)}/${key.split('/').map(awsEncode).join('/')}`;
-    const url = new URL(objectPath, this.endpoint);
-    const now = new Date();
-    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
-    const day = amzDate.slice(0, 8);
-    const payloadHash = sha256(body);
-    const canonicalHeaders = `host:${url.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\nx-amz-server-side-encryption:AES256\n`;
-    const signedHeaders = 'host;x-amz-content-sha256;x-amz-date;x-amz-server-side-encryption';
-    const canonical = `${method}\n${url.pathname}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
-    const scope = `${day}/${this.region}/s3/aws4_request`;
-    const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${sha256(canonical)}`;
-    const dateKey = hmac(`AWS4${this.secretKey}`, day);
-    const regionKey = hmac(dateKey, this.region);
-    const serviceKey = hmac(regionKey, 's3');
-    const signingKey = hmac(serviceKey, 'aws4_request');
-    const signature = hmac(signingKey, stringToSign, 'hex');
-    const response = await fetch(url, {
-      method,
-      body: method === 'GET' || method === 'DELETE' ? undefined : body,
-      redirect: 'error',
-      signal: AbortSignal.timeout(15000),
-      headers: {
-        'x-amz-date': amzDate,
-        'x-amz-content-sha256': payloadHash,
-        'x-amz-server-side-encryption': 'AES256',
-        Authorization: `AWS4-HMAC-SHA256 Credential=${this.accessKey}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
-      },
+    cloudinary.config({
+      cloud_name: config.cloudName,
+      api_key: config.apiKey,
+      api_secret: config.apiSecret,
+      secure: true,
     });
-    if (!response.ok && !(method === 'DELETE' && response.status === 404)) {
-      throw new Error(`S3-compatible screenshot storage returned HTTP ${response.status}`);
-    }
-    return response;
+    this.client = cloudinary;
+    this.provider = 'cloudinary-authenticated';
   }
 
-  async put(key, bytes) { await this.request('PUT', key, bytes); }
-  async get(key) { return Buffer.from(await (await this.request('GET', key)).arrayBuffer()); }
-  async delete(key) { await this.request('DELETE', key); }
+  async put(key, bytes) {
+    const { publicId, format } = cloudinaryAssetIdentity(key);
+    await new Promise((resolve, reject) => {
+      const stream = this.client.uploader.upload_stream({
+        public_id: publicId,
+        resource_type: 'image',
+        type: 'authenticated',
+        format,
+        overwrite: false,
+        unique_filename: false,
+        use_filename: false,
+        tags: ['digitalpulse-screenshot'],
+      }, (error, result) => {
+        if (error) reject(error);
+        else if (!result || result.public_id !== publicId || result.type !== 'authenticated') reject(new Error('Cloudinary returned invalid authenticated upload metadata'));
+        else resolve(result);
+      });
+      stream.end(bytes);
+    });
+  }
+
+  async get(key) {
+    const { publicId, format } = cloudinaryAssetIdentity(key);
+    const expiresAt = Math.floor(Date.now() / 1000) + 60;
+    const signedUrl = this.client.utils.private_download_url(publicId, format, {
+      resource_type: 'image',
+      type: 'authenticated',
+      expires_at: expiresAt,
+      attachment: false,
+    });
+    const url = new URL(signedUrl);
+    if (url.protocol !== 'https:' || (!url.hostname.endsWith('.cloudinary.com') && url.hostname !== 'cloudinary.com')) {
+      throw new Error('Cloudinary generated an unsafe download URL');
+    }
+    const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error(`Cloudinary screenshot download returned HTTP ${response.status}`);
+    const contentLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(contentLength) && contentLength > MAX_STORED_IMAGE_BYTES) throw new Error('Cloudinary screenshot exceeds the maximum image size');
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > MAX_STORED_IMAGE_BYTES) throw new Error('Cloudinary screenshot exceeds the maximum image size');
+    return bytes;
+  }
+
+  async delete(key) {
+    const { publicId } = cloudinaryAssetIdentity(key);
+    const result = await this.client.uploader.destroy(publicId, {
+      resource_type: 'image',
+      type: 'authenticated',
+      invalidate: true,
+    });
+    if (!['ok', 'not found'].includes(result?.result)) throw new Error('Cloudinary did not confirm screenshot deletion');
+  }
 }
 
 let cached;
@@ -136,20 +157,18 @@ export function createScreenshotStore() {
     cached = new LocalEncryptedStore(root);
     return cached;
   }
-  if (provider === 's3') {
-    const required = ['SCREENSHOT_S3_ENDPOINT', 'SCREENSHOT_S3_REGION', 'SCREENSHOT_S3_BUCKET', 'SCREENSHOT_S3_ACCESS_KEY_ID', 'SCREENSHOT_S3_SECRET_ACCESS_KEY'];
+  if (provider === 'cloudinary') {
+    const required = ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'];
     const missing = required.filter((name) => !process.env[name]);
-    if (missing.length) throw new Error(`Missing screenshot S3 configuration: ${missing.join(', ')}`);
-    cached = new S3CompatibleStore({
-      endpoint: process.env.SCREENSHOT_S3_ENDPOINT,
-      region: process.env.SCREENSHOT_S3_REGION,
-      bucket: process.env.SCREENSHOT_S3_BUCKET,
-      accessKey: process.env.SCREENSHOT_S3_ACCESS_KEY_ID,
-      secretKey: process.env.SCREENSHOT_S3_SECRET_ACCESS_KEY,
+    if (missing.length) throw new Error(`Missing Cloudinary screenshot configuration: ${missing.join(', ')}`);
+    cached = new CloudinaryAuthenticatedStore({
+      cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+      apiKey: process.env.CLOUDINARY_API_KEY,
+      apiSecret: process.env.CLOUDINARY_API_SECRET,
     });
     return cached;
   }
-  throw new Error('SCREENSHOT_STORAGE_PROVIDER must be local or s3');
+  throw new Error('SCREENSHOT_STORAGE_PROVIDER must be local or cloudinary');
 }
 
 export function createViewToken(captureId, userId, expiresAt) {

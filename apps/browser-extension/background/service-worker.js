@@ -1,17 +1,20 @@
 import { CONFIG } from '../shared/constants.js';
 import { recordBlockedAttempt, flushBlockedAttempts } from './blocked-attempts.js';
-import { TabManager } from './tab-manager.js';
+import { TabManager, reconcileActiveTab } from './tab-manager.js';
 import { ActivityManager } from './activity-manager.js';
 import { syncBlockingRulesWithStatus as syncBlockingRules } from './policy-sync.js';
 import { createSyncClient } from './sync-client.js';
-import { ensureSyncAlarm, singleFlight, SYNC_ALARM_NAME } from './sync-scheduler.js';
+import { createScreenshotCapture } from './screenshot-capture.js';
+import { ensureSyncAlarm, singleFlight, serializeTasks, SYNC_ALARM_NAME } from './sync-scheduler.js';
 
 const isEdge = navigator.userAgent.includes('Edg/');
 const browserName = isEdge ? 'edge' : 'chrome';
 const { enrollBrowserDevice, sendHeartbeat, syncQueue, auditQueueState } = createSyncClient({ chromeApi: chrome, fetchImpl: fetch, config: CONFIG, browserName });
+const { captureAuthorizedActiveTab, stop: stopScreenshotCapture, handleHeartbeatMonitoring } = createScreenshotCapture({ chromeApi: chrome, fetchImpl: fetch, config: CONFIG, browserName });
 const ENROLLMENT_DEFERRED_MESSAGE = 'Device enrollment is not configured yet. Please contact your administrator.';
 const MAX_QUEUE_EVENTS = 1000;
 let applyMonitoringState = async () => {};
+const serializeRuntime = serializeTasks();
 
 async function getOrCreateDeviceId() {
   const stored = await chrome.storage.local.get([CONFIG.DEVICE_STORAGE_KEY]);
@@ -51,7 +54,10 @@ async function initializeWorker() {
     onSessionChanged: (session) => chrome.storage.local.set({ [CONFIG.ACTIVE_SESSION_STORAGE_KEY]: session }),
   });
   applyMonitoringState = async (monitoring) => {
-    await activityManager.setMonitoringState(monitoring);
+    // Heartbeat authorizes domain activity, not screenshots. Only the screenshot
+    // policy controller may establish the screenshot ON badge.
+    const allowed = await handleHeartbeatMonitoring(monitoring);
+    await activityManager.setMonitoringState({ ...monitoring, allowed });
     if (!activityManager.monitoringAllowed) await chrome.storage.local.remove('dp_active_domain');
   };
   const initialHeartbeat = await sendHeartbeat();
@@ -70,10 +76,13 @@ async function initializeWorker() {
   const refreshAuthorizedActiveTab = async () => {
     if (!activityManager.monitoringAllowed) return null;
     try {
-      const [currentTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-      if (currentTab?.url) tabManager.handleTabActivated(currentTab);
-      return currentTab?.url || null;
-    } catch { return null; }
+      return await reconcileActiveTab(chrome, activityManager, tabManager, CONFIG.IDLE_THRESHOLD_SECS);
+    } catch (error) {
+      await stopScreenshotCapture('SYNC_FAILED');
+      await activityManager.switchDomain(null);
+      console.debug('[DigitalPulse] Active tab unavailable:', error.message);
+      return null;
+    }
   };
   const performPeriodicSync = async () => {
     await flushBlockedAttempts().catch((error) => console.debug('[DigitalPulse] Blocked attempt sync:', error.message));
@@ -83,11 +92,13 @@ async function initializeWorker() {
       const heartbeat = await sendHeartbeat();
       await applyMonitoringState(heartbeat.monitoring || {});
       await refreshAuthorizedActiveTab();
+      const screenshot = await captureAuthorizedActiveTab();
       await activityManager.checkpoint();
       const sync = await syncQueue();
-      return { policy, heartbeat, sync };
+      return { policy, heartbeat, screenshot, sync };
     } catch (error) {
       console.debug('[DigitalPulse] Periodic sync error:', error.message);
+      await stopScreenshotCapture('SYNC_FAILED');
       return { policy, heartbeat: { ok: false }, sync: { ok: false }, error: error.message || String(error) };
     }
   };
@@ -97,9 +108,9 @@ async function initializeWorker() {
 
 // Chrome requires event listeners to be registered as the worker evaluates.
 const workerRuntime = initializeWorker();
+const withRuntime = (task) => serializeRuntime(async () => task(await workerRuntime));
 const runSync = singleFlight(async (source) => {
-  const { performPeriodicSync } = await workerRuntime;
-  const result = await performPeriodicSync();
+  const result = await withRuntime(({ performPeriodicSync }) => performPeriodicSync());
   await chrome.storage.local.set({
     dp_automatic_sync: {
       source,
@@ -122,6 +133,7 @@ const ensurePeriodicSyncAlarm = singleFlight(async () => {
 
 function runSyncSafely(source) {
   return runSync(source).catch(async (error) => {
+    await stopScreenshotCapture('SYNC_FAILED');
     console.debug('[DigitalPulse] Automatic sync error:', error.message || error);
     await chrome.storage.local.set({
       dp_automatic_sync: {
@@ -173,16 +185,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     runSync('popup').then(({ heartbeat, sync, policy }) => sendResponse({ success: Boolean(heartbeat.ok && sync.ok && policy.updated), heartbeat, sync, policy })).catch((error) => sendResponse({ success: false, error: error.message })); return true;
   }
   if (message.action === 'refresh_status') {
-    workerRuntime.then(async ({ refreshAuthorizedActiveTab }) => { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); sendResponse({ heartbeat }); }).catch((error) => sendResponse({ error: error.message })); return true;
+    withRuntime(async ({ refreshAuthorizedActiveTab }) => { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); sendResponse({ heartbeat }); }).catch((error) => sendResponse({ error: error.message })); return true;
   }
   return false;
 });
 
-chrome.tabs.onActivated.addListener((activeInfo) => { workerRuntime.then(async ({ activityManager, tabManager }) => { if (!activityManager.monitoringAllowed) return; try { tabManager.handleTabActivated(await chrome.tabs.get(activeInfo.tabId)); } catch { /* tab closed */ } }); });
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => { workerRuntime.then(({ activityManager, tabManager }) => { if (activityManager.monitoringAllowed && tab.active && changeInfo.url) tabManager.handleUrlChanged(changeInfo.url); }); });
-chrome.windows.onFocusChanged.addListener((windowId) => { workerRuntime.then(async ({ activityManager, tabManager }) => { if (!activityManager.monitoringAllowed) return; if (windowId === chrome.windows.WINDOW_ID_NONE) tabManager.handleWindowFocusChanged(false); else { const [tab] = await chrome.tabs.query({ active: true, windowId }); tabManager.handleWindowFocusChanged(true, tab?.url); } }); });
+function handleBrowserTransition() {
+  void withRuntime(({ refreshAuthorizedActiveTab }) => refreshAuthorizedActiveTab())
+    .catch((error) => console.debug('[DigitalPulse] Tab transition failed:', error.message));
+}
+chrome.tabs.onActivated.addListener(handleBrowserTransition);
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => { if (tab.active && changeInfo.url) handleBrowserTransition(); });
+chrome.windows.onFocusChanged.addListener(handleBrowserTransition);
 chrome.idle.setDetectionInterval(CONFIG.IDLE_THRESHOLD_SECS);
-chrome.idle.onStateChanged.addListener((state) => { workerRuntime.then(async ({ activityManager, refreshAuthorizedActiveTab }) => { if (state === 'active') await refreshAuthorizedActiveTab(); const stored = await chrome.storage.local.get(['dp_active_domain']); await activityManager.handleIdleState(state, Date.now(), state === 'active' ? stored.dp_active_domain : null); }); });
+chrome.idle.onStateChanged.addListener(handleBrowserTransition);
 if (chrome.alarms?.onAlarm) {
   chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === SYNC_ALARM_NAME) void runSyncSafely('alarm'); });
 }

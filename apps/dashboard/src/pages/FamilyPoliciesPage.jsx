@@ -11,8 +11,8 @@ export default function FamilyPoliciesPage() {
   const fetchViolations = useCallback((opts) => api.policyViolations(opts), []);
   const fetchGraceGrants = useCallback((opts) => api.graceGrants(opts), []);
 
-  const { data: policiesData, error: policiesErr, loading: policiesLoading, reload: reloadPolicies } = useApi(fetchPolicies, { intervalMs: 5000 });
-  const { data: violationsData, error: violationsErr, loading: violationsLoading, reload: reloadViolations } = useApi(fetchViolations, { intervalMs: 5000 });
+  const { data: policiesData, loading: policiesLoading, reload: reloadPolicies } = useApi(fetchPolicies, { intervalMs: 5000 });
+  const { data: violationsData, loading: violationsLoading, reload: reloadViolations } = useApi(fetchViolations, { intervalMs: 5000 });
   const { data: graceData, reload: reloadGrace } = useApi(fetchGraceGrants, { intervalMs: 3000 });
 
   const [newPolicyName, setNewPolicyName] = useState('');

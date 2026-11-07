@@ -26,6 +26,7 @@
     "@fastify/helmet": "^13.2.0",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
+    "cloudinary": "^2.8.0",
     "dotenv": "^18.0.9",
     "fastify": "^5.12.7",
     "nodemailer": "^7.0.12",

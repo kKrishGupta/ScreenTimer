@@ -22,6 +22,11 @@ function FieldError({ children }) {
 export default function AcceptInvitationPage() {
   const location = useLocation();
   const token = readInvitationToken(location);
+  // Never retain another invitation's details, passwords, or submit state.
+  return <InvitationForm key={token} token={token} location={location} />;
+}
+
+function InvitationForm({ token, location }) {
   const navigate = useNavigate();
   const { login, logout, user } = useAuth();
   const [details, setDetails] = useState(null);
@@ -44,9 +49,9 @@ export default function AcceptInvitationPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setDetails(null);
-    setSignInRequired(false);
     if (!token) {
+      // This effect owns validation state for the URL-derived token.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError('This invitation link is missing its token. Ask your organization for a new link.');
       setValidating(false);
       return () => { cancelled = true; };

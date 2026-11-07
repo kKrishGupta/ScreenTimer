@@ -40,6 +40,21 @@ it('preserves schedule edits when the organization timezone refreshes', async ()
   expect(screen.getByLabelText('Monitoring shift start')).toHaveValue('10:00');
 });
 
+it('saves an organization schedule once and reloads persisted settings', async () => {
+  mocks.saveSchedule.mockResolvedValue({
+    success: true,
+    syncedUsers: 4,
+    settings: { ...mocks.settings, organizationTimezone: 'Asia/Kolkata' },
+  });
+  render(<MemoryRouter><DevicesPage /></MemoryRouter>);
+  const save = screen.getByRole('button', { name: 'Save organization schedule' });
+  fireEvent.click(save);
+  fireEvent.click(save);
+  await waitFor(() => expect(mocks.saveSchedule).toHaveBeenCalledTimes(1));
+  expect(mocks.saveSchedule).toHaveBeenCalledWith({ shiftStart: '09:00', shiftEnd: '18:00', workingDays: ['Mon'] });
+  await waitFor(() => expect(mocks.reload).toHaveBeenCalled());
+});
+
 it('warns employees that a saved schedule still needs an organization timezone', async () => {
   mocks.role = 'EMPLOYEE';
   mocks.saveSchedule.mockResolvedValue({ settings: mocks.settings });

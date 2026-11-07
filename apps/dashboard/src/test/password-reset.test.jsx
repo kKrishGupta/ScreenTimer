@@ -76,7 +76,7 @@ describe('confidential password reset page', () => {
     expect(document.body.innerHTML).not.toContain(token);
     expect(api.logout).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(window.location.pathname).toBe('/login'), { timeout: 2500 });
-    expect(await screen.findByRole('heading', { name: 'Welcome back' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Employee Login' })).toBeInTheDocument();
   });
 
   it('rejects mismatched passwords without submitting or losing the captured link', async () => {
@@ -155,12 +155,12 @@ describe('confidential password reset page', () => {
     window.history.replaceState(null, '', '/login');
     api.requestPasswordReset.mockResolvedValue({ success: true, message: 'If the account exists, check your email for a reset link.', resetToken: token });
     renderApp();
-    await screen.findByRole('heading', { name: 'Welcome back' });
+    await screen.findByRole('heading', { name: 'Employee Login' });
     fireEvent.click(screen.getByRole('link', { name: 'Forgot password?' }));
     fireEvent.change(screen.getByLabelText('Work email', { selector: 'input' }), { target: { value: email } });
     fireEvent.submit(screen.getByRole('button', { name: 'Send reset link' }).closest('form'));
-    expect(await screen.findByRole('status')).toHaveTextContent('check your email');
-    expect(window.location.pathname).toBe('/reset-password');
+    expect(await screen.findByRole('status')).toHaveTextContent(/check your email/i);
+    expect(window.location.pathname).toBe('/forgot-password');
     expect(window.location.search).toBe('');
     expect(screen.getByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Update password' })).not.toBeInTheDocument();
@@ -182,7 +182,7 @@ describe('confidential password reset page', () => {
     fireEvent.submit(form);
     expect(api.requestPasswordReset).toHaveBeenCalledTimes(1);
     failDelivery(new ApiError('Email unavailable', { status: 503, code: 'RESET_EMAIL_NOT_CONFIGURED' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('contact your administrator to enable email delivery');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Password-reset email is currently unavailable. Please contact your administrator.');
     expect(window.location.pathname).toBe('/forgot-password');
   });
 

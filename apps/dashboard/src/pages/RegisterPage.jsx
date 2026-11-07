@@ -37,7 +37,7 @@ export default function RegisterPage() {
         return;
       }
 
-      navigate('/', { replace: true });
+      navigate('/organization/', { replace: true });
     } catch (err) {
       setError(['TIMEOUT', 'NETWORK_ERROR'].includes(err.code)
         ? `${err.message} Registration may have completed. Try Sign in before submitting again.`

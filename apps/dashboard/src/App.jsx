@@ -1,10 +1,11 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router';
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import Layout from './components/layout/Layout.jsx';
 import RoleHomePage from './pages/RoleHomePage.jsx';
 import EmployeesPage from './pages/EmployeesPage.jsx';
 import DevicesPage from './pages/DevicesPage.jsx';
 import TimelinePage from './pages/TimelinePage.jsx';
+import DigitalWellbeingPage from './pages/DigitalWellbeingPage.jsx';
 import ApplicationsPage from './pages/ApplicationsPage.jsx';
 import WebsitesPage from './pages/WebsitesPage.jsx';
 import ScreenMonitoringPage from './pages/ScreenMonitoringPage.jsx';
@@ -37,7 +38,12 @@ function PublicOnly({ children }) {
   if (!isAuthenticated) return children;
   const returnPath = location.state?.from?.pathname;
   if (location.pathname === '/login' && ['/accept-invitation', '/invitations/accept'].includes(returnPath)) return children;
-  return <Navigate replace to={user?.role === 'EMPLOYEE' ? '/employee-portal' : '/'} />;
+  const destination = user?.role === 'EMPLOYEE'
+    ? '/employee-portal'
+    : user?.role === 'ADMIN'
+      ? '/organization/'
+      : '/';
+  return <Navigate replace to={destination} />;
 }
 
 function AdminOnly({ children }) {
@@ -51,15 +57,31 @@ function AdminOnly({ children }) {
 
 function DigitalWellbeingRoute() {
   const { user } = useAuth();
-  return user?.role === 'EMPLOYEE' ? <TimelinePage /> : <ReportsPage />;
+  return user?.role === 'EMPLOYEE' ? <DigitalWellbeingPage personal /> : <ReportsPage />;
 }
 
 function ProtectedRoutes() {
-  const { loading, isAuthenticated } = useAuth();
+  const { loading, isAuthenticated, logoutDestination } = useAuth();
   const location = useLocation();
   if (loading) return <AuthLoading />;
-  if (!isAuthenticated) return <Navigate replace to="/login" state={{ from: location }} />;
+  if (!isAuthenticated) {
+    return (
+      <Navigate
+        replace
+        to={logoutDestination || '/login'}
+        state={logoutDestination ? undefined : { from: location }}
+      />
+    );
+  }
   return <Layout />;
+}
+
+function OrganizationRoutes() {
+  return (
+    <AdminOnly>
+      <Outlet />
+    </AdminOnly>
+  );
 }
 
 export default function App() {
@@ -83,6 +105,18 @@ export default function App() {
 
       <Route element={<ProtectedRoutes />}>
         <Route index element={<RoleHomePage />} />
+        <Route path="organization" element={<OrganizationRoutes />}>
+          <Route index element={<RoleHomePage />} />
+          <Route path="employees" element={<EmployeesPage />} />
+          <Route path="employee-setup" element={<EmployeeSetupPage />} />
+          <Route path="devices" element={<DevicesPage />} />
+          <Route path="screen-monitoring" element={<ScreenMonitoringPage />} />
+          <Route path="live" element={<LiveMonitoringPage />} />
+          <Route path="blocked-activity" element={<BlockedActivityPage />} />
+          <Route path="time-planner" element={<SchedulePage />} />
+          <Route path="reports" element={<ReportsPage />} />
+          <Route path="alerts" element={<AlertsPage />} />
+        </Route>
         <Route path="live" element={<AdminOnly><LiveMonitoringPage /></AdminOnly>} />
         <Route path="employee-portal" element={<EmployeePortalPage />} />
         <Route path="employee-setup" element={<EmployeeSetupPage />} />

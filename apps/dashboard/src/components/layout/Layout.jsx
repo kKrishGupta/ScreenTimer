@@ -18,25 +18,23 @@ import {
   UsersIcon,
 } from '../ui/icons.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
-import { useNavigate } from 'react-router';
 
 const NAV = [
-  { to: '/', label: 'Overview', icon: GridIcon, end: true },
-  { to: '/employees', label: 'Employees', icon: UsersIcon },
-  { to: '/employee-setup', label: 'My Device', icon: DeviceIcon },
-  { to: '/devices', label: 'Organization Devices', icon: ScreenIcon },
-  { to: '/screen-monitoring', label: 'Screen Monitoring', icon: ScreenIcon },
-  { to: '/live', label: 'Activity', icon: PulseIcon },
-  { to: '/blocked-activity', label: 'Website Blocking', icon: ShieldIcon },
-  { to: '/time-planner', label: 'Schedule', icon: CalendarIcon },
-  { to: '/reports', label: 'Reports', icon: TimelineIcon },
-  { to: '/alerts', label: 'Alerts', icon: BellIcon },
+  { to: '/organization', label: 'Overview', icon: GridIcon, end: true },
+  { to: '/organization/employees', label: 'Employees', icon: UsersIcon },
+  { to: '/organization/employee-setup', label: 'My Device', icon: DeviceIcon },
+  { to: '/organization/devices', label: 'Organization Devices', icon: ScreenIcon },
+  { to: '/organization/screen-monitoring', label: 'Screen Monitoring', icon: ScreenIcon },
+  { to: '/organization/live', label: 'Activity', icon: PulseIcon },
+  { to: '/organization/blocked-activity', label: 'Website Blocking', icon: ShieldIcon },
+  { to: '/organization/time-planner', label: 'Schedule', icon: CalendarIcon },
+  { to: '/organization/reports', label: 'Reports', icon: TimelineIcon },
+  { to: '/organization/alerts', label: 'Alerts', icon: BellIcon },
 ];
 
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const session = user ? { user } : null;
   const isEmployee = user?.role === 'EMPLOYEE';
   const nav = isEmployee
@@ -50,8 +48,14 @@ export default function Layout() {
     : ['ADMIN', 'SUPER_ADMIN'].includes(user?.role) ? NAV : [];
 
   async function handleLogout() {
-    await logout();
-    navigate('/login', { replace: true });
+    const loginPath =
+      user?.role === 'ADMIN'
+        ? '/organization/login'
+        : user?.role === 'SUPER_ADMIN'
+          ? '/super-admin/login'
+          : '/login';
+
+    await logout(loginPath);
   }
 
   // Close mobile drawer on Escape key

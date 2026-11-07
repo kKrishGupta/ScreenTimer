@@ -172,13 +172,13 @@ describe('registration privilege-escalation protection', () => {
 
     for (const [index, role] of [
       Roles.SUPER_ADMIN,
-      Roles.ORGANIZATION_ADMIN,
-      Roles.MANAGER,
+      Roles.ADMIN,
+      'MANAGER',
       Roles.EMPLOYEE,
     ].entries()) {
       const response = await app.inject({
         method: 'POST',
-        url: '/api/v1/auth/register',
+        url: '/api/v1/organization/register',
         payload: {
           email: `attacker-${index}@example.com`,
           password: 'StrongPassword123!',
@@ -194,7 +194,7 @@ describe('registration privilege-escalation protection', () => {
 
       assert.equal(response.statusCode, 201);
       const created = prisma.__state.users[index];
-      assert.equal(created.role, 'ORG_ADMIN');
+      assert.equal(created.role, 'ADMIN');
       assert.notEqual(created.organizationId, 'victim-org');
     }
 
@@ -208,7 +208,7 @@ describe('registration privilege-escalation protection', () => {
     const invitation = await app.authService.createInvitation({
       organizationId: 'trusted-org',
       email: 'employee@example.com',
-      role: Roles.MANAGER,
+      role: Roles.EMPLOYEE,
       invitedBy: 'admin@example.com',
     });
 
@@ -242,7 +242,7 @@ describe('registration privilege-escalation protection', () => {
     assert.equal(accepted.statusCode, 200);
     assert.equal(accepted.json().user.email, 'employee@example.com');
     assert.equal(prisma.__state.users[0].organizationId, 'trusted-org');
-    assert.equal(prisma.__state.users[0].role, Roles.MANAGER);
+    assert.equal(prisma.__state.users[0].role, Roles.EMPLOYEE);
     assert.equal('passwordHash' in accepted.json().user, false);
     assert.equal('passwordSalt' in accepted.json().user, false);
 
@@ -336,16 +336,16 @@ describe('registration privilege-escalation protection', () => {
     t.after(() => app.close());
     const account = await prisma.user.create({ data: {
       organizationId: 'trusted-org', email: 'manager@example.com', displayName: 'Department Manager',
-      role: Roles.MANAGER, passwordHash: 'manager-hash', passwordSalt: 'manager-salt', employmentStatus: 'active',
+      role: Roles.ADMIN, passwordHash: 'manager-hash', passwordSalt: 'manager-salt', employmentStatus: 'active',
     } });
     const invitation = await app.authService.createInvitation({ organizationId: 'trusted-org', email: account.email, role: Roles.EMPLOYEE });
     const token = new URLSearchParams(new URL(invitation.invitationUrl).hash.slice(1)).get('token');
-    const session = await app.authService.createTestSession({ userId: account.id, email: account.email, role: Roles.MANAGER, organizationId: 'trusted-org' });
+    const session = await app.authService.createTestSession({ userId: account.id, email: account.email, role: Roles.ADMIN, organizationId: 'trusted-org' });
 
     const response = await app.inject({ method: 'POST', url: '/api/v1/auth/invitations/accept', headers: session.headers, payload: { token } });
     assert.equal(response.statusCode, 409);
     assert.equal(response.json().error.code, 'INVITATION_ROLE_CONFLICT');
-    assert.equal(account.role, Roles.MANAGER);
+    assert.equal(account.role, Roles.ADMIN);
     assert.equal(prisma.__state.invitations[0].acceptedAt, undefined);
   });
 
@@ -423,7 +423,7 @@ describe('registration privilege-escalation protection', () => {
       organizationId: 'trusted-org',
       email: 'saved@example.com',
       displayName: 'Saved Employee',
-      role: Roles.ORGANIZATION_ADMIN,
+      role: Roles.EMPLOYEE,
       shiftStart: '09:00', shiftEnd: '17:00', workingDays: ['Mon', 'Tue'], shiftTimezone: 'UTC',
     });
     const token = new URLSearchParams(new URL(result.invitationUrl).hash.slice(1)).get('token');

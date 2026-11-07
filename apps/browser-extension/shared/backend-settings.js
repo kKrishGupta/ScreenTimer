@@ -32,7 +32,10 @@ export async function saveBackendUrl(chromeApi, value, fetchImpl = globalThis.fe
 
 export function resolveBackendUrl(stored, config = CONFIG) {
   const configured = normalizeBackendUrl(config.DEFAULT_BACKEND_URL);
-  const previous = stored[config.SETTINGS_STORAGE_KEY]?.backendUrl || 'http://127.0.0.1:3001';
+  const previous = stored[config.SETTINGS_STORAGE_KEY]?.backendUrl;
+  if (!previous && (stored.dp_device_secret || stored[config.SYNC_QUEUE_STORAGE_KEY]?.length)) {
+    throw new Error('Stored backend identity is missing. Contact your administrator; enrollment has not been changed.');
+  }
   if (previous && normalizeBackendUrl(previous) !== configured && (stored.dp_device_secret || stored[config.SYNC_QUEUE_STORAGE_KEY]?.length)) {
     throw new Error('This device belongs to a different backend. Use a fresh browser profile and enroll with your administrator.');
   }

@@ -24,6 +24,7 @@ function normalizeDashboardUser(user) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [logoutDestination, setLogoutDestination] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +54,7 @@ export function AuthProvider({ children }) {
   const value = useMemo(() => ({
     user,
     loading,
+    logoutDestination,
     isAuthenticated: Boolean(user),
 
     async login(credentials, options = {}) {
@@ -80,6 +82,7 @@ export function AuthProvider({ children }) {
           throw new Error('This account cannot access this login portal.');
         }
 
+        setLogoutDestination(null);
         setUser(authenticatedUser);
         return { ...result, user: authenticatedUser };
       } catch (error) {
@@ -94,7 +97,8 @@ export function AuthProvider({ children }) {
       return api.registerOrganization(details);
     },
 
-    async logout() {
+    async logout(destination = null) {
+      setLogoutDestination(destination);
       try {
         await api.logout();
       } finally {
@@ -102,7 +106,7 @@ export function AuthProvider({ children }) {
         setUser(null);
       }
     },
-  }), [loading, user]);
+  }), [loading, logoutDestination, user]);
 
   return (
     <AuthContext.Provider value={value}>

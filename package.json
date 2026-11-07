@@ -35,6 +35,7 @@
     "lint:dashboard": "npm run lint -w @digitalpulse/dashboard",
     "package:exe": "powershell -ExecutionPolicy Bypass -File scripts/build-exe-package.ps1",
     "package:employees": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-employee-downloads.ps1 -Deployment Production",
+    "package:extensions": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-employee-downloads.ps1 -ExtensionsOnly -Overwrite -Deployment Production",
     "build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-installer.ps1",
     "verify:windows-installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-installer.ps1",
     "verify:employee-downloads": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-employee-downloads.ps1",

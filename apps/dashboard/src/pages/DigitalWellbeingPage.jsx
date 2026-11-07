@@ -139,7 +139,45 @@ function DonutChart({ items, totalSeconds, label, onSelect, selectedItem }) {
   );
 }
 
-export default function DigitalWellbeingPage() {
+export default function DigitalWellbeingPage({ personal = false }) {
+  return personal ? <PersonalWellbeing /> : <UsageReports />;
+}
+
+function PersonalWellbeing() {
+  const fetchPersonalUsage = useCallback(async (opts) => {
+    const response = await api.me(opts);
+    const user = response.user || response;
+    return api.employee(user.id, opts);
+  }, []);
+  const { data, loading, error, reload } = useApi(fetchPersonalUsage, { intervalMs: 30000 });
+  if (loading && !data) return <LoadingState label="Loading your wellbeing summary..." />;
+  if (error) return <ErrorState error={error} onRetry={reload} />;
+  const analytics = data?.employee?.analytics;
+  const hasData = analytics?.hasData === true;
+  const active = analytics?.activeSeconds || 0;
+  const idle = analytics?.idleSeconds || 0;
+  const websites = (analytics?.websiteUsage || []).map(item => ({ name: item.name, totalSeconds: item.seconds }));
+  const applications = (analytics?.applicationUsage || []).map(item => ({ name: item.name, totalSeconds: item.seconds }));
+  return <div className="space-y-6">
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <PageHeader title="My Digital Wellbeing" description="Understand your recorded usage and where your attention goes. My Activity shows individual sessions; this page summarizes them." />
+      <Button onClick={reload}>Refresh summary</Button>
+    </div>
+    {!hasData ? <EmptyState title="No usage recorded yet">Your summary will appear after an authorized device sends activity.</EmptyState> : <>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card title="Recorded active time"><p className="text-3xl font-semibold text-emerald-300">{formatDuration(active)}</p></Card>
+        <Card title="Recorded idle time"><p className="text-3xl font-semibold text-amber-300">{formatDuration(idle)}</p></Card>
+        <Card title="Most-used website"><p className="break-all text-xl font-semibold text-sky-300">{[...websites].sort((a, b) => b.totalSeconds - a.totalSeconds)[0]?.name || 'No website usage'}</p></Card>
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">{[['Website usage breakdown', websites], ['Application usage breakdown', applications]].map(([title, items]) => <Card key={title} title={title}>
+        {items.length ? <><DonutChart items={items} totalSeconds={items.reduce((total, item) => total + item.totalSeconds, 0)} label="Recorded time" /><ul className="mt-4 space-y-2">{items.map(item => <li key={item.name} className="flex justify-between gap-3 text-sm text-slate-300"><span className="break-all">{item.name}</span><span>{formatDuration(item.totalSeconds)}</span></li>)}</ul></> : <p className="text-sm text-slate-400">No recorded usage. Desktop application usage requires an enrolled Windows agent.</p>}
+      </Card>)}</div>
+    </>}
+    <Card title="Your usage, explained"><p className="text-sm text-slate-300">These totals summarize synchronized activity from your own account. Browser extensions record website time; the Windows agent records desktop activity. Untracked time is not treated as idle time. This summary refreshes automatically every 30 seconds while visible.</p></Card>
+  </div>;
+}
+
+function UsageReports() {
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [selectedRange, setSelectedRange] = useState('7d');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -150,7 +188,7 @@ export default function DigitalWellbeingPage() {
   // Wellbeing break states
   const [breakActive, setBreakActive] = useState(false);
   const [breakTimer, setBreakTimer] = useState(20);
-  const [busy, setBusy] = useState(false);
+  const [, setBusy] = useState(false);
 
   // Queries
   const fetchSummary = useCallback((opts) => api.summary({ date: selectedDate, userId: selectedEmployeeId || undefined }, opts), [selectedDate, selectedEmployeeId]);
@@ -162,9 +200,9 @@ export default function DigitalWellbeingPage() {
   const fetchWellbeing = useCallback((opts) => api.wellbeingStatus(opts), []);
 
   const { data: summaryData, loading: sumLoading, error: sumErr, reload: reloadSum } = useApi(fetchSummary, { intervalMs: 5000 });
-  const { data: appsData, loading: appsLoading, reload: reloadApps } = useApi(fetchApps, { intervalMs: 5000 });
-  const { data: websitesData, loading: webLoading, reload: reloadWeb } = useApi(fetchWebsites, { intervalMs: 5000 });
-  const { data: weeklyData, loading: weekLoading, reload: reloadWeek } = useApi(fetchWeekly, { intervalMs: 10000 });
+  const { data: appsData, reload: reloadApps } = useApi(fetchApps, { intervalMs: 5000 });
+  const { data: websitesData, reload: reloadWeb } = useApi(fetchWebsites, { intervalMs: 5000 });
+  const { data: weeklyData, reload: reloadWeek } = useApi(fetchWeekly, { intervalMs: 10000 });
   const { data: plannerData, reload: reloadPlanner } = useApi(fetchPlanner, { intervalMs: 5000 });
   const { data: wellbeingData, reload: reloadWellbeing } = useApi(fetchWellbeing, { intervalMs: 5000 });
   const { data: employeesData } = useApi(fetchEmployees);

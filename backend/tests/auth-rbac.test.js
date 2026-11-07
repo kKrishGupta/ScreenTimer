@@ -10,7 +10,7 @@ function fakePrisma() {
   const sessions = [];
   const auditLogs = [];
 
-  return {
+  const prisma = {
     __sessions: sessions,
     __users: users,
     user: {
@@ -64,6 +64,10 @@ function fakePrisma() {
       },
     },
   };
+
+  prisma.$transaction = async (callback) => callback(prisma);
+
+  return prisma;
 }
 
 describe('Authentication & Family RBAC (Milestone 2)', () => {
@@ -113,7 +117,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     t.after(() => app.close());
     const response = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/register',
+      url: '/api/v1/organization/register',
       payload: { email: 'public@example.test', password: 'StrongPassword123!', displayName: 'Public User', organizationName: 'Public Org' },
     });
     assert.equal(response.statusCode, 403);
@@ -132,7 +136,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
       organizationId: 'org-prod-test', email: 'production-admin@example.test', displayName: 'Production Admin',
       role: 'ORG_ADMIN', passwordHash: credentials.hash, passwordSalt: credentials.salt,
     } });
-    const login = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: account.email, password: 'ProductionPassword123!' } });
+    const login = await app.inject({ method: 'POST', url: '/api/v1/organization/login', payload: { email: account.email, password: 'ProductionPassword123!' } });
     assert.equal(login.statusCode, 200, login.body);
     assert.equal('token' in login.json(), false);
     assert.match(login.headers['set-cookie'], /HttpOnly/);
@@ -171,7 +175,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     } });
     assert.equal(replay.statusCode, 400);
 
-    const newLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: account.email, password: 'UpdatedPassword123!' } });
+    const newLogin = await app.inject({ method: 'POST', url: '/api/v1/organization/login', payload: { email: account.email, password: 'UpdatedPassword123!' } });
     assert.equal(newLogin.statusCode, 200, newLogin.body);
     const newCookie = newLogin.headers['set-cookie'].split(';')[0];
     const newRawToken = newCookie.slice(newCookie.indexOf('=') + 1);
@@ -192,7 +196,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     } });
     const ambiguousLogin = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/login',
+      url: '/api/v1/organization/login',
       payload: { email: duplicateEmail, password: 'DuplicatePassword123!' },
     });
     assert.equal(ambiguousLogin.statusCode, 401);
@@ -214,12 +218,12 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     // 1. Successful registration
     const res1 = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/register',
+      url: '/api/v1/organization/register',
       payload: {
         email: 'alice@family.local',
         password: 'Password123!',
         displayName: 'Alice (Parent)',
-        role: Roles.ORGANIZATION_ADMIN,
+        role: Roles.ADMIN,
         organizationName: 'The Miller Family',
       },
     });
@@ -227,12 +231,12 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     const body1 = res1.json();
     assert.equal(body1.success, true);
     assert.equal(body1.user.email, 'alice@family.local');
-    assert.equal(body1.user.role, Roles.ORGANIZATION_ADMIN);
+    assert.equal(body1.user.role, Roles.ADMIN);
 
     // 2. Duplicate registration rejected
     const res2 = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/register',
+      url: '/api/v1/organization/register',
       payload: {
         email: 'alice@family.local',
         password: 'AnotherPassword123!',
@@ -249,7 +253,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     // Register user
     await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/register',
+      url: '/api/v1/organization/register',
       payload: {
         email: 'bob@family.local',
         password: 'SecretPassword987!',
@@ -260,7 +264,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     // 1. Invalid password
     const failRes = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/login',
+      url: '/api/v1/organization/login',
       payload: { email: 'bob@family.local', password: 'BadPassword!' },
     });
     assert.equal(failRes.statusCode, 401);
@@ -268,7 +272,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     // 2. Valid login
     const loginRes = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/login',
+      url: '/api/v1/organization/login',
       payload: { email: 'bob@family.local', password: 'SecretPassword987!', rememberMe: false },
     });
     assert.equal(loginRes.statusCode, 200);
@@ -332,7 +336,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     const app = await buildApp({ config, prisma, logger: false });
     t.after(() => app.close());
 
-    const response = await app.inject({ method: 'POST', url: '/api/v1/auth/login', payload: { email, password: 'SharedPassword123!' } });
+    const response = await app.inject({ method: 'POST', url: '/api/v1/organization/login', payload: { email, password: 'SharedPassword123!' } });
     assert.equal(response.statusCode, 401);
     assert.equal(response.json().error.message, 'Invalid email or password');
     assert.equal(response.headers['set-cookie'], undefined);
@@ -345,7 +349,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
 
     await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/register',
+      url: '/api/v1/organization/register',
       payload: { email: 'charlie@family.local', password: 'StrongPassword456!' },
     });
 
@@ -353,7 +357,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     for (let i = 0; i < 5; i++) {
       await app.inject({
         method: 'POST',
-        url: '/api/v1/auth/login',
+        url: '/api/v1/organization/login',
         payload: { email: 'charlie@family.local', password: 'Wrong' },
       });
     }
@@ -361,7 +365,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     // 6th attempt should be rate limited with 429
     const lockedRes = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/login',
+      url: '/api/v1/organization/login',
       payload: { email: 'charlie@family.local', password: 'StrongPassword456!' },
     });
     assert.equal(lockedRes.statusCode, 429);
@@ -377,7 +381,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
 
     await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/register',
+      url: '/api/v1/organization/register',
       payload: { email: 'dan@family.local', password: 'OldPassword123!' },
     });
 
@@ -406,7 +410,7 @@ describe('Authentication & Family RBAC (Milestone 2)', () => {
     // 3. Login with new password succeeds
     const newLogin = await app.inject({
       method: 'POST',
-      url: '/api/v1/auth/login',
+      url: '/api/v1/organization/login',
       payload: { email: 'dan@family.local', password: 'BrandNewPassword123!' },
     });
     assert.equal(newLogin.statusCode, 200);

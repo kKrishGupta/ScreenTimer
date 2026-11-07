@@ -1,7 +1,9 @@
 import { CONFIG } from '../shared/constants.js';
 import { normalizeBackendUrl } from '../shared/backend-settings.js';
+import { initializeCapturePermission } from './capture-permission.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  initializeCapturePermission(document, chrome);
   const statusBadge = document.getElementById('status-badge');
   const deviceIdEl = document.getElementById('device-id');
   const queueCountEl = document.getElementById('queue-count');

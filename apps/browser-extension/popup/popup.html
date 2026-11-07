@@ -29,9 +29,20 @@
     <div class="field"><span class="label">Extension:</span><span id="extension-version" class="value mono">Checking...</span></div>
     <div class="field">
       <span class="label">Backend:</span>
-      <span id="backend-url" class="value mono">http://127.0.0.1:3001</span>
+      <span id="backend-url" class="value mono">Checking...</span>
     </div>
     <p>Server address is managed by your organization. Contact your administrator to change it.</p>
+    <section aria-label="Browser screenshot permission">
+      <h2>Optional browser screenshots</h2>
+      <p>Scheduled screenshots require the browser's broad “all websites” permission.
+        DigitalPulse captures only your visible active HTTP(S) tab, never incognito,
+        while your employee acknowledgement, organization approval and schedule are valid.
+        Page content may include sensitive information. Pin DigitalPulse to see the ON badge.
+        This permission does not replace employee consent or administrator authorization.</p>
+      <button id="capture-permission-grant" type="button">Allow scheduled browser screenshots…</button>
+      <button id="capture-permission-revoke" type="button" hidden>Turn off browser screenshot permission</button>
+      <p id="capture-permission-status" role="status" aria-live="polite">Checking browser permission...</p>
+    </section>
     <div class="field">
       <span class="label">Pending Queue:</span>
       <span id="queue-count" class="value">0 events</span>

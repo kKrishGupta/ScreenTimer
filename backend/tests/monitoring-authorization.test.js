@@ -70,8 +70,23 @@ test('authenticated admin can set organization time zone, own schedule, consent,
     id: adminId, organizationId: orgId, employmentStatus: 'active', monitoringAuthorized: false,
     monitoringConsentAt: null, monitoringConsentRevokedAt: null, monitoringConsentVersion: null,
     shiftStart: null, shiftEnd: null, workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-    organization: { timezone: null },
+    scheduleOverride: false,
+    organization: {
+      timezone: null, monitoringShiftStart: null, monitoringShiftEnd: null,
+      monitoringWorkingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], monitoringConfigUpdatedAt: null,
+    },
   };
+  const inheritedEmployee = {
+    id: 'inherited-employee', organizationId: orgId, scheduleOverride: false,
+    shiftStart: '09:00', shiftEnd: '17:00', workingDays: ['Mon'],
+    monitoringAuthorized: true, monitoringConsentAt: new Date('2026-01-01T00:00:00Z'),
+  };
+  const overriddenEmployee = {
+    id: 'overridden-employee', organizationId: orgId, scheduleOverride: true,
+    shiftStart: '07:00', shiftEnd: '15:00', workingDays: ['Tue'],
+    monitoringAuthorized: true, monitoringConsentAt: new Date('2026-01-01T00:00:00Z'),
+  };
+  const organizationUsers = [owner, inheritedEmployee, overriddenEmployee];
   const tokenRows = [];
   const logs = [];
   const consentTargets = [];
@@ -80,10 +95,17 @@ test('authenticated admin can set organization time zone, own schedule, consent,
       findUnique: async ({ where }) => where.id === owner.id ? { ...owner, organization: { ...owner.organization } } : null,
       findFirst: async ({ where }) => where.id === owner.id && where.organizationId === owner.organizationId ? { id: owner.id } : null,
       updateMany: async ({ where, data }) => {
-        consentTargets.push(where.id);
-        if (where.id !== owner.id || where.organizationId !== owner.organizationId) return { count: 0 };
-        Object.assign(owner, data);
-        return { count: 1 };
+        if (where.id) {
+          consentTargets.push(where.id);
+          if (where.id !== owner.id || where.organizationId !== owner.organizationId) return { count: 0 };
+          Object.assign(owner, data);
+          return { count: 1 };
+        }
+        const matches = organizationUsers.filter((candidate) =>
+          candidate.organizationId === where.organizationId &&
+          (where.scheduleOverride === undefined || candidate.scheduleOverride === where.scheduleOverride));
+        matches.forEach((candidate) => Object.assign(candidate, data));
+        return { count: matches.length };
       },
     },
     organization: {
@@ -109,6 +131,20 @@ test('authenticated admin can set organization time zone, own schedule, consent,
   assert.equal(timezone.statusCode, 200);
   const schedule = await app.inject({ method: 'PATCH', url: '/api/v1/devices/my-monitoring-schedule', headers: session.headers, payload: { shiftStart: '22:00', shiftEnd: '06:00', workingDays: ['Thu'] } });
   assert.equal(schedule.statusCode, 200);
+  assert.equal(schedule.json().syncedUsers, 2);
+  assert.deepEqual(owner.organization.monitoringWorkingDays, ['Thu']);
+  assert.equal(inheritedEmployee.shiftStart, '22:00');
+  assert.equal(inheritedEmployee.shiftEnd, '06:00');
+  assert.deepEqual(inheritedEmployee.workingDays, ['Thu']);
+  assert.equal(overriddenEmployee.shiftStart, '07:00');
+  assert.deepEqual(overriddenEmployee.workingDays, ['Tue']);
+  assert.equal(inheritedEmployee.monitoringAuthorized, true);
+  assert.ok(inheritedEmployee.monitoringConsentAt instanceof Date);
+  assert.equal(logs.some((log) => log.action === 'ORGANIZATION_MONITORING_SCHEDULE_UPDATED'), true);
+  const invalidSchedule = await app.inject({ method: 'PATCH', url: '/api/v1/devices/my-monitoring-schedule', headers: session.headers, payload: { shiftStart: '09:00', shiftEnd: '09:00', workingDays: [] } });
+  assert.equal(invalidSchedule.statusCode, 400);
+  const invalidTimezone = await app.inject({ method: 'PATCH', url: '/api/v1/devices/organization-timezone', headers: session.headers, payload: { timezone: 'Not/A_Timezone' } });
+  assert.equal(invalidTimezone.statusCode, 400);
   const consent = await app.inject({ method: 'POST', url: '/api/v1/devices/my-monitoring-consent', headers: session.headers, payload: { consent: true, userId: 'someone-else' } });
   assert.equal(consent.statusCode, 200);
   assert.equal(owner.monitoringConsentAt instanceof Date, true);
@@ -130,6 +166,14 @@ test('authenticated admin can set organization time zone, own schedule, consent,
   const employeeSession = await app.authService.createTestSession({ userId: 'monitoring-employee-2', role: 'EMPLOYEE', organizationId: orgId, email: 'employee@example.com' });
   const deniedSelfAuthorization = await app.inject({ method: 'PATCH', url: '/api/v1/devices/my-monitoring-authorization', headers: employeeSession.headers, payload: { authorized: true } });
   assert.equal(deniedSelfAuthorization.statusCode, 403);
+  const deniedTimezone = await app.inject({ method: 'PATCH', url: '/api/v1/devices/organization-timezone', headers: employeeSession.headers, payload: { timezone: 'UTC' } });
+  assert.equal(deniedTimezone.statusCode, 403);
+
+  const otherOrganization = await app.authService.createTestSession({ userId: 'other-admin', role: 'ADMIN', organizationId: 'other-org', email: 'other@example.com' });
+  const crossTenantSchedule = await app.inject({ method: 'PATCH', url: '/api/v1/devices/my-monitoring-schedule', headers: otherOrganization.headers, payload: { shiftStart: '08:00', shiftEnd: '16:00', workingDays: ['Mon'] } });
+  assert.equal(crossTenantSchedule.statusCode, 404);
+  const crossTenantTimezone = await app.inject({ method: 'PATCH', url: '/api/v1/devices/organization-timezone', headers: otherOrganization.headers, payload: { timezone: 'UTC' } });
+  assert.equal(crossTenantTimezone.statusCode, 404);
 });
 
 test('only an organization administrator can authorize an employee within its own organization', async (t) => {

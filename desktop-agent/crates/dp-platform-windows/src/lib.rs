@@ -11,14 +11,15 @@
 //! Privacy boundary: this crate never reads window contents, keystrokes, the clipboard or
 //! screen pixels.
 
-pub mod diagnostics;
 pub mod credential_store;
 pub mod data_protection;
+pub mod diagnostics;
 pub mod foreground;
 pub mod http;
-pub mod session_state;
 pub mod idle;
 pub mod monitor;
+pub mod session_state;
+pub mod tray;
 
 pub use diagnostics::{get_current_process_metrics, ProcessMetrics};
 pub use foreground::{

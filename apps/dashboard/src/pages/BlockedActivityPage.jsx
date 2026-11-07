@@ -212,7 +212,7 @@ export default function BlockedActivityPage() {
                 <tr>
                   <th className="pb-3 font-semibold">Timestamp</th>
                   <th className="pb-3 font-semibold">Restricted Target</th>
-                  <th className="pb-3 font-semibold">Employee</th>
+                  <th className="pb-3 font-semibold">Employee / Username</th>
                   <th className="pb-3 font-semibold">Enforced Policy</th>
                   <th className="pb-3 font-semibold">Action & Outcome</th>
                   <th className="pb-3 font-semibold">Status</th>
@@ -232,7 +232,9 @@ export default function BlockedActivityPage() {
                     </td>
 
                     <td className="py-3 pr-4 font-medium text-slate-200">
-                      {v.employee || 'Organization User'}
+                      <div>{v.employee || 'Organization User'}</div>
+                      {v.username && v.username !== v.employee && <div className="mt-1 text-[10px] font-normal text-slate-500">{v.username}</div>}
+                      <div className="mt-1 text-[10px] font-normal text-slate-500">Attempted at {formatTimestamp(v.timestamp)}</div>
                     </td>
 
                     <td className="py-3 pr-4 text-slate-300">

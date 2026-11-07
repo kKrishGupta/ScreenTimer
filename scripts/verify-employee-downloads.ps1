@@ -36,6 +36,11 @@ foreach ($name in $names) {
                         if ($relative -ne 'dp-user-agent.exe') { throw 'Unexpected Windows runtime file.' }
                         if ($hash -ne (Get-FileHash -LiteralPath (Join-Path $repoRoot 'desktop-agent\target\release\dp-user-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Packaged executable differs from release build.' }
                     } else {
+                        if ($relative -eq 'background/service-worker.js') {
+                            $sourceText = [IO.StreamReader]::new($entry.Open())
+                            try { $workerSource = $sourceText.ReadToEnd() } finally { $sourceText.Dispose() }
+                            if ($workerSource -notmatch "screenshot-capture\.js" -or $workerSource -notmatch "captureAuthorizedActiveTab") { throw "Packaged service worker does not initialize screenshot capture: $name" }
+                        }
                         $source = Join-Path (Join-Path $repoRoot 'apps\browser-extension') $relative
                         if ($hash -ne (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Extension runtime source differs: $relative" }
                         if ($runtimeHashes.ContainsKey($relative) -and $runtimeHashes[$relative] -ne $hash) { throw 'Chrome and Edge runtime code diverged.' }

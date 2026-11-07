@@ -3,9 +3,13 @@ import { Link } from 'react-router';
 import { api } from '../lib/api.js';
 
 export default function BlockedAttemptNotice({ user }) {
+  if (user?.role !== 'ADMIN' || !user.organizationId) return null;
+  return <ScopedBlockedAttemptNotice key={`${user.organizationId}:${user.id}`} user={user} />;
+}
+
+function ScopedBlockedAttemptNotice({ user }) {
   const [notice, setNotice] = useState(null);
   useEffect(() => {
-    setNotice(null);
     if (user?.role !== 'ADMIN' || !user.organizationId) return;
     let stopped = false;
     let seen = null;

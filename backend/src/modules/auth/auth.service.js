@@ -336,99 +336,110 @@ export class AuthService {
    * organization membership is created only through acceptInvitation().
    */
   async register({ email, password, displayName, organizationName }) {
-    if (!email || !email.includes('@')) {
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
       const err = new Error('Valid email address is required');
       err.statusCode = 400;
       throw err;
     }
+
+    if (!password || typeof password !== 'string' || password.length < 8) {
+      const err = new Error('Password must be at least 8 characters long');
+      err.statusCode = 400;
+      throw err;
+    }
+
     const cleanEmail = email.toLowerCase().trim();
     const { hash, salt } = hashPassword(password);
     const assignedRole = Roles.ADMIN;
 
-    if (this.isProduction && (!this.prisma?.user?.findFirst || !this.prisma?.user?.create || !this.prisma?.organization?.create || !this.prisma?.$transaction)) {
-      const unavailable = new Error('Transactional registration storage is unavailable');
+    // Public organization registration always requires persistent,
+    // transactional database storage, including in development.
+    if (
+      !this.prisma?.user?.findFirst ||
+      !this.prisma?.user?.create ||
+      !this.prisma?.organization?.create ||
+      !this.prisma?.$transaction
+    ) {
+      const unavailable = new Error(
+        'Transactional registration storage is unavailable'
+      );
       unavailable.statusCode = 503;
       throw unavailable;
     }
 
-    // Check if user already exists
-    if (this.prisma?.user?.findFirst) {
-      try {
-        const existing = await this.prisma.user.findFirst({
-          where: { email: cleanEmail },
-        });
-        if (existing) {
-          const err = new Error('A user with this email already exists');
-          err.statusCode = 409;
-          throw err;
-        }
+    let result;
 
-        const createOrganizationAndOwner = async (tx) => {
-          const org = await tx.organization.create({
-            data: {
-              name: organizationName || `${displayName || 'Family'}'s Household`,
-              slug: `household-${crypto.randomBytes(4).toString('hex')}`,
-            },
-          });
-          const newUser = await tx.user.create({
-            data: {
-              organizationId: org.id,
-              email: cleanEmail,
-              displayName: displayName || cleanEmail.split('@')[0],
-              // Persist the canonical organization-admin enum value. The API
-              // normalizes legacy OWNER/FAMILY_OWNER aliases on read.
-              role: 'ADMIN',
-              passwordHash: hash,
-              passwordSalt: salt,
-            },
-          });
-          return { org, newUser };
-        };
+    try {
+      const existing = await this.prisma.user.findFirst({
+        where: { email: cleanEmail },
+      });
 
-        const { org, newUser } = this.prisma.$transaction
-          ? await this.prisma.$transaction(createOrganizationAndOwner)
-          : await createOrganizationAndOwner(this.prisma);
-
-        await this.logAuthEvent({
-          organizationId: org.id,
-          action: 'USER_REGISTERED',
-          actor: cleanEmail,
-          details: { userId: newUser.id, role: assignedRole },
-        });
-
-        return {
-          id: newUser.id,
-          email: newUser.email,
-          displayName: newUser.displayName,
-          role: assignedRole,
-          organizationId: newUser.organizationId,
-        };
-      } catch (err) {
-        if (err.statusCode) throw err;
-        if (this.isProduction) {
-          const unavailable = new Error('Registration storage is unavailable');
-          unavailable.statusCode = 503;
-          throw unavailable;
-        }
-        // In unit test or fallback mode when DB is unavailable:
-        return this._registerMemory({
-          cleanEmail,
-          hash,
-          salt,
-          displayName,
-          assignedRole,
-          organizationName,
-        });
+      if (existing) {
+        const err = new Error('A user with this email already exists');
+        err.statusCode = 409;
+        throw err;
       }
-    }
 
-    if (this.isProduction) {
-      const unavailable = new Error('Persistent registration storage is not configured');
+      result = await this.prisma.$transaction(async (tx) => {
+        const org = await tx.organization.create({
+          data: {
+            name: organizationName || `${displayName || 'Family'}'s Household`,
+            slug: `household-${crypto.randomBytes(4).toString('hex')}`,
+          },
+        });
+
+        const newUser = await tx.user.create({
+          data: {
+            organizationId: org.id,
+            email: cleanEmail,
+            displayName: displayName || cleanEmail.split('@')[0],
+            role: 'ADMIN',
+            passwordHash: hash,
+            passwordSalt: salt,
+          },
+        });
+
+        return { org, newUser };
+      });
+    } catch (err) {
+      if (err.statusCode) throw err;
+
+      this.logger?.error?.(
+        { err, email: cleanEmail },
+        'Organization registration database operation failed'
+      );
+
+      const unavailable = new Error('Registration storage is unavailable');
       unavailable.statusCode = 503;
       throw unavailable;
     }
 
-    return this._registerMemory({ cleanEmail, hash, salt, displayName, assignedRole, organizationName });
+    // Audit logging is deliberately outside the registration transaction.
+    // Audit failure must never trigger an in-memory duplicate registration.
+    try {
+      await this.logAuthEvent({
+        organizationId: result.org.id,
+        action: 'USER_REGISTERED',
+        actor: cleanEmail,
+        details: {
+          userId: result.newUser.id,
+          role: assignedRole,
+        },
+      });
+    } catch (err) {
+      this.logger?.warn?.(
+        { err, email: cleanEmail },
+        'Organization registration audit logging failed'
+      );
+    }
+
+    return {
+      id: result.newUser.id,
+      email: result.newUser.email,
+      displayName: result.newUser.displayName,
+      role: assignedRole,
+      organizationId: result.newUser.organizationId,
+    };
   }
 
   async _registerInvitedUser({ email, password, displayName, organizationId, role, departmentId, employeeNumber, shiftStart, shiftEnd, workingDays, shiftTimezone }) {
@@ -465,6 +476,8 @@ export class AuthService {
             shiftEnd,
             workingDays,
             shiftTimezone,
+            scheduleOverride: true,
+            configurationUpdatedAt: new Date(),
           },
         });
 
@@ -1429,6 +1442,8 @@ export class AuthService {
               shiftEnd: invitation.shiftEnd ?? account.shiftEnd,
               workingDays: invitation.workingDays ?? account.workingDays,
               shiftTimezone: invitation.shiftTimezone ?? account.shiftTimezone,
+              scheduleOverride: true,
+              configurationUpdatedAt: acceptedAt,
             },
           });
           return { kind: 'accepted', user, role: account.role, existingAccount: true };
@@ -1465,6 +1480,8 @@ export class AuthService {
             shiftEnd: invitation.shiftEnd || '17:00',
             workingDays: invitation.workingDays || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
             shiftTimezone: invitation.shiftTimezone || 'UTC',
+            scheduleOverride: true,
+            configurationUpdatedAt: acceptedAt,
           },
         });
         return { kind: 'accepted', user, role: invitedRole, existingAccount: false };

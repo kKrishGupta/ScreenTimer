@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { recordBlockedAttempt, flushBlockedAttempts } from '../background/blocked-attempts.js';
+import { CONFIG } from '../shared/constants.js';
 
 test('reports only main-frame policy matches, strips URL paths, and retries failed delivery', async () => {
-  const state = { dp_device_id: 'device-1', dp_device_secret: 'secret' };
+  const state = { dp_device_id: 'device-1', dp_device_secret: 'secret', dp_settings: { backendUrl: CONFIG.DEFAULT_BACKEND_URL } };
   const chrome = {
     storage: { local: { get: async () => structuredClone(state), set: async (data) => Object.assign(state, data) } },
     declarativeNetRequest: { getDynamicRules: async () => [{ action: { type: 'block' }, condition: { urlFilter: '||instagram.com' } }] },

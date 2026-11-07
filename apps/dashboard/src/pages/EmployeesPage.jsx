@@ -42,7 +42,6 @@ export default function EmployeesPage() {
   const [newEmpId, setNewEmpId] = useState('');
   const [newDept, setNewDept] = useState('Engineering');
   const [newDesignation, setNewDesignation] = useState('Software Engineer');
-  const [newLocation, setNewLocation] = useState('Remote');
   const [newShiftStart, setNewShiftStart] = useState('09:00');
   const [newShiftEnd, setNewShiftEnd] = useState('18:00');
 
@@ -492,7 +491,15 @@ export default function EmployeesPage() {
             <div role="dialog" aria-modal="true" aria-labelledby="invite-success-title" className="w-full max-w-lg space-y-4 rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
               <div className="flex items-start justify-between"><div><h2 id="invite-success-title" className="text-lg font-bold text-white">Invitation created successfully</h2><p className="mt-1 text-xs text-slate-400">They set their password when they accept.</p></div><button type="button" aria-label="Close invitation dialog" onClick={() => setShowInviteModal(false)} className="text-slate-400 hover:text-white">×</button></div>
               <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100"><p className="font-semibold">{inviteSuccess.invitation.displayName || inviteName}</p><p>{inviteSuccess.invitation.email || inviteEmail}</p><p className="mt-3 text-xs">Expires {new Date(inviteSuccess.expiresAt).toLocaleString()} · Pending Acceptance</p></div>
-              {inviteSuccess.emailSent ? <p role="status" className="text-sm text-emerald-200">The invitation was accepted by the email provider. Ask the employee to check their inbox and spam folder.</p> : <p role="alert" className="text-sm text-amber-200">The invitation is saved but the email was not sent. {inviteSuccess.emailError?.message || 'Check your SMTP configuration and resend the invitation.'}</p>}
+              {inviteSuccess.emailSent ? (
+                <p role="status" className="text-sm text-emerald-200">
+                  The invitation was accepted by the email provider. Ask the employee to check their inbox and spam folder.
+                </p>
+              ) : (
+                <p role="alert" className="text-sm text-amber-200">
+                  The invitation is saved and remains active, but email delivery is unavailable. Copy and send this link to the employee.
+                </p>
+              )}
               <div className="space-y-2 rounded-lg border border-white/10 bg-slate-950 p-3"><p className="text-xs font-semibold text-slate-300">Secure invitation link</p><code className="block break-all text-xs text-slate-200">{inviteSuccess.invitationUrl}</code><button type="button" onClick={() => handleCopyInvitationLink(inviteSuccess.invitationUrl)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Copy Invitation Link</button></div>
               <div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={busy} onClick={() => retryInvitationEmail(inviteSuccess.invitation.id)} className="rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-200 disabled:opacity-50">{busy ? 'Retrying…' : inviteSuccess.emailSent ? 'Resend Email (new link)' : 'Retry Email (refresh link)'}</button><button type="button" onClick={() => setShowInviteModal(false)} className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-white">Done</button></div>
             </div>
@@ -656,38 +663,6 @@ export default function EmployeesPage() {
                 </div>
               )}
 
-              {false && showInviteModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
-                  <form onSubmit={handleInviteEmployee} className="w-full max-w-md space-y-4 rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h2 className="text-lg font-bold text-white">Invite employee</h2>
-                        <p className="mt-1 text-xs text-slate-400">The employee creates their password from the invitation.</p>
-                      </div>
-                      <button type="button" onClick={() => { setShowInviteModal(false); setInviteToken(''); }} className="text-slate-400 hover:text-white">✕</button>
-                    </div>
-                    <input
-                      type="email"
-                      required
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder="employee@company.com"
-                      className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white"
-                    />
-                    <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white">
-                      <option value="EMPLOYEE">Employee</option>
-                    </select>
-                    <Button type="submit" disabled={busy} className="w-full bg-emerald-600 text-white">
-                      {busy ? 'Sending…' : 'Send invitation'}
-                    </Button>
-                    {inviteLink && (
-                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-xs text-emerald-200">
-                        Invitation link: <span className="break-all font-mono">{inviteLink}</span>
-                      </div>
-                    )}
-                  </form>
-                </div>
-              )}
 
               {/* Assign Device Select */}
               {allDevices.length > 0 && (

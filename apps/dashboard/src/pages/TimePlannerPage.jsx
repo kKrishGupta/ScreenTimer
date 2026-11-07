@@ -12,7 +12,7 @@ export default function TimePlannerPage() {
   const fetchAnalytics = useCallback((opts) => api.plannerAnalytics(opts), []);
 
   const { data: tasksData, error: tasksErr, loading: tasksLoading, reload: reloadTasks } = useApi(fetchTasks, { intervalMs: 5000 });
-  const { data: goalsData, reload: reloadGoals } = useApi(fetchGoals, { intervalMs: 5000 });
+  const { data: goalsData } = useApi(fetchGoals, { intervalMs: 5000 });
   const { data: sessionsData, reload: reloadSessions } = useApi(fetchSessions, { intervalMs: 3000 });
   const { data: analytics, error: analyticsErr, loading: analyticsLoading, reload: reloadAnalytics } = useApi(fetchAnalytics, { intervalMs: 5000 });
 

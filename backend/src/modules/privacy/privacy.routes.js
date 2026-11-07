@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import { Roles, normalizeRole } from '../auth/auth.service.js';
+import { createScreenshotStore } from '../screen/screen-storage.js';
 
 export default async function privacyRoutes(fastify) {
   const { prisma } = fastify;
@@ -168,7 +169,7 @@ export default async function privacyRoutes(fastify) {
     let deletedSessionsCount = 0;
     let deletedEventsCount = 0;
     let deletedScreenshotsCount = 0;
-    let screenshotFiles = [];
+    let screenshotObjects = [];
 
     const baseWhere = { organizationId: orgId };
     if (targetDeviceIds !== null) {
@@ -188,13 +189,35 @@ export default async function privacyRoutes(fastify) {
       try {
         const captures = await prisma.screenCaptureMetadata.findMany({
           where: baseWhere,
-          select: { filePath: true },
+          select: { storageKey: true, filePath: true },
         });
-        screenshotFiles = captures.map((capture) => capture.filePath).filter(Boolean);
+        screenshotObjects = captures;
       } catch (err) {
         req.log?.error?.(err, 'Unable to enumerate screenshot files for privacy deletion');
         return reply.code(503).send({
           error: { code: 'DELETION_UNAVAILABLE', message: 'Unable to safely prepare data deletion' },
+        });
+      }
+    }
+
+    // Delete encrypted objects before their metadata. If any provider operation
+    // fails, metadata is retained so the deletion can be safely retried instead
+    // of leaving an unreferenced private object behind.
+    if (screenshotObjects.length > 0) {
+      let screenshotStore;
+      try {
+        screenshotStore = createScreenshotStore();
+        for (const capture of screenshotObjects) {
+          if (capture.storageKey) await screenshotStore.delete(capture.storageKey);
+          else if (capture.filePath) {
+            try { await fs.unlink(capture.filePath); }
+            catch (error) { if (error.code !== 'ENOENT') throw error; }
+          }
+        }
+      } catch (err) {
+        req.log?.error?.(err, 'Unable to remove screenshot objects for privacy deletion');
+        return reply.code(503).send({
+          error: { code: 'SCREENSHOT_DELETION_FAILED', message: 'Screenshot storage could not be cleared; metadata was retained for a safe retry' },
         });
       }
     }
@@ -224,19 +247,6 @@ export default async function privacyRoutes(fastify) {
         // Fallback
       }
 
-      // Metadata deletion is transactional; encrypted blobs are filesystem
-      // resources and are removed only after the database transaction succeeds.
-      await Promise.all(
-        screenshotFiles.map(async (filePath) => {
-          try {
-            await fs.unlink(filePath);
-          } catch (err) {
-            if (err.code !== 'ENOENT') {
-              req.log?.error?.(err, 'Unable to remove encrypted screenshot file');
-            }
-          }
-        }),
-      );
     }
 
     // 4. Record tamper-evident audit log of deletion

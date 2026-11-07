@@ -98,7 +98,7 @@ function readInstallState(userId) {
   }
 }
 
-function DeviceStatus({ title, device, installStarted }) {
+function DeviceStatus({ title, device, installStarted, now }) {
   const status = statusFor(device, installStarted);
   const detail = status === 'Not Installed'
     ? 'No backend enrollment is registered. An installed but unenrolled app cannot be detected from this page.'
@@ -122,7 +122,7 @@ function DeviceStatus({ title, device, installStarted }) {
       <dl className="mt-3 space-y-1 text-xs text-slate-400">
         <div className="flex justify-between gap-2"><dt>Installation</dt><dd>{device ? 'Collector registered' : installStarted ? 'Started locally' : 'Not verified'}</dd></div>
         <div className="flex justify-between gap-2"><dt>Enrollment</dt><dd>{device?.isRevoked || device?.status === 'revoked' ? 'Revoked' : device ? 'Enrolled' : 'Pending'}</dd></div>
-        <div className="flex justify-between gap-2"><dt>Monitoring authorization</dt><dd>{status === 'Connected' && device?.monitoring?.allowed === true && Date.parse(device.monitoring.allowedUntil || '') > Date.now() ? 'Authorized' : 'Paused'}</dd></div>
+        <div className="flex justify-between gap-2"><dt>Monitoring authorization</dt><dd>{status === 'Connected' && device?.monitoring?.allowed === true && Date.parse(device.monitoring.allowedUntil || '') > now ? 'Authorized' : 'Paused'}</dd></div>
       </dl>
       {device?.name && <p className="mt-2 text-xs text-slate-400">Registered device: {device.name}</p>}
       <p className="mt-1 text-xs text-slate-500">Last heartbeat: {device?.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : '—'}</p>
@@ -179,7 +179,7 @@ export default function EmployeeSetupPage() {
   const [busy, setBusy] = useState('');
   const [feedback, setFeedback] = useState('');
   const actionInFlight = useRef(false);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const issuedToken = tokens[deviceKind];
   const tokenActive = issuedToken && Date.parse(issuedToken.expiresAt) > now;
   const settings = !monitoringError && monitoringData?.settings;
@@ -194,12 +194,15 @@ export default function EmployeeSetupPage() {
   }, []);
 
   useEffect(() => {
+    // Account changes require clearing local setup state before the next API response.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setInstallStarted(readInstallState(user?.id));
     setTokens({});
   }, [user?.id]);
 
   useEffect(() => {
     const controller = new AbortController();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPackageAvailability({ windows: 'checking', chrome: 'checking', edge: 'checking' });
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
     Promise.all([
@@ -363,9 +366,9 @@ export default function EmployeeSetupPage() {
         {lastCheckedAt && <p className="mb-3 text-xs text-slate-500">Checked at {lastCheckedAt.toLocaleTimeString()}.</p>}
         {error ? <ErrorState error={error} onRetry={reload} /> : loading ? <LoadingState label="Checking backend device records…" /> : (
           <div className="grid gap-3 lg:grid-cols-3">
-            <DeviceStatus title="Windows Agent" device={agentDevice} installStarted={installStarted.windows} />
-            <DeviceStatus title="Chrome Extension" device={chromeDevice} installStarted={installStarted.chrome} />
-            <DeviceStatus title="Edge Extension" device={edgeDevice} installStarted={installStarted.edge} />
+            <DeviceStatus title="Windows Agent" device={agentDevice} installStarted={installStarted.windows} now={now} />
+            <DeviceStatus title="Chrome Extension" device={chromeDevice} installStarted={installStarted.chrome} now={now} />
+            <DeviceStatus title="Edge Extension" device={edgeDevice} installStarted={installStarted.edge} now={now} />
           </div>
         )}
         <p className="mt-3 text-xs text-slate-500">Connected appears only when a device has a valid authenticated heartbeat. An installation or locally reported setup start does not create a backend device or associate one with your account.</p>

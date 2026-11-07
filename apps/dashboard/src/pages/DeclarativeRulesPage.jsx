@@ -31,7 +31,7 @@ export default function DeclarativeRulesPage() {
   }, [rules, search]);
 
   // URL Simulator matching logic matching Chrome MV3 urlFilter specs
-  const simulationResult = useMemo(() => {
+  const simulationResult = (() => {
     if (!testUrl.trim()) return null;
 
     let target = testUrl.trim().toLowerCase();
@@ -60,7 +60,7 @@ export default function DeclarativeRulesPage() {
     } catch {
       return { matched: false, invalidUrl: true };
     }
-  }, [testUrl, rules]);
+  })();
 
   const handleCopyJson = () => {
     const jsonStr = JSON.stringify(data || { rules: [], count: 0, version: 1 }, null, 2);

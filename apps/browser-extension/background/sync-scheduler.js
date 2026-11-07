@@ -1,5 +1,16 @@
 export const SYNC_ALARM_NAME = 'dp_sync';
 
+// Preserve every tab/focus/idle transition while asynchronous session storage
+// and upload acknowledgement are in progress. Unlike singleFlight, none are dropped.
+export function serializeTasks() {
+  let tail = Promise.resolve();
+  return (task) => {
+    const result = tail.then(task);
+    tail = result.catch(() => {});
+    return result;
+  };
+}
+
 /**
  * Keep the periodic alarm stable across Manifest V3 worker restarts.
  * Recreating an alarm with the same name replaces it and moves its next run,

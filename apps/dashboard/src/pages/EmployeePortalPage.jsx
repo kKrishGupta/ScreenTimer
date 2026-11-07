@@ -30,6 +30,8 @@ export default function EmployeePortalPage() {
   const hasActivity = Boolean(analytics?.hasData);
   const monitoring = data?.monitoring?.monitoring;
   const screenMonitoring = data?.screenMonitoring;
+  const screenshotDevices = screenMonitoring?.devices || [];
+  const hasScreenshotDevice = screenshotDevices.length > 0;
   const monitoringLabel = monitoring?.allowed
     ? 'Active'
     : monitoring?.reason
@@ -46,6 +48,11 @@ export default function EmployeePortalPage() {
       />
       <div className={`rounded-xl border p-4 ${screenMonitoring?.organizationEnabled ? 'border-sky-500/30 bg-sky-500/5' : 'border-white/10 bg-white/[0.02]'}`}>
         <p className="font-semibold text-white">Work-screen monitoring notice</p>
+        {!hasScreenshotDevice && <div className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/5 p-3 text-sm text-amber-200">
+          Screenshots are not running: no eligible Windows desktop agent or Chrome/Edge browser extension is enrolled for your account.
+          <Link to="/employee-setup" className="mt-2 block font-semibold text-sky-300 underline">Set up the Windows desktop agent</Link>
+          <p className="mt-1">Choose Windows Desktop Agent or Chrome / Edge Extension, complete enrollment, and ask your administrator to select the device in Screen Monitoring.</p>
+        </div>}
         <p className="mt-1 text-sm text-slate-300">{screenMonitoring?.explanation}</p>
         <p className="mt-2 text-xs text-slate-400">Schedule: {screenMonitoring?.workingDays?.join(', ')} · {screenMonitoring?.shiftStart}–{screenMonitoring?.shiftEnd} · interval {Math.round((screenMonitoring?.captureIntervalSeconds || 300) / 60)} minutes · retained {screenMonitoring?.retentionDays || 30} days.</p>
         {screenMonitoring?.acknowledgedAt ? <p className="mt-3 text-sm font-medium text-emerald-300">Acknowledged {new Date(screenMonitoring.acknowledgedAt).toLocaleString()}. Monitoring remains subject to all authorization gates.</p> : <Button className="mt-3" disabled={acknowledging} onClick={async () => { setAcknowledging(true); try { await api.acknowledgeScreenMonitoring(); await reload(); } finally { setAcknowledging(false); } }}>{acknowledging ? 'Saving...' : 'I acknowledge this monitoring notice'}</Button>}
@@ -80,6 +87,9 @@ export default function EmployeePortalPage() {
           {!monitoring?.allowed && monitoring?.nextCheckAt && <p className="mt-1 text-xs text-slate-500">Next scheduled start: {new Date(monitoring.nextCheckAt).toLocaleString()}</p>}
         </Card>
       </div>
+      <Card title="Screenshot collectors">
+        {!screenshotDevices.length ? <p className="text-sm text-slate-500">No screenshot collector is enrolled.</p> : <div className="space-y-3">{screenshotDevices.map((entry) => <div key={entry.id} className="rounded-lg border border-white/10 bg-white/[0.02] p-3"><div className="flex items-center justify-between"><p className="font-semibold text-white">{String(entry.kind).toUpperCase() === 'BROWSER_EXTENSION' ? `${entry.browser === 'edge' ? 'Edge' : 'Chrome'} Browser Extension` : 'Windows Desktop Agent'}</p><Status value={entry.connectivity} /></div><p className="mt-1 text-xs text-slate-400">{entry.name} · {entry.screenCaptureEnabled ? 'Selected' : 'Not selected'} · {entry.isRevoked ? 'Revoked' : 'Enrolled'}</p><p className="mt-1 text-xs text-slate-400">Policy: {entry.policyAllowed ? 'Authorized' : entry.policyReason || 'Not authorized'} · Last heartbeat: {entry.lastSeenAt ? new Date(entry.lastSeenAt).toLocaleString() : 'Never'}</p><p className="mt-1 text-xs text-slate-500">Last successful screenshot: {entry.lastCaptureAt ? new Date(entry.lastCaptureAt).toLocaleString() : 'None'}{entry.lastScreenCaptureError ? ` · Failure: ${entry.lastScreenCaptureError}` : ''}</p>{String(entry.kind).toUpperCase() === 'BROWSER_EXTENSION' && <p className="mt-1 text-xs text-sky-300">Captures only the visible active browser tab.</p>}</div>)}</div>}
+      </Card>
       <div className="grid gap-6 lg:grid-cols-2">
         {[
           ['App usage', analytics?.applicationUsage],
@@ -115,4 +125,8 @@ function formatMonitoringReason(reason) {
     ACCOUNT_INACTIVE: 'account is inactive',
     DEVICE_NOT_ENROLLED: 'device is not enrolled',
   }[reason] || 'authorization could not be verified');
+}
+
+function Status({ value }) {
+  return <span className={`rounded-full px-2 py-1 text-xs ${value === 'online' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>{value}</span>;
 }

@@ -266,7 +266,7 @@ export default async function plannerRoutes(fastify) {
             ),
         );
 
-        return { success: true, message: 'Task deleted successfully' };
+        return { success: true, deletedId: existing.id, message: 'Task deleted successfully' };
       } catch (error) {
         req.log?.error?.({ err: error }, 'Planner task deletion failed');
         return reply.code(503).send({
@@ -296,7 +296,7 @@ export default async function plannerRoutes(fastify) {
       });
     }
 
-    return { success: true, message: 'Task deleted successfully' };
+    return { success: true, deletedId: id, message: 'Task deleted successfully' };
   });
 
   // GET /api/v1/planner/goals

@@ -15,3 +15,7 @@ test('refuses to send existing credentials to another backend', () => {
 test('server mutations are disabled', async () => {
   await assert.rejects(saveBackendUrl({}, 'https://other.example'), /managed by your administrator/);
 });
+
+test('missing stored backend identity never redirects existing credentials', () => {
+  assert.throws(() => resolveBackendUrl({ dp_device_secret: 'secret' }, config), /identity is missing/);
+});

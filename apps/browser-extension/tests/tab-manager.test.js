@@ -4,12 +4,60 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { activityEventSchema } from '@digitalpulse/contracts';
 import { extractDomain } from '../shared/constants.js';
-import { TabManager } from '../background/tab-manager.js';
+import { TabManager, reconcileActiveTab } from '../background/tab-manager.js';
+import { serializeTasks } from '../background/sync-scheduler.js';
 import { ActivityManager } from '../background/activity-manager.js';
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 addFormats(ajv);
 const validateEvent = ajv.compile(activityEventSchema);
+
+test('automatic tab reconciliation resumes same-domain tracking and respects idle/focus', async () => {
+  const activity = new ActivityManager({ deviceId: '11111111-2222-3333-4444-555555555555', browser: 'chrome' });
+  const tabs = new TabManager({ onActiveDomainChanged: domain => activity.switchDomain(domain) });
+  let focused = true;
+  let idle = 'active';
+  let url = 'https://erp.akgec.ac.in/Dual_Auth_Login';
+  const chromeApi = {
+    windows: { getLastFocused: async () => ({ focused }) },
+    idle: { queryState: async () => idle },
+    tabs: { query: async () => [{ url }] },
+  };
+  const allow = { allowed: true, allowedUntil: new Date(Date.now() + 600000).toISOString() };
+  await activity.setMonitoringState(allow);
+  await reconcileActiveTab(chromeApi, activity, tabs, 60);
+  assert.equal(activity.activeSession.domain, 'erp.akgec.ac.in');
+  await activity.setMonitoringState({ allowed: false });
+  await activity.setMonitoringState(allow);
+  await reconcileActiveTab(chromeApi, activity, tabs, 60);
+  assert.equal(activity.activeSession.domain, 'erp.akgec.ac.in');
+  idle = 'idle';
+  await reconcileActiveTab(chromeApi, activity, tabs, 60);
+  assert.equal(activity.activeSession, null);
+  idle = 'active'; focused = false;
+  await reconcileActiveTab(chromeApi, activity, tabs, 60);
+  assert.equal(activity.activeSession, null);
+  focused = true; url = 'http://localhost:5173/employee-portal';
+  await reconcileActiveTab(chromeApi, activity, tabs, 60);
+  assert.equal(activity.activeSession.domain, 'localhost');
+});
+
+test('tab transitions wait for session persistence before the automatic checkpoint', async () => {
+  const run = serializeTasks();
+  const events = [];
+  let now = Date.now() - 60000;
+  const activity = new ActivityManager({ deviceId: '11111111-2222-3333-4444-555555555555', browser: 'chrome',
+    onSessionCompleted: async event => { await new Promise(resolve => setTimeout(resolve, 10)); events.push(event); } });
+  await activity.setMonitoringState({ allowed: true, allowedUntil: new Date(now + 600000).toISOString() }, now);
+  const tabs = new TabManager({ onActiveDomainChanged: domain => activity.switchDomain(domain, now) });
+  await tabs.handleTabActivated({ url: 'https://first.example' });
+  now += 10000;
+  await Promise.all([
+    run(() => tabs.handleTabActivated({ url: 'https://second.example' })),
+    run(() => activity.checkpoint(now + 10000)),
+  ]);
+  assert.deepEqual(events.map(event => [event.web.domain, event.durationSeconds]), [['first.example', 10], ['second.example', 10]]);
+});
 
 test('extractDomain correctly normalizes domains without paths or queries', () => {
   assert.equal(extractDomain('https://github.com/microsoft/vscode'), 'github.com');

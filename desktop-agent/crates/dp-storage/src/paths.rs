@@ -1,36 +1,56 @@
 //! Stable per-user storage and non-destructive migration of legacy SQLite files.
 
+use rusqlite::{Connection, OpenFlags};
 use std::io;
 use std::path::{Path, PathBuf};
-use rusqlite::{Connection, OpenFlags};
 
 /// Resolve the Windows default without depending on the process working directory.
 /// An explicit path remains supported for recovery and existing installations.
 pub fn database_path(custom: Option<&Path>, local_app_data: Option<&Path>) -> io::Result<PathBuf> {
     if let Some(path) = custom {
         if path.as_os_str().is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "DP_DB_PATH must not be empty"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "DP_DB_PATH must not be empty",
+            ));
         }
         return Ok(path.to_owned());
     }
-    let root = local_app_data.filter(|path| path.is_absolute()).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "LOCALAPPDATA is unavailable; set DP_DB_PATH to an accessible persistent file")
-    })?;
+    let root = local_app_data
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "LOCALAPPDATA is unavailable; set DP_DB_PATH to an accessible persistent file",
+            )
+        })?;
     Ok(root.join("DigitalPulse").join("agent_storage.db"))
 }
 
 /// Prepare a persistent directory and copy one legacy database using SQLite's
 /// consistent snapshot operation (including uncheckpointed WAL contents).
 /// Never remove the source, merge databases, or replace an existing destination.
-pub fn prepare_database_path(destination: &Path, legacy_paths: &[PathBuf]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let parent = destination.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."));
+pub fn prepare_database_path(
+    destination: &Path,
+    legacy_paths: &[PathBuf],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
-    if destination.exists() { return Ok(()); }
+    if destination.exists() {
+        return Ok(());
+    }
     let mut sources = Vec::new();
     for path in legacy_paths {
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
         let resolved = path.canonicalize()?;
-        if !sources.contains(&resolved) { sources.push(resolved); }
+        if !sources.contains(&resolved) {
+            sources.push(resolved);
+        }
     }
     if sources.len() > 1 {
         return Err("Multiple legacy agent databases found; set DP_DB_PATH to the intended database before upgrading. No records were moved.".into());
@@ -40,8 +60,13 @@ pub fn prepare_database_path(destination: &Path, legacy_paths: &[PathBuf]) -> Re
         let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let connection = Connection::open_with_flags(source, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
             // Reject an unrelated SQLite file without altering it.
-            connection.query_row("SELECT COUNT(*) FROM agent_state", [], |row| row.get::<_, i64>(0))?;
-            connection.execute("VACUUM INTO ?1", [staging.to_str().ok_or("Storage path is not valid UTF-8")?])?;
+            connection.query_row("SELECT COUNT(*) FROM agent_state", [], |row| {
+                row.get::<_, i64>(0)
+            })?;
+            connection.execute(
+                "VACUUM INTO ?1",
+                [staging.to_str().ok_or("Storage path is not valid UTF-8")?],
+            )?;
             // A hard link publishes the completed snapshot without replacing a
             // destination created concurrently. Both paths are on one volume.
             match std::fs::hard_link(&staging, destination) {
@@ -64,8 +89,14 @@ mod tests {
     #[test]
     fn windows_default_is_stable_and_override_is_preserved() {
         let root = std::env::temp_dir();
-        assert_eq!(database_path(None, Some(&root)).unwrap(), root.join("DigitalPulse/agent_storage.db"));
-        assert_eq!(database_path(Some(Path::new("custom.db")), None).unwrap(), PathBuf::from("custom.db"));
+        assert_eq!(
+            database_path(None, Some(&root)).unwrap(),
+            root.join("DigitalPulse/agent_storage.db")
+        );
+        assert_eq!(
+            database_path(Some(Path::new("custom.db")), None).unwrap(),
+            PathBuf::from("custom.db")
+        );
         assert!(database_path(None, None).is_err());
         assert!(database_path(Some(Path::new("")), Some(&root)).is_err());
     }
@@ -80,19 +111,32 @@ mod tests {
             let mut old = Storage::open(&source).unwrap();
             old.set_state("device_id", "persistent-device").unwrap();
             let now = chrono::Utc::now();
-            old.record_session_with_event(&crate::StoredActivitySession {
-                id: uuid::Uuid::new_v4(), device_id: uuid::Uuid::new_v4(),
-                application_name: None, executable_name: None, process_id: None,
-                started_at: now, ended_at: now, duration_seconds: 1.0,
-                activity_state: "idle".into(), created_at: now,
-            }, "{}").unwrap();
+            old.record_session_with_event(
+                &crate::StoredActivitySession {
+                    id: uuid::Uuid::new_v4(),
+                    device_id: uuid::Uuid::new_v4(),
+                    application_name: None,
+                    executable_name: None,
+                    process_id: None,
+                    started_at: now,
+                    ended_at: now,
+                    duration_seconds: 1.0,
+                    activity_state: "idle".into(),
+                    created_at: now,
+                },
+                "{}",
+            )
+            .unwrap();
             // Keep the source open to exercise a database in WAL mode.
             prepare_database_path(&target, &[source.clone()]).unwrap();
         }
         for _ in 0..2 {
             prepare_database_path(&target, &[source.clone()]).unwrap();
             let stored = Storage::open(&target).unwrap();
-            assert_eq!(stored.get_state("device_id").unwrap().as_deref(), Some("persistent-device"));
+            assert_eq!(
+                stored.get_state("device_id").unwrap().as_deref(),
+                Some("persistent-device")
+            );
             assert_eq!(stored.count_pending_sync().unwrap(), 1);
         }
         assert!(source.is_file());

@@ -162,15 +162,19 @@ export default function ForgotPasswordPage() {
       >
         <div className="space-y-5">
 
-          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+          <div
+            role="status"
+            aria-live="polite"
+            className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4"
+          >
             <div className="mb-2 flex items-center gap-2 text-emerald-400">
               <span aria-hidden="true">✉</span>
               <span className="font-semibold">Check your inbox</span>
             </div>
 
             <p className="text-sm leading-6 text-emerald-300">
-              If an account exists for this email address, we will
-              send you a password-reset link. Please check your
+              Please check your email. If an account exists for this email address,
+              we will send you a password-reset link. Please check your
               inbox and spam folder.
             </p>
           </div>

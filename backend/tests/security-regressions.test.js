@@ -60,19 +60,18 @@ async function createSecurityApp() {
   return { app, prisma, inject };
 }
 
-test('screen routes are disabled and never reveal consent, captures, or live sessions', async (t) => {
+test('screen administration routes reject employees', async (t) => {
   const { app, inject } = await createSecurityApp();
   t.after(() => app.close());
   for (const [method, path] of [
-    ['GET', '/api/v1/screen/config'],
-    ['POST', '/api/v1/screen/consent'],
-    ['GET', '/api/v1/screen/captures'],
-    ['DELETE', '/api/v1/screen/captures/00000000-0000-4000-8000-000000000000'],
-    ['POST', '/api/v1/screen/live-session/start'],
+    ['GET', '/api/v1/screen-monitoring/settings'],
+    ['PATCH', '/api/v1/screen-monitoring/settings'],
+    ['GET', '/api/v1/screen-monitoring/captures'],
+    ['DELETE', '/api/v1/screen-monitoring/captures/00000000-0000-4000-8000-000000000000'],
   ]) {
     const response = await inject(method, path, 'employeeA', { consent: true });
-    assert.equal(response.statusCode, 410, `${method} ${path}`);
-    assert.equal(response.json().error.code, 'SCREEN_MONITORING_DISABLED');
+    assert.equal(response.statusCode, 403, `${method} ${path}`);
+    assert.equal(response.json().error.code, 'FORBIDDEN');
   }
 });
 

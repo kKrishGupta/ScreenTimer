@@ -1,154 +1,85 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildApp } from '../src/app.js';
-import { loadConfig } from '../src/shared/config.js';
+import { evaluateDevicePolicy, localScheduleState, runScreenshotRetentionCleanup } from '../src/modules/screen/screen.routes.js';
 
-function createMockPrisma() {
+const mondayAtNoonUtc = new Date('2026-11-02T12:00:00.000Z');
+
+function eligibleDevice(overrides = {}) {
+  return { id: 'device-1', kind: 'DESKTOP_AGENT', organizationId: 'org-1', userId: 'employee-1', isRevoked: false, screenCaptureEnabled: true, ...overrides };
+}
+
+function activeOwner(overrides = {}) {
   return {
-    $connect: async () => {},
-    $disconnect: async () => {},
-    $queryRaw: async () => [{ '?column?': 1 }],
+    id: 'employee-1', organizationId: 'org-1', employmentStatus: 'active', monitoringAuthorized: true,
+    monitoringConsentAt: new Date('2026-01-01T00:00:00.000Z'), monitoringConsentRevokedAt: null,
+    screenMonitoringAcknowledgedAt: new Date('2026-01-01T00:00:00.000Z'), workingDays: ['Mon'],
+    shiftStart: '09:00', shiftEnd: '18:00', organization: { timezone: 'UTC' }, ...overrides,
   };
 }
 
-test('Screen Monitoring API (Milestone 7)', async (t) => {
-  const config = loadConfig({
-    DATABASE_URL: 'postgresql://test:test@127.0.0.1:5433/test',
-    HOST: '127.0.0.1',
-    PORT: '3001',
-  });
-  const app = await buildApp({ config, prisma: createMockPrisma(), logger: false });
-  const auth = await app.authService.createTestSession();
-  const headers = auth.headers;
+function prismaFor({ owner = activeOwner(), setting = {} } = {}) {
+  return {
+    user: { findUnique: async () => owner },
+    screenMonitoringSetting: { findUnique: async () => ({
+      organizationId: 'org-1', enabled: true, captureIntervalSeconds: 300, retentionDays: 30,
+      workingDays: ['Mon'], shiftStart: '09:00', shiftEnd: '18:00',
+      excludedApplications: ['1password.exe'], ...setting,
+    }) },
+  };
+}
 
-  await t.test('GET /api/v1/screen/config returns initial state requiring consent', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/v1/screen/config',
-      headers,
-    });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.equal(body.consentGranted, false);
-    assert.equal(body.status, 'stopped');
-  });
+test('device ownership, consent, revocation and authorization gates fail closed', async () => {
+  for (const device of [null, eligibleDevice({ kind: 'BROWSER_EXTENSION' }), eligibleDevice({ isRevoked: true }), eligibleDevice({ userId: null })]) {
+    assert.equal((await evaluateDevicePolicy(prismaFor(), device, mondayAtNoonUtc)).allowed, false);
+  }
+  for (const owner of [activeOwner({ organizationId: 'other-org' }), activeOwner({ monitoringConsentAt: null }), activeOwner({ monitoringConsentRevokedAt: new Date() }), activeOwner({ monitoringAuthorized: false }), activeOwner({ employmentStatus: 'disabled' })]) {
+    assert.equal((await evaluateDevicePolicy(prismaFor({ owner }), eligibleDevice(), mondayAtNoonUtc)).allowed, false);
+  }
+});
 
-  await t.test('POST /api/v1/screen/capture rejected when consent is not granted (403)', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/v1/screen/capture',
-      headers,
-      payload: { applicationName: 'Test App' },
-    });
-    assert.equal(res.statusCode, 403);
-    const body = res.json();
-    assert.equal(body.error.code, 'CONSENT_REQUIRED');
-  });
+test('eligible acknowledged employee receives the five-minute screenshot policy', async () => {
+  const result = await evaluateDevicePolicy(prismaFor(), eligibleDevice(), mondayAtNoonUtc);
+  assert.equal(result.allowed, true);
+  assert.equal(result.intervalSeconds, 300);
+  assert.deepEqual(result.excludedApplications, ['1password.exe']);
+  assert.equal(result.visibleIndicator, true);
+});
 
-  await t.test('POST /api/v1/screen/consent enables monitoring and grants consent', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/v1/screen/consent',
-      headers,
-      payload: { consent: true },
-    });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.equal(body.success, true);
-    assert.equal(body.consentGranted, true);
-    assert.equal(body.status, 'active');
-  });
+test('disabled policy and missing employee acknowledgement stop capture', async () => {
+  const disabled = await evaluateDevicePolicy(prismaFor({ setting: { enabled: false } }), eligibleDevice(), mondayAtNoonUtc);
+  assert.equal(disabled.reason, 'SCREEN_MONITORING_DISABLED');
 
-  let captureId;
-  await t.test('POST /api/v1/screen/capture succeeds when consent is granted', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/api/v1/screen/capture',
-      headers,
-      payload: { applicationName: 'Notepad' },
-    });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.equal(body.success, true);
-    assert.equal(body.capture.applicationName, 'Notepad');
-    assert.ok(body.capture.id);
-    captureId = body.capture.id;
-  });
+  const noNotice = await evaluateDevicePolicy(
+    prismaFor({ owner: activeOwner({ screenMonitoringAcknowledgedAt: null }) }), eligibleDevice(), mondayAtNoonUtc,
+  );
+  assert.equal(noNotice.reason, 'SCREEN_NOTICE_NOT_ACKNOWLEDGED');
+});
 
-  await t.test('GET /api/v1/screen/captures returns captured screenshot', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/api/v1/screen/captures',
-      headers,
-    });
-    assert.equal(res.statusCode, 200);
-    const body = res.json();
-    assert.ok(body.count >= 1);
-    const found = body.captures.find((c) => c.id === captureId);
-    assert.ok(found);
-    assert.equal(found.applicationName, 'Notepad');
-  });
+test('unselected devices and after-hours captures are rejected', async () => {
+  const unselected = await evaluateDevicePolicy(prismaFor(), eligibleDevice({ screenCaptureEnabled: false }), mondayAtNoonUtc);
+  assert.equal(unselected.reason, 'DEVICE_NOT_SELECTED');
+  const afterHours = await evaluateDevicePolicy(prismaFor(), eligibleDevice(), new Date('2026-11-02T20:00:00.000Z'));
+  assert.equal(afterHours.reason, 'OUTSIDE_SCHEDULE');
+});
 
-  await t.test('POST /api/v1/screen/state pauses and resumes monitoring', async () => {
-    const pauseRes = await app.inject({
-      method: 'POST',
-      url: '/api/v1/screen/state',
-      headers,
-      payload: { action: 'pause', pauseMinutes: 15 },
-    });
-    assert.equal(pauseRes.statusCode, 200);
-    assert.equal(pauseRes.json().status, 'paused');
+test('organization screenshot schedule supports overnight windows', () => {
+  const setting = { workingDays: ['Mon'], shiftStart: '22:00', shiftEnd: '06:00' };
+  assert.equal(localScheduleState(setting, 'UTC', new Date('2026-11-02T23:00:00Z')).allowed, true);
+  assert.equal(localScheduleState(setting, 'UTC', new Date('2026-11-03T05:00:00Z')).allowed, true);
+  assert.equal(localScheduleState(setting, 'UTC', new Date('2026-11-03T07:00:00Z')).allowed, false);
+});
 
-    // While paused, capture is rejected with 409
-    const captureWhilePaused = await app.inject({
-      method: 'POST',
-      url: '/api/v1/screen/capture',
-      headers,
-      payload: { applicationName: 'Notepad' },
-    });
-    assert.equal(captureWhilePaused.statusCode, 409);
-
-    // Resume
-    const resumeRes = await app.inject({
-      method: 'POST',
-      url: '/api/v1/screen/state',
-      headers,
-      payload: { action: 'resume' },
-    });
-    assert.equal(resumeRes.statusCode, 200);
-    assert.equal(resumeRes.json().status, 'active');
-  });
-
-  await t.test('POST /api/v1/screen/live-session/start and stop manages temporary session', async () => {
-    const startRes = await app.inject({
-      method: 'POST',
-      url: '/api/v1/screen/live-session/start',
-      headers,
-      payload: { durationMinutes: 10 },
-    });
-    assert.equal(startRes.statusCode, 200);
-    const startBody = startRes.json();
-    assert.equal(startBody.liveSession.active, true);
-    assert.ok(startBody.liveSession.sessionId);
-
-    const stopRes = await app.inject({
-      method: 'POST',
-      url: '/api/v1/screen/live-session/stop',
-      headers,
-    });
-    assert.equal(stopRes.statusCode, 200);
-    assert.equal(stopRes.json().active, false);
-  });
-
-  await t.test('DELETE /api/v1/screen/captures/:id removes screenshot', async () => {
-    const delRes = await app.inject({
-      method: 'DELETE',
-      url: `/api/v1/screen/captures/${captureId}`,
-      headers,
-    });
-    assert.equal(delRes.statusCode, 200);
-    assert.equal(delRes.json().deletedId, captureId);
-  });
-
-  await app.close();
+test('retention cleanup preserves metadata when object deletion fails', async () => {
+  const deletedRows = [];
+  const prisma = { screenCaptureMetadata: {
+    findMany: async () => [
+      { id: 'ok', organizationId: 'org-1', storageKey: 'org-1/device/ok.jpg.enc' },
+      { id: 'failed', organizationId: 'org-1', storageKey: 'org-1/device/failed.jpg.enc' },
+    ],
+    delete: async ({ where }) => deletedRows.push(where.id),
+  } };
+  const store = { delete: async (key) => { if (key.includes('failed')) throw new Error('storage unavailable'); } };
+  const result = await runScreenshotRetentionCleanup(prisma, store, { error() {} });
+  assert.deepEqual(result, { deleted: 1, failed: 1 });
+  assert.deepEqual(deletedRows, ['ok']);
 });

@@ -49,21 +49,14 @@ const defaultRouterFetch = async (url) => {
   if (u.includes('/devices')) {
     return new Response(JSON.stringify({ devices: [], count: 0 }), { status: 200 });
   }
-  if (u.includes('/screen/config')) {
-    return new Response(
-      JSON.stringify({
-        consentGranted: false,
-        status: 'stopped',
-        captureIntervalMinutes: 10,
-        retentionDays: 7,
-        totalCaptures: 0,
-        liveSession: { active: false },
-      }),
-      { status: 200 },
-    );
+  if (u.includes('/screen-monitoring/settings')) {
+    return new Response(JSON.stringify({ settings: { enabled: false, captureIntervalSeconds: 300, retentionDays: 30, workingDays: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'], shiftStart: '09:00', shiftEnd: '18:00', excludedApplications: [] } }), { status: 200 });
   }
-  if (u.includes('/screen/captures')) {
-    return new Response(JSON.stringify({ captures: [], count: 0 }), { status: 200 });
+  if (u.includes('/screen-monitoring/employees')) {
+    return new Response(JSON.stringify({ employees: [] }), { status: 200 });
+  }
+  if (u.includes('/screen-monitoring/captures')) {
+    return new Response(JSON.stringify({ captures: [], page: 1, pageSize: 24, total: 0, totalPages: 0 }), { status: 200 });
   }
   if (u.includes('/planner/tasks')) {
     return new Response(JSON.stringify({ tasks: [{ id: '1', title: 'Sample Homework Task', category: 'study', targetMinutes: 30, completed: false }], totalCount: 1, completedCount: 0 }), { status: 200 });
@@ -159,7 +152,8 @@ const mockFetch = (impl) => vi.spyOn(globalThis, 'fetch').mockImplementation(asy
         id: 'admin-001',
         email: 'admin@example.com',
         displayName: 'Test Administrator',
-        role: 'ORGANIZATION_ADMIN',
+        role: 'ADMIN',
+        organizationId: 'org-test',
         organization: { name: 'Test Organization' },
       },
     }), { status: 200 });
@@ -236,7 +230,7 @@ describe('dashboard shell and navigation', () => {
     let resolveReminder;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options = {}) => {
       const requestUrl = typeof url === 'string' ? url : url?.url ?? '';
-      if (requestUrl.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'admin-001', email: 'admin@example.com', role: 'ORGANIZATION_ADMIN' } }), { status: 200 });
+      if (requestUrl.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'admin-001', email: 'admin@example.com', role: 'ADMIN' } }), { status: 200 });
       if (requestUrl.endsWith('/employees/emp-001/setup-reminder') && options.method === 'POST') {
         return new Promise((resolve) => {
           resolveReminder = () => resolve(new Response(JSON.stringify({
@@ -371,7 +365,7 @@ describe('dashboard shell and navigation', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options = {}) => {
       const requestUrl = typeof url === 'string' ? url : url?.url ?? '';
-      if (requestUrl.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'admin-001', email: 'admin@example.com', role: 'ORGANIZATION_ADMIN' } }), { status: 200 });
+      if (requestUrl.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'admin-001', email: 'admin@example.com', role: 'ADMIN' } }), { status: 200 });
       if (requestUrl.endsWith('/invitations') && options.method === 'POST') {
         invitationCreated = true;
         return new Response(JSON.stringify({
@@ -442,7 +436,7 @@ describe('dashboard shell and navigation', () => {
   it('shows an understandable rejection for an expired invitation without showing the password form', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const requestUrl = typeof url === 'string' ? url : url?.url ?? '';
-      if (requestUrl.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'admin-001', email: 'admin@example.com', role: 'ORGANIZATION_ADMIN' } }), { status: 200 });
+      if (requestUrl.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'admin-001', email: 'admin@example.com', role: 'ADMIN' } }), { status: 200 });
       if (requestUrl.endsWith('/invitations/validate')) return new Response(JSON.stringify({ error: { code: 'INVITATION_VALIDATION_FAILED', message: 'This invitation has expired. Ask your organization to resend it.' } }), { status: 410 });
       return defaultRouterFetch(url);
     });
@@ -563,44 +557,40 @@ describe('dashboard shell and navigation', () => {
     expect(screen.getByText('Windows Desktop Agent')).toBeInTheDocument();
   });
 
-  it('renders Milestone 7 screen monitoring consent flow when consent is not yet granted', async () => {
+  it('renders the organization screen monitoring policy and empty states', async () => {
     mockFetch(defaultRouterFetch);
     renderAt('/screen-monitoring');
-    expect(await screen.findByText('Explicit User Consent Required')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Grant Consent & Enable' })).toBeInTheDocument();
+    expect(await screen.findByText('Organization policy')).toBeInTheDocument();
+    expect(screen.getByText('No eligible Windows devices')).toBeInTheDocument();
+    expect(screen.getByText('No screenshots in this range')).toBeInTheDocument();
   });
 
-  it('renders Milestone 7 active screen monitoring controls and captures when consent is granted', async () => {
+  it('renders real enrolled-device status and uploaded screenshots', async () => {
     mockFetch(async (url) => {
       const u = typeof url === 'string' ? url : url?.url ?? '';
-      if (u.includes('/screen/config')) {
-        return new Response(
-          JSON.stringify({
-            consentGranted: true,
-            status: 'active',
-            captureIntervalMinutes: 10,
-            retentionDays: 7,
-            totalCaptures: 1,
-            liveSession: { active: false },
-          }),
-          { status: 200 },
-        );
+      if (u.includes('/screen-monitoring/settings')) {
+        return new Response(JSON.stringify({ settings: { enabled: true, captureIntervalSeconds: 300, retentionDays: 30, workingDays: ['Mon'], shiftStart: '09:00', shiftEnd: '18:00', excludedApplications: [] } }), { status: 200 });
       }
-      if (u.includes('/screen/captures')) {
+      if (u.includes('/screen-monitoring/employees')) {
+        return new Response(JSON.stringify({ employees: [{ employeeId: 'emp-1', employeeName: 'Alex Mercer', deviceId: 'device-1', deviceName: 'Windows Laptop', acknowledgedAt: '2026-11-01T09:00:00Z', selected: true, connectivity: 'online', lastCaptureAt: '2026-11-01T14:30:00Z' }] }), { status: 200 });
+      }
+      if (u.includes('/screen-monitoring/captures')) {
         return new Response(
           JSON.stringify({
             captures: [
               {
                 id: 'cap-1',
-                timestamp: '2026-11-01T14:30:00.000Z',
+                capturedAt: '2026-11-01T14:30:00.000Z',
+                employeeName: 'Alex Mercer',
+                deviceName: 'Windows Laptop',
                 applicationName: 'Visual Studio Code',
-                previewUrl: 'data:image/svg+xml;utf8,<svg></svg>',
+                imageUrl: 'data:image/jpeg;base64,/9j/2Q==',
                 width: 1920,
                 height: 1080,
                 sizeBytes: 85000,
               },
             ],
-            count: 1,
+            page: 1, pageSize: 24, total: 1, totalPages: 1,
           }),
           { status: 200 },
         );
@@ -608,9 +598,9 @@ describe('dashboard shell and navigation', () => {
       return defaultRouterFetch(url);
     });
     renderAt('/screen-monitoring');
-    expect(await screen.findByText(/Status: active/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Capture Now' })).toBeInTheDocument();
-    expect(screen.getByText('Visual Studio Code')).toBeInTheDocument();
+    expect(await screen.findAllByText('Alex Mercer')).not.toHaveLength(0);
+    expect(screen.getAllByText('Windows Laptop').length).toBeGreaterThan(0);
+    expect(screen.getByText('online')).toBeInTheDocument();
   });
 
   it('renders the employee work schedule editor', async () => {
@@ -680,11 +670,11 @@ describe('authentication entry flow', () => {
     let authenticated = false;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
       const requestUrl = typeof url === 'string' ? url : url?.url ?? '';
-      if (requestUrl.includes('/auth/login')) {
+      if (requestUrl.includes('/organization/login')) {
         authenticated = true;
         return new Response(JSON.stringify({
           success: true,
-          user: { id: 'admin-1', role: 'ORGANIZATION_ADMIN' },
+          user: { id: 'admin-1', role: 'ADMIN' },
         }), { status: 200 });
       }
       if (requestUrl.includes('/auth/me')) {
@@ -697,7 +687,7 @@ describe('authentication entry flow', () => {
             id: 'admin-1',
             email: 'admin@example.com',
             displayName: 'Admin User',
-            role: 'ORGANIZATION_ADMIN',
+            role: 'ADMIN',
             organization: { name: 'Acme' },
           },
         }), { status: 200 });
@@ -705,7 +695,7 @@ describe('authentication entry flow', () => {
       return defaultRouterFetch(url, options);
     });
 
-    renderAt('/login');
+    renderAt('/organization/login');
     await screen.findByLabelText('Work email');
     fireEvent.change(screen.getByLabelText('Work email'), { target: { value: 'admin@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct-password' } });
@@ -824,7 +814,7 @@ describe('authentication entry flow', () => {
     expect(acceptedPayloads[0].payload.displayName).toBe('Invitee Person');
 
     fireEvent.click(screen.getByRole('link', { name: 'Sign in to accept invitation' }));
-    await screen.findByRole('heading', { name: 'Welcome back' });
+    await screen.findByRole('heading', { name: 'Employee Login' });
     expect(JSON.parse(screen.getByTestId('router-location').textContent).state.from.pathname).toBe('/accept-invitation');
     fireEvent.change(screen.getByLabelText('Work email'), { target: { value: invitation.email } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'ExistingPass123!' } });

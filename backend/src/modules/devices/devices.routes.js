@@ -13,20 +13,48 @@ async function readOwnMonitoringStatus(prisma, user) {
   }
   const owner = await prisma.user.findUnique({
     where: { id: user.id },
-    include: { organization: { select: { timezone: true } } },
+    include: { organization: { select: {
+      timezone: true,
+      monitoringShiftStart: true,
+      monitoringShiftEnd: true,
+      monitoringWorkingDays: true,
+      monitoringConfigUpdatedAt: true,
+    } } },
   });
   if (!owner || owner.organizationId !== user.organizationId) {
     const error = new Error('Account or organization could not be verified');
     error.statusCode = 404;
     throw error;
   }
+  const isOrganizationAdmin = normalizeRole(user.role) === Roles.ADMIN;
+  const organizationHasSchedule = Boolean(
+    owner.organization?.monitoringShiftStart && owner.organization?.monitoringShiftEnd,
+  );
+  const displayedSchedule = isOrganizationAdmin && organizationHasSchedule
+    ? {
+        shiftStart: owner.organization.monitoringShiftStart,
+        shiftEnd: owner.organization.monitoringShiftEnd,
+        workingDays: owner.organization.monitoringWorkingDays,
+      }
+    : {
+        shiftStart: owner.shiftStart,
+        shiftEnd: owner.shiftEnd,
+        workingDays: owner.workingDays,
+      };
   return {
     monitoring: getMonitoringAuthorization(owner),
     settings: {
-      shiftStart: owner.shiftStart || '',
-      shiftEnd: owner.shiftEnd || '',
-      workingDays: owner.workingDays || [],
+      shiftStart: displayedSchedule.shiftStart || '',
+      shiftEnd: displayedSchedule.shiftEnd || '',
+      workingDays: displayedSchedule.workingDays || [],
       organizationTimezone: owner.organization?.timezone || '',
+      organizationSchedule: {
+        shiftStart: owner.organization?.monitoringShiftStart || '',
+        shiftEnd: owner.organization?.monitoringShiftEnd || '',
+        workingDays: owner.organization?.monitoringWorkingDays || [],
+      },
+      scheduleSource: isOrganizationAdmin ? 'organization' : owner.scheduleOverride ? 'employee_override' : 'organization',
+      configurationUpdatedAt: owner.configurationUpdatedAt || owner.organization?.monitoringConfigUpdatedAt || null,
       adminAuthorized: owner.monitoringAuthorized === true,
       consentGranted: Boolean(owner.monitoringConsentAt && (!owner.monitoringConsentRevokedAt || owner.monitoringConsentRevokedAt < owner.monitoringConsentAt)),
     },
@@ -136,16 +164,52 @@ export default async function devicesRoutes(app) {
         workingDays.some((day) => !WORKING_DAYS.includes(day)) || new Set(workingDays).size !== workingDays.length) {
       return reply.code(400).send({ error: { code: 'INVALID_SCHEDULE', message: 'Choose valid working hours and at least one working day. Overnight schedules are supported.' } });
     }
-    if (!app.prisma?.user?.updateMany) {
+    if (!app.prisma?.user?.updateMany || !app.prisma?.$transaction) {
       return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'The monitoring schedule could not be saved' } });
     }
     try {
-      const changed = await app.prisma.user.updateMany({
-        where: { id: request.user.id, organizationId: request.user.organizationId },
-        data: { shiftStart, shiftEnd, workingDays },
+      const now = new Date();
+      const isAdmin = normalizeRole(request.user.role) === Roles.ADMIN;
+      const result = await app.prisma.$transaction(async (tx) => {
+        if (isAdmin) {
+          const organization = await tx.organization.updateMany({
+            where: { id: request.user.organizationId },
+            data: {
+              monitoringShiftStart: shiftStart,
+              monitoringShiftEnd: shiftEnd,
+              monitoringWorkingDays: workingDays,
+              monitoringConfigUpdatedAt: now,
+              monitoringConfigUpdatedBy: request.user.email,
+            },
+          });
+          if (organization.count !== 1) return { found: false, syncedUsers: 0 };
+          const users = await tx.user.updateMany({
+            where: { organizationId: request.user.organizationId, scheduleOverride: false },
+            data: { shiftStart, shiftEnd, workingDays, configurationUpdatedAt: now },
+          });
+          if (tx.auditLog?.create) await tx.auditLog.create({ data: {
+            organizationId: request.user.organizationId,
+            action: 'ORGANIZATION_MONITORING_SCHEDULE_UPDATED',
+            actor: request.user.email,
+            details: { shiftStart, shiftEnd, workingDays, inheritedUsersUpdated: users.count },
+          } });
+          return { found: true, syncedUsers: users.count };
+        }
+
+        const changed = await tx.user.updateMany({
+          where: { id: request.user.id, organizationId: request.user.organizationId },
+          data: { shiftStart, shiftEnd, workingDays, scheduleOverride: true, configurationUpdatedAt: now },
+        });
+        if (changed.count === 1 && tx.auditLog?.create) await tx.auditLog.create({ data: {
+          organizationId: request.user.organizationId,
+          action: 'EMPLOYEE_MONITORING_SCHEDULE_UPDATED',
+          actor: request.user.email,
+          details: { userId: request.user.id, shiftStart, shiftEnd, workingDays },
+        } });
+        return { found: changed.count === 1, syncedUsers: changed.count };
       });
-      if (changed.count !== 1) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Account not found in this organization' } });
-      return reply.send({ success: true, ...(await readOwnMonitoringStatus(app.prisma, request.user)) });
+      if (!result.found) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: isAdmin ? 'Organization not found' : 'Account not found in this organization' } });
+      return reply.send({ success: true, syncedUsers: result.syncedUsers, ...(await readOwnMonitoringStatus(app.prisma, request.user)) });
     } catch (error) {
       request.log.error({ err: error }, 'Failed to persist personal monitoring schedule');
       return reply.code(503).send({ error: { code: 'SCHEDULE_SAVE_FAILED', message: 'The monitoring schedule could not be saved' } });
@@ -161,13 +225,31 @@ export default async function devicesRoutes(app) {
     }
     try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }); }
     catch { return reply.code(400).send({ error: { code: 'INVALID_TIMEZONE', message: 'Enter a valid IANA time zone, such as Europe/London' } }); }
-    if (!request.user.organizationId || !app.prisma?.organization?.updateMany) {
+    if (!request.user.organizationId || !app.prisma?.organization?.updateMany || !app.prisma?.user?.updateMany || !app.prisma?.$transaction) {
       return reply.code(503).send({ error: { code: 'ORGANIZATION_SETTINGS_UNAVAILABLE', message: 'Organization settings could not be saved' } });
     }
     try {
-      const changed = await app.prisma.organization.updateMany({ where: { id: request.user.organizationId }, data: { timezone } });
-      if (changed.count !== 1) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Organization not found' } });
-      return reply.send({ success: true, timezone });
+      const now = new Date();
+      const result = await app.prisma.$transaction(async (tx) => {
+        const changed = await tx.organization.updateMany({
+          where: { id: request.user.organizationId },
+          data: { timezone, monitoringConfigUpdatedAt: now, monitoringConfigUpdatedBy: request.user.email },
+        });
+        if (changed.count !== 1) return { found: false, syncedUsers: 0 };
+        const users = await tx.user.updateMany({
+          where: { organizationId: request.user.organizationId },
+          data: { configurationUpdatedAt: now },
+        });
+        if (tx.auditLog?.create) await tx.auditLog.create({ data: {
+          organizationId: request.user.organizationId,
+          action: 'ORGANIZATION_TIMEZONE_UPDATED',
+          actor: request.user.email,
+          details: { timezone, affectedUsers: users.count },
+        } });
+        return { found: true, syncedUsers: users.count };
+      });
+      if (!result.found) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Organization not found' } });
+      return reply.send({ success: true, timezone, syncedUsers: result.syncedUsers, configurationUpdatedAt: now });
     } catch (error) {
       request.log.error({ err: error }, 'Failed to persist organization time zone');
       return reply.code(503).send({ error: { code: 'ORGANIZATION_SETTINGS_UNAVAILABLE', message: 'Organization time zone could not be saved' } });
@@ -219,8 +301,7 @@ export default async function devicesRoutes(app) {
 
       if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole)) {
         return reply.code(403).send({
-          error: 'FORBIDDEN',
-          message: 'Only administrators can create enrollment tokens',
+          error: { code: 'FORBIDDEN', message: 'Only administrators can create enrollment tokens' },
         });
       }
 

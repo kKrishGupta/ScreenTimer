@@ -52,6 +52,8 @@ export default async function employeeRoutes(fastify) {
       shiftEnd: u.shiftEnd || null,
       shiftTimezone: u.shiftTimezone || null,
       workingDays: Array.isArray(u.workingDays) ? u.workingDays : [],
+      scheduleOverride: Boolean(u.scheduleOverride),
+      configurationUpdatedAt: u.configurationUpdatedAt || null,
       joiningDate: u.createdAt ? (u.createdAt.toISOString ? u.createdAt.toISOString().split('T')[0] : String(u.createdAt).split('T')[0]) : null,
       employmentStatus: u.employmentStatus || 'unknown',
       monitoringAuthorized: typeof u.monitoringAuthorized === 'boolean' ? u.monitoringAuthorized : false,
@@ -791,6 +793,10 @@ export default async function employeeRoutes(fastify) {
             ...(updates.shiftTimezone ? { shiftTimezone: updates.shiftTimezone } : {}),
             ...(updates.employmentStatus ? { employmentStatus: updates.employmentStatus } : {}),
     };
+    if (updates.shiftStart || updates.shiftEnd || Array.isArray(updates.workingDays) || updates.shiftTimezone) {
+      updateData.scheduleOverride = true;
+      updateData.configurationUpdatedAt = new Date();
+    }
     if (Object.keys(updateData).length === 0) return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'No supported employee changes were provided' } });
     if (!prisma?.user?.updateMany) return reply.code(503).send({ error: { code: 'STORAGE_UNAVAILABLE', message: 'Employee storage is unavailable' } });
     const changed = await prisma.user.updateMany({ where: { id: emp.id, organizationId: emp.organizationId }, data: updateData });

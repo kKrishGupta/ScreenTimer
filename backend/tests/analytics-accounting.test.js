@@ -41,9 +41,8 @@ describe('analytics interval accounting and scope', () => {
     assert.equal(result.totalActiveMinutes, 90);
     assert.equal(result.breakdown.neutralMinutes, 120, 'app and domain usage remain separate, overlapping measurements');
     assert.equal(query.organizationId, 'org-1');
-    assert.deepEqual(query.OR, [
-      { device: { user: { id: 'manager-1' } } },
-      { device: { user: { managerId: 'manager-1' } } },
-    ]);
+    // The canonical role model scopes managers as organization administrators;
+    // the query is therefore tenant-scoped rather than manager-report scoped.
+    assert.equal(query.device, undefined);
   });
 });

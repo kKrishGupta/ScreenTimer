@@ -6,9 +6,9 @@ import screenRoutes from '../src/modules/screen/screen.routes.js';
 
 async function routes(plugin, prisma = {}) {
   const handlers = new Map();
-  const app = { prisma, addHook() {} };
+  const app = { prisma, addHook() {}, addContentTypeParser() {}, log: { error() {} } };
   for (const method of ['get', 'post', 'patch', 'delete']) {
-    app[method] = (path, handler) => handlers.set(`${method} ${path}`, handler);
+    app[method] = (path, ...args) => handlers.set(`${method} ${path}`, args.at(-1));
   }
   await plugin(app);
   return handlers;
@@ -17,6 +17,24 @@ function reply() {
   return { statusCode: 200, code(code) { this.statusCode = code; return this; },
     send(body) { this.body = body; return body; } };
 }
+
+test('screen device status uses stored capture metadata and exposes policy denial', async () => {
+  const capturedAt = new Date('2026-11-06T10:00:00Z');
+  const handlers = await routes(screenRoutes, {
+    device: { findMany: async ({ where }) => {
+      assert.equal(where.organizationId, 'scope-a');
+      return [{ id: 'device', kind: 'DESKTOP_AGENT', organizationId: 'scope-a', userId: 'employee', screenCaptureEnabled: false, lastScreenCaptureAt: new Date('2026-11-06T11:00:00Z') }];
+    } },
+    screenCaptureMetadata: { findMany: async ({ where }) => {
+      assert.equal(where.organizationId, 'scope-a');
+      return [{ id: 'capture', deviceId: 'device', capturedAt }];
+    } },
+  });
+  const result = await handlers.get('get /screen-monitoring/employees')({ user: { role: 'ADMIN', organizationId: 'scope-a' } }, reply());
+  assert.equal(result.employees[0].lastCaptureAt, capturedAt);
+  assert.equal(result.employees[0].captureStatusMismatch, true);
+  assert.equal(result.employees[0].policyReason, 'DEVICE_NOT_SELECTED');
+});
 
 test('planner memory tasks respect employee ownership and selected organization', async () => {
   const handlers = await routes(plannerRoutes);
@@ -59,41 +77,30 @@ test('privacy super admin requires explicit organization and rejects a device ou
   assert.equal(crossTenant.statusCode, 403);
 });
 
-test('screen list scopes database ownership and detail denies another device owner', async () => {
+test('screen monitoring is admin-only and all capture queries are organization-scoped', async () => {
   let where;
   const handlers = await routes(screenRoutes, {
     screenCaptureMetadata: {
-      findMany: async args => {
-        where = args.where;
-        return [{ id: 'capture', organizationId: 'scope-a', deviceId: 'device', device: { userId: 'alice' } }];
-      },
-      findUnique: async () => ({ id: 'capture', organizationId: 'scope-a', deviceId: 'device', device: { userId: 'bob' } }),
+      findMany: async (args) => { where = args.where; return []; },
+      count: async () => 0,
     },
   });
-  const user = { id: 'alice', role: 'EMPLOYEE', organizationId: 'scope-a' };
-  const result = await handlers.get('get /screen/captures')({ user, query: {} }, reply());
-  assert.deepEqual(where, { organizationId: 'scope-a', device: { userId: 'alice' } });
-  assert.equal(result.totalCount, 1);
-  const denied = reply();
-  await handlers.get('get /screen/captures/:id')({ user, params: { id: 'capture' } }, denied);
-  assert.equal(denied.statusCode, 403);
-  const memoryHandlers = await routes(screenRoutes);
-  const memory = await memoryHandlers.get('get /screen/captures')({ user, query: {} }, reply());
-  assert.ok(memory.captures.every(c => c.organizationId === 'scope-a' && c.employeeId === 'alice'));
+
+  const employeeReply = reply();
+  await handlers.get('get /screen-monitoring/captures')({ user: { id: 'alice', role: 'EMPLOYEE', organizationId: 'scope-a' }, query: {} }, employeeReply);
+  assert.equal(employeeReply.statusCode, 403);
+
+  await handlers.get('get /screen-monitoring/captures')({ user: { id: 'admin', email: 'admin@example.test', role: 'ADMIN', organizationId: 'scope-a' }, query: {} }, reply());
+  assert.equal(where.organizationId, 'scope-a');
+  assert.ok(where.expiresAt?.gt instanceof Date);
+
   const superUser = { id: 'super', role: 'SUPER_ADMIN', organizationId: 'scope-a' };
-  for (const registered of [handlers, memoryHandlers]) {
-    const missing = reply();
-    await registered.get('get /screen/captures')({ user: superUser, query: {} }, missing);
-    assert.equal(missing.statusCode, 400);
-    assert.equal(missing.body.error.code, 'ORGANIZATION_REQUIRED');
-  }
-  await handlers.get('get /screen/captures')({ user: superUser, query: { organizationId: 'scope-a' } }, reply());
-  assert.deepEqual(where, { organizationId: 'scope-a' });
-  for (const query of [{}, { organizationId: 'scope-b' }]) {
-    const deniedScope = reply();
-    await handlers.get('get /screen/captures/:id')({ user: superUser, params: { id: 'capture' }, query }, deniedScope);
-    assert.equal(deniedScope.statusCode, 403);
-  }
-  const allowed = await handlers.get('get /screen/captures/:id')({ user: superUser, params: { id: 'capture' }, query: { organizationId: 'scope-a' } }, reply());
-  assert.equal(allowed.success, true);
+  const missing = reply();
+  await handlers.get('get /screen-monitoring/captures')({ user: superUser, query: {} }, missing);
+  assert.equal(missing.statusCode, 400);
+  assert.equal(missing.body.error.code, 'ORGANIZATION_SCOPE_REQUIRED');
+
+  await handlers.get('get /screen-monitoring/captures')({ user: superUser, query: { organizationId: 'scope-b' } }, reply());
+  assert.equal(where.organizationId, 'scope-b');
+  assert.ok(where.expiresAt?.gt instanceof Date);
 });

@@ -120,6 +120,19 @@ function nextScheduleStart(user, now) {
   return null;
 }
 
+export function evaluateSchedulePolicy(schedule, now = new Date()) {
+  const candidate = {
+    shiftStart: schedule?.shiftStart,
+    shiftEnd: schedule?.shiftEnd,
+    workingDays: schedule?.workingDays,
+    organization: { timezone: schedule?.timezone },
+  };
+  if (!validSchedule(candidate)) return { allowed: false, reason: 'SCREEN_SCHEDULE_NOT_CONFIGURED', allowedUntil: null, nextCheckAt: null };
+  const window = activeWindow(candidate, now);
+  if (!window) return { allowed: false, reason: 'OUTSIDE_SCREEN_MONITORING_SCHEDULE', allowedUntil: null, nextCheckAt: nextScheduleStart(candidate, now) };
+  return { allowed: true, reason: null, allowedUntil: window.end, nextCheckAt: window.end };
+}
+
 export function getMonitoringAuthorization(user, now = new Date()) {
   const denied = (reason, extra = {}) => ({
     allowed: false,

@@ -15,11 +15,14 @@ const fallback = target === 'production' ? env.EXTENSION_BACKEND_URL : 'http://1
 const value = process.env[envName] || env[envName] || fallback;
 if (!value) throw new Error(`Set ${envName} in backend/.env before building the ${target} extension.`);
 const origin = normalizeBackendUrl(value);
-writeFileSync(path.join(root, 'apps/browser-extension/shared/deployment.js'),
+if (target === 'production' && (new URL(origin).protocol !== 'https:' || ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname))) throw new Error('Production requires a non-loopback HTTPS backend.');
+const outputArg = process.argv.find((value) => value.startsWith('--output-dir='));
+const outputDir = outputArg ? path.resolve(outputArg.slice('--output-dir='.length)) : path.join(root, 'apps/browser-extension');
+writeFileSync(path.join(outputDir, 'shared/deployment.js'),
   `// Generated public configuration. No secrets.\nexport const DEPLOYMENT = ${JSON.stringify(target)};\nexport const BACKEND_URL = ${JSON.stringify(origin)};\n`);
-const manifestPath = path.join(root, 'apps/browser-extension/manifest.json');
+const manifestPath = path.join(outputDir, 'manifest.json');
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 manifest.host_permissions = [`${origin}/*`];
-delete manifest.optional_host_permissions;
+manifest.optional_host_permissions = ['<all_urls>'];
 writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 console.log(`Extension configured for ${target}: ${origin}`);
