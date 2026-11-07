@@ -209,12 +209,21 @@ test('hidden, inactive, incognito, navigating and minimized targets fail closed'
     chromeApi.tabs.captureVisibleTab = () => assert.fail('must not capture');
     assert.equal((await client.captureAuthorizedActiveTab()).success, false);
   }
-  for (const window of [{ focused: false }, { state: 'minimized' }, { state: 'fullscreen' }, { incognito: true }]) {
+  for (const window of [{ focused: false }, { state: 'minimized' }, { incognito: true }]) {
     const { client, chromeApi } = setup();
     chromeApi.windows.getLastFocused = async () => ({ id: 7, focused: true, type: 'normal', ...window });
     chromeApi.tabs.captureVisibleTab = () => assert.fail('must not capture');
     assert.equal((await client.captureAuthorizedActiveTab()).success, false);
   }
+});
+
+test('a focused fullscreen normal window remains eligible for visible-tab capture', async () => {
+  const { client, chromeApi } = setup();
+  chromeApi.windows.getLastFocused = async (options) => {
+    assert.deepEqual(options, { populate: true });
+    return { id: 7, focused: true, state: 'fullscreen', type: 'normal', incognito: false };
+  };
+  assert.equal((await client.captureAuthorizedActiveTab()).success, true);
 });
 
 test('unpinned toolbar, badge failure or policy fetch failure clears indicator and prevents capture', async () => {

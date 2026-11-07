@@ -105,13 +105,48 @@ async function fetchPolicy({ chromeApi, fetchImpl, config, stored }) {
 }
 
 async function activeVisibleTab(chromeApi) {
-  const focusedWindow = await chromeApi.windows.getLastFocused();
-  if (!focusedWindow?.focused || ['minimized', 'fullscreen'].includes(focusedWindow.state) || focusedWindow.type !== 'normal' || focusedWindow.incognito) throw new Error('BROWSER_WINDOW_NOT_VISIBLE');
-  if (chromeApi.idle?.queryState && await chromeApi.idle.queryState(60) !== 'active') throw new Error('BROWSER_WINDOW_NOT_ACTIVE');
-  const tabs = await chromeApi.tabs.query({ active: true, lastFocusedWindow: true });
+  const focusedWindow = await chromeApi.windows.getLastFocused({ populate: true });
+
+  if (
+    !focusedWindow ||
+    !focusedWindow.focused ||
+    focusedWindow.state === 'minimized' ||
+    focusedWindow.type !== 'normal' ||
+    focusedWindow.incognito
+  ) {
+    throw new Error('BROWSER_WINDOW_NOT_VISIBLE');
+  }
+
+  if (
+    chromeApi.idle?.queryState &&
+    await chromeApi.idle.queryState(60) !== 'active'
+  ) {
+    throw new Error('BROWSER_WINDOW_NOT_ACTIVE');
+  }
+
+  const tabs = await chromeApi.tabs.query({
+    active: true,
+    lastFocusedWindow: true
+  });
+
   const tab = tabs?.[0];
-  if (!tab?.id || tab.incognito || tab.active !== true || tab.windowId !== focusedWindow.id || tab.discarded || tab.hidden || tab.pendingUrl) throw new Error('ACTIVE_TAB_NOT_ELIGIBLE');
-  if (!/^https?:\/\//i.test(tab.url || '')) throw new Error('ACTIVE_TAB_NOT_ELIGIBLE');
+
+  if (
+    !tab?.id ||
+    tab.incognito ||
+    tab.active !== true ||
+    tab.windowId !== focusedWindow.id ||
+    tab.discarded ||
+    tab.hidden ||
+    tab.pendingUrl
+  ) {
+    throw new Error('ACTIVE_TAB_NOT_ELIGIBLE');
+  }
+
+  if (!/^https?:\/\//i.test(tab.url || '')) {
+    throw new Error('ACTIVE_TAB_NOT_ELIGIBLE');
+  }
+
   return tab;
 }
 

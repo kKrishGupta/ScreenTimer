@@ -104,7 +104,7 @@ export default function ScreenMonitoringPage() {
           </label>
           <label className="text-sm text-slate-300">Capture interval
             <select value={form.captureIntervalSeconds} onChange={(event) => setForm({ ...form, captureIntervalSeconds: event.target.value })} className="mt-1 w-full rounded-lg border border-white/10 bg-surface-950 px-3 py-2">
-              {[300, 600, 900, 1800, 3600].map((seconds) => <option key={seconds} value={seconds}>Every {seconds / 60} minutes</option>)}
+              {[60, 300, 600, 900, 1800, 3600].map((seconds) => <option key={seconds} value={seconds}>Every {seconds / 60} minutes</option>)}
             </select>
           </label>
           <label className="text-sm text-slate-300">Retention days

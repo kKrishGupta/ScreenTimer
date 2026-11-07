@@ -14,7 +14,9 @@
   "host_permissions": [
     "http://127.0.0.1:3001/*"
   ],
-  "optional_host_permissions": ["<all_urls>"],
+  "optional_host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"

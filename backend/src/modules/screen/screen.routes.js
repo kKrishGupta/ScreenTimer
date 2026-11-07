@@ -208,7 +208,7 @@ export default async function screenRoutes(fastify) {
     if (
       typeof body.enabled !== 'boolean' ||
       !Number.isInteger(interval) ||
-      interval < 300 ||
+      interval < 60 ||
       interval > 3600 ||
       !Number.isInteger(retention) ||
       retention < 1 ||
