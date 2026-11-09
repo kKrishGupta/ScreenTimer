@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Website Blocked — DigitalPulse</title>
+    <link rel="stylesheet" href="blocked.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="card" role="alert" aria-labelledby="blocked-title">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">DP</div>
+          <span class="brand-name">DigitalPulse Policy Enforcement</span>
+        </div>
+
+        <h1 id="blocked-title" class="title">Website restricted by organization policy</h1>
+        <p class="subtitle">
+          Access to <strong id="blocked-domain">this website</strong> is currently blocked on this enrolled work browser.
+        </p>
+
+        <dl class="meta-grid">
+          <div class="meta-item">
+            <dt>Restricted domain</dt>
+            <dd id="meta-domain">—</dd>
+          </div>
+          <div class="meta-item">
+            <dt>Policy rule</dt>
+            <dd id="meta-policy">Organization website blocking policy</dd>
+          </div>
+          <div class="meta-item meta-full">
+            <dt>Requested address</dt>
+            <dd id="meta-url">—</dd>
+          </div>
+        </dl>
+
+        <p id="status-message" class="status-message" hidden></p>
+
+        <div class="actions">
+          <button id="retry-btn" type="button" class="btn-primary">
+            Re-check policy &amp; return to site
+          </button>
+        </div>
+
+        <p class="footnote">
+          If an administrator removes this restriction, this page will automatically restore access or you can re-check policy above.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="blocked.js"></script>
+  </body>
+</html>
+

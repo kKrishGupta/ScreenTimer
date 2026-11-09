@@ -7,6 +7,8 @@ import {
   enforceBlockedTabs,
   markTabBlockedByDnr,
   handleBlockedNavigationCompleted,
+  handleTabLoading,
+  isUrlBlockedByCurrentRules,
   clearBlockedTabEnforcementState,
 } from './policy-sync.js';
 import { createSyncClient } from './sync-client.js';
@@ -201,15 +203,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === 'refresh_status') {
     withRuntime(async ({ refreshAuthorizedActiveTab }) => { const heartbeat = await sendHeartbeat(); await applyMonitoringState(heartbeat.monitoring || {}); await refreshAuthorizedActiveTab(); sendResponse({ heartbeat }); }).catch((error) => sendResponse({ error: error.message })); return true;
   }
+  if (message.action === 'check_url_blocked') {
+    isUrlBlockedByCurrentRules(chrome, message.url)
+      .then((blocked) => sendResponse({ ok: true, blocked }))
+      .catch((error) => sendResponse({ ok: false, blocked: false, error: error.message || String(error) }));
+    return true;
+  }
+  if (message.action === 'record_blocked_navigation') {
+    recordBlockedAttempt({
+      frameId: 0,
+      error: 'net::ERR_BLOCKED_BY_CLIENT',
+      url: message.url,
+    })
+      .then(() => flushBlockedAttempts())
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
   return false;
 });
 
 function handleBrowserTransition() {
+  void enforceBlockedTabs(chrome).catch((error) => console.debug('[DigitalPulse] Active tab policy check:', error.message));
   void withRuntime(({ refreshAuthorizedActiveTab }) => refreshAuthorizedActiveTab())
     .catch((error) => console.debug('[DigitalPulse] Tab transition failed:', error.message));
 }
 chrome.tabs.onActivated.addListener(handleBrowserTransition);
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'loading') {
+    void handleTabLoading(chrome, tabId, changeInfo, tab).catch((error) => console.debug('[DigitalPulse] Tab loading state:', error.message));
+  }
   if (changeInfo.url || changeInfo.status === 'complete') {
     void enforceBlockedTabs(chrome).catch((error) => console.debug('[DigitalPulse] Tab policy enforcement:', error.message));
   }

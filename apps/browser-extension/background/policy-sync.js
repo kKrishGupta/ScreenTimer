@@ -2,6 +2,7 @@ import { CONFIG } from '../shared/constants.js';
 import { resolveBackendUrl } from '../shared/backend-settings.js';
 
 export const ENFORCED_TABS_STORAGE_KEY = 'dp_enforced_blocked_tabs';
+export const BLOCKED_PAGE_PATH = 'popup/blocked.html';
 
 const enforcementStateByChrome = new WeakMap();
 
@@ -198,15 +199,108 @@ function buildEnforcementKey(tabUrl, matchingRules) {
   return `${tabUrl}\n\n${ruleSignature}`;
 }
 
+function describePolicyRule(matchingRules, fallbackDomain) {
+  for (const rule of matchingRules || []) {
+    const cond = rule?.condition || {};
+    if (typeof cond.urlFilter === 'string' && cond.urlFilter.trim()) {
+      return cond.urlFilter.trim().replace(/^\|\|/, '').replace(/\^$/, '');
+    }
+    const domainList = Array.isArray(cond.requestDomains)
+      ? cond.requestDomains
+      : Array.isArray(cond.domains)
+        ? cond.domains
+        : [];
+    if (domainList.length > 0) {
+      return normalizeDomainPattern(domainList[0]) || fallbackDomain;
+    }
+  }
+  return fallbackDomain || 'Organization website policy';
+}
+
+export function buildBlockedPageUrl(chromeApi, rawUrl, matchingRules = []) {
+  if (typeof chromeApi?.runtime?.getURL !== 'function') return null;
+  let baseUrl;
+  try {
+    baseUrl = chromeApi.runtime.getURL(BLOCKED_PAGE_PATH);
+  } catch {
+    return null;
+  }
+  if (!baseUrl || typeof baseUrl !== 'string') return null;
+
+  let domain = '';
+  try {
+    domain = new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    domain = '';
+  }
+  const policyLabel = describePolicyRule(matchingRules, domain);
+  const params = new URLSearchParams();
+  if (domain) params.set('domain', domain);
+  if (policyLabel) params.set('policy', policyLabel);
+  if (rawUrl) params.set('url', rawUrl);
+  const query = params.toString();
+  return query ? `${baseUrl}?${query}` : baseUrl;
+}
+
+export function extractOriginalUrlFromBlockedPage(chromeApi, rawTabUrl) {
+  if (!rawTabUrl || typeof rawTabUrl !== 'string') return null;
+  let parsed;
+  try {
+    parsed = new URL(rawTabUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'chrome-extension:' && parsed.protocol !== 'extension:') {
+    return null;
+  }
+  if (typeof chromeApi?.runtime?.getURL === 'function') {
+    try {
+      const expectedBase = new URL(chromeApi.runtime.getURL(BLOCKED_PAGE_PATH));
+      if (parsed.origin !== expectedBase.origin || parsed.pathname !== expectedBase.pathname) {
+        return null;
+      }
+    } catch {
+      if (!parsed.pathname.endsWith(`/${BLOCKED_PAGE_PATH}`)) return null;
+    }
+  } else if (!parsed.pathname.endsWith(`/${BLOCKED_PAGE_PATH}`)) {
+    return null;
+  }
+
+  const original = parsed.searchParams.get('url');
+  if (!original || !/^https?:\/\//i.test(original)) return null;
+  return original;
+}
+
+export async function isUrlBlockedByCurrentRules(chromeApi, rawUrl, rules = null) {
+  if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) return false;
+  let effectiveRules = rules;
+  if (!Array.isArray(effectiveRules)) {
+    if (typeof chromeApi?.declarativeNetRequest?.getDynamicRules !== 'function') {
+      return false;
+    }
+    effectiveRules = await chromeApi.declarativeNetRequest.getDynamicRules();
+  }
+  const activeBlockingRules = effectiveRules.filter((rule) => getBlockingRuleKey(rule) !== null);
+  if (activeBlockingRules.length === 0) return false;
+  const matched = await findMatchingBlockingRules(chromeApi, activeBlockingRules, rawUrl);
+  return matched.length > 0;
+}
+
 /**
  * Reconciles open tabs against active DNR blocking rules.
- * Always reloads matching un-enforced tabs with `{ bypassCache: true }` so
- * service-worker-controlled pages (such as YouTube's sw.js app shell) cannot
- * serve cached content and bypass declarativeNetRequest.
+ * When a tab is still displaying restricted content (already-open tab, tab
+ * activation, or Service Worker cached shell such as YouTube's sw.js),
+ * transitions the tab to the extension-owned blocked page (`popup/blocked.html`)
+ * so the site's Service Worker cannot intercept the navigation, falling back to
+ * `tabs.reload(tabId, { bypassCache: true })` when `tabs.update`/`runtime.getURL`
+ * are unavailable. Also restores open extension blocked pages when a policy is
+ * removed.
  */
 export async function enforceBlockedTabs(chromeApi, rules = null) {
-  if (!chromeApi?.tabs?.query || !chromeApi?.tabs?.reload) {
-    return { reloadedTabIds: [], failedTabIds: [] };
+  const canUpdateTab = typeof chromeApi?.tabs?.update === 'function' && typeof chromeApi?.runtime?.getURL === 'function';
+  const canReloadTab = typeof chromeApi?.tabs?.reload === 'function';
+  if (!chromeApi?.tabs?.query || (!canUpdateTab && !canReloadTab)) {
+    return { reloadedTabIds: [], transitionedTabIds: [], restoredTabIds: [], failedTabIds: [] };
   }
 
   const state = getEnforcementState(chromeApi);
@@ -215,32 +309,37 @@ export async function enforceBlockedTabs(chromeApi, rules = null) {
   let effectiveRules = rules;
   if (!Array.isArray(effectiveRules)) {
     if (typeof chromeApi?.declarativeNetRequest?.getDynamicRules !== 'function') {
-      return { reloadedTabIds: [], failedTabIds: [] };
+      return { reloadedTabIds: [], transitionedTabIds: [], restoredTabIds: [], failedTabIds: [] };
     }
     effectiveRules = await chromeApi.declarativeNetRequest.getDynamicRules();
   }
 
   const activeBlockingRules = effectiveRules.filter((rule) => getBlockingRuleKey(rule) !== null);
-  if (activeBlockingRules.length === 0) {
-    const hadEntries = state.enforcedTabKeys.size > 0;
-    state.enforcedTabKeys.clear();
-    state.failedTabIds.clear();
-    state.activeBypassReloads.clear();
-    if (hadEntries) await persistEnforcementState(chromeApi, state);
-    return { reloadedTabIds: [], failedTabIds: [] };
-  }
-
   const activeRuleKeys = new Set(activeBlockingRules.map(getBlockingRuleKey).filter(Boolean));
   let stateChanged = false;
 
-  for (const [tabId, signature] of state.enforcedTabKeys.entries()) {
-    const [, ruleSignature = ''] = String(signature).split('\n\n');
-    const keys = ruleSignature.split('\n').filter(Boolean);
-    if (!keys.some((key) => activeRuleKeys.has(key))) {
-      state.enforcedTabKeys.delete(tabId);
-      state.activeBypassReloads.delete(tabId);
+  if (activeBlockingRules.length === 0) {
+    if (state.enforcedTabKeys.size > 0) {
+      state.enforcedTabKeys.clear();
       stateChanged = true;
     }
+    state.failedTabIds.clear();
+    state.activeBypassReloads.clear();
+  } else {
+    for (const [tabId, signature] of state.enforcedTabKeys.entries()) {
+      const [, ruleSignature = ''] = String(signature).split('\n\n');
+      const keys = ruleSignature.split('\n').filter(Boolean);
+      if (!keys.some((key) => activeRuleKeys.has(key))) {
+        state.enforcedTabKeys.delete(tabId);
+        state.activeBypassReloads.delete(tabId);
+        stateChanged = true;
+      }
+    }
+  }
+
+  if (activeBlockingRules.length === 0 && !canUpdateTab) {
+    if (stateChanged) await persistEnforcementState(chromeApi, state);
+    return { reloadedTabIds: [], transitionedTabIds: [], restoredTabIds: [], failedTabIds: [] };
   }
 
   let tabs = [];
@@ -248,11 +347,13 @@ export async function enforceBlockedTabs(chromeApi, rules = null) {
     tabs = await chromeApi.tabs.query({});
   } catch {
     if (stateChanged) await persistEnforcementState(chromeApi, state);
-    return { reloadedTabIds: [], failedTabIds: [] };
+    return { reloadedTabIds: [], transitionedTabIds: [], restoredTabIds: [], failedTabIds: [] };
   }
 
   const openTabIds = new Set();
   const reloadedTabIds = [];
+  const transitionedTabIds = [];
+  const restoredTabIds = [];
   const failedTabIds = [];
 
   for (const tab of Array.isArray(tabs) ? tabs : []) {
@@ -260,7 +361,34 @@ export async function enforceBlockedTabs(chromeApi, rules = null) {
     openTabIds.add(tab.id);
 
     const tabUrl = tab.url || tab.pendingUrl || '';
+    const originalBlockedUrl = extractOriginalUrlFromBlockedPage(chromeApi, tabUrl);
+    if (originalBlockedUrl) {
+      const stillBlockedRules =
+        activeBlockingRules.length > 0
+          ? await findMatchingBlockingRules(chromeApi, activeBlockingRules, originalBlockedUrl)
+          : [];
+      if (stillBlockedRules.length === 0 && canUpdateTab) {
+        try {
+          await chromeApi.tabs.update(tab.id, { url: originalBlockedUrl });
+          restoredTabIds.push(tab.id);
+        } catch {
+          // Best-effort tab restoration after policy removal.
+        }
+      }
+      if (state.enforcedTabKeys.delete(tab.id)) stateChanged = true;
+      state.failedTabIds.delete(tab.id);
+      state.activeBypassReloads.delete(tab.id);
+      continue;
+    }
+
     if (!/^https?:\/\//i.test(tabUrl)) {
+      if (state.enforcedTabKeys.delete(tab.id)) stateChanged = true;
+      state.failedTabIds.delete(tab.id);
+      state.activeBypassReloads.delete(tab.id);
+      continue;
+    }
+
+    if (activeBlockingRules.length === 0) {
       if (state.enforcedTabKeys.delete(tab.id)) stateChanged = true;
       state.failedTabIds.delete(tab.id);
       state.activeBypassReloads.delete(tab.id);
@@ -280,8 +408,15 @@ export async function enforceBlockedTabs(chromeApi, rules = null) {
 
     if (!alreadyEnforced) {
       try {
-        state.activeBypassReloads.set(tab.id, enforcementKey);
-        await chromeApi.tabs.reload(tab.id, { bypassCache: true });
+        const blockedPageUrl = canUpdateTab ? buildBlockedPageUrl(chromeApi, tabUrl, matchingRules) : null;
+        if (blockedPageUrl && typeof chromeApi.tabs?.update === 'function') {
+          state.activeBypassReloads.delete(tab.id);
+          await chromeApi.tabs.update(tab.id, { url: blockedPageUrl });
+          transitionedTabIds.push(tab.id);
+        } else {
+          state.activeBypassReloads.set(tab.id, enforcementKey);
+          await chromeApi.tabs.reload(tab.id, { bypassCache: true });
+        }
         state.enforcedTabKeys.set(tab.id, enforcementKey);
         state.failedTabIds.delete(tab.id);
         stateChanged = true;
@@ -310,7 +445,28 @@ export async function enforceBlockedTabs(chromeApi, rules = null) {
     await persistEnforcementState(chromeApi, state);
   }
 
-  return { reloadedTabIds, failedTabIds };
+  return { reloadedTabIds, transitionedTabIds, restoredTabIds, failedTabIds };
+}
+
+/**
+ * Clears any stale enforcement marker when a tab starts a fresh navigation so
+ * that if a website's Service Worker serves cached content instead of failing
+ * with `net::ERR_BLOCKED_BY_CLIENT`, completion handlers immediately transition
+ * the tab to the extension-owned blocked page.
+ */
+export async function handleTabLoading(chromeApi, tabId, changeInfo, tab) {
+  if (!chromeApi || changeInfo?.status !== 'loading') return;
+  if (!Number.isInteger(tabId) || tabId < 0) return;
+  const candidateUrl = changeInfo.url || tab?.url || tab?.pendingUrl || '';
+  if (extractOriginalUrlFromBlockedPage(chromeApi, candidateUrl)) return;
+
+  const state = getEnforcementState(chromeApi);
+  await hydrateEnforcementState(chromeApi, state);
+  if (state.activeBypassReloads.has(tabId)) return;
+
+  if (state.enforcedTabKeys.delete(tabId)) {
+    await persistEnforcementState(chromeApi, state);
+  }
 }
 
 /**

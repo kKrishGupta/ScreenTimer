@@ -5,9 +5,13 @@ import {
   syncBlockingRulesWithStatus,
   enforceBlockedTabs,
   handleBlockedNavigationCompleted,
+  handleTabLoading,
   markTabBlockedByDnr,
   clearBlockedTabEnforcementState,
   doesRuleBlockUrl,
+  buildBlockedPageUrl,
+  extractOriginalUrlFromBlockedPage,
+  isUrlBlockedByCurrentRules,
   ENFORCED_TABS_STORAGE_KEY,
 } from '../background/policy-sync.js';
 
@@ -413,4 +417,139 @@ test('domain and exclusion matching respects DNR semantics and rejects lookalike
     condition: { urlFilter: '||youtube.com', excludedResourceTypes: ['main_frame'] },
   };
   assert.equal(doesRuleBlockUrl(excludedMainFrameRule, 'https://www.youtube.com/'), false);
+});
+
+test('transitions Service Worker-controlled YouTube tab to extension-owned blocked page and restores on unblock without redirect loops', async () => {
+  const youtubeRule = {
+    id: 501,
+    action: { type: 'block' },
+    condition: { urlFilter: '||youtube.com', resourceTypes: ['main_frame'] },
+  };
+  let dynamicRules = [youtubeRule];
+  const tabState = {
+    id: 77,
+    url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    status: 'complete',
+  };
+  const updatedTabs = [];
+  const reloadedTabs = [];
+
+  const chromeApi = {
+    runtime: {
+      getURL(path) {
+        return `chrome-extension://abcdefghijklmnop/${path}`;
+      },
+    },
+    declarativeNetRequest: {
+      async getDynamicRules() {
+        return dynamicRules;
+      },
+    },
+    tabs: {
+      async query() {
+        return [{ ...tabState }];
+      },
+      async update(tabId, props) {
+        updatedTabs.push({ tabId, props });
+        if (props.url) tabState.url = props.url;
+        return { ...tabState };
+      },
+      async reload(tabId, props) {
+        reloadedTabs.push({ tabId, props });
+      },
+    },
+  };
+
+  // 1. Open or Service-Worker-served YouTube tab is transitioned to extension-owned blocked page
+  const firstEnforcement = await enforceBlockedTabs(chromeApi);
+  assert.deepEqual(firstEnforcement.transitionedTabIds, [77]);
+  assert.equal(updatedTabs.length, 1);
+  assert.equal(reloadedTabs.length, 0);
+  assert.match(updatedTabs[0].props.url, /^chrome-extension:\/\/abcdefghijklmnop\/popup\/blocked\.html\?/);
+  assert.equal(
+    extractOriginalUrlFromBlockedPage(chromeApi, tabState.url),
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  );
+  assert.equal(await isUrlBlockedByCurrentRules(chromeApi, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'), true);
+
+  // 2. Repeated enforcement while on popup/blocked.html does not cause a redirect loop
+  const secondEnforcement = await enforceBlockedTabs(chromeApi);
+  assert.deepEqual(secondEnforcement.transitionedTabIds, []);
+  assert.deepEqual(secondEnforcement.restoredTabIds, []);
+  assert.equal(updatedTabs.length, 1);
+
+  // 3. Removing the YouTube policy restores the blocked tab to the original YouTube URL
+  dynamicRules = [];
+  assert.equal(await isUrlBlockedByCurrentRules(chromeApi, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'), false);
+  const unblockEnforcement = await enforceBlockedTabs(chromeApi, []);
+  assert.deepEqual(unblockEnforcement.restoredTabIds, [77]);
+  assert.equal(tabState.url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+
+  // 4. Re-enabling the policy transitions the YouTube tab back to the blocked page immediately
+  dynamicRules = [youtubeRule];
+  const reblockEnforcement = await enforceBlockedTabs(chromeApi, [youtubeRule]);
+  assert.deepEqual(reblockEnforcement.transitionedTabIds, [77]);
+  assert.match(tabState.url, /^chrome-extension:\/\/abcdefghijklmnop\/popup\/blocked\.html\?/);
+});
+
+test('handleTabLoading + handleBlockedNavigationCompleted intercepts YouTube Service Worker cached navigation', async () => {
+  const youtubeRule = {
+    id: 601,
+    action: { type: 'block' },
+    condition: { urlFilter: '||youtube.com', resourceTypes: ['main_frame'] },
+  };
+  const tabState = {
+    id: 88,
+    url: 'https://www.youtube.com/',
+    status: 'complete',
+  };
+  const updatedTabs = [];
+
+  const chromeApi = {
+    runtime: {
+      getURL(path) {
+        return `chrome-extension://abcdefghijklmnop/${path}`;
+      },
+    },
+    declarativeNetRequest: {
+      async getDynamicRules() {
+        return [youtubeRule];
+      },
+    },
+    tabs: {
+      async query() {
+        return [{ ...tabState }];
+      },
+      async update(tabId, props) {
+        updatedTabs.push({ tabId, props });
+        if (props.url) tabState.url = props.url;
+        return { ...tabState };
+      },
+      async reload() {},
+    },
+  };
+
+  // Suppose tab 88 previously had a native DNR block recorded
+  await markTabBlockedByDnr(chromeApi, {
+    tabId: 88,
+    frameId: 0,
+    url: 'https://www.youtube.com/',
+    error: 'net::ERR_BLOCKED_BY_CLIENT',
+  });
+
+  // User navigates to https://www.youtube.com/ again; YouTube's sw.js intercepts
+  // the fetch and serves cached HTML (200 OK from Service Worker) without firing onErrorOccurred.
+  await handleTabLoading(chromeApi, 88, { status: 'loading' }, tabState);
+  const completionResult = await handleBlockedNavigationCompleted(chromeApi, {
+    tabId: 88,
+    frameId: 0,
+    url: 'https://www.youtube.com/',
+  });
+
+  assert.deepEqual(completionResult.transitionedTabIds, [88]);
+  assert.equal(updatedTabs.length, 1);
+  assert.equal(
+    updatedTabs[0].props.url,
+    buildBlockedPageUrl(chromeApi, 'https://www.youtube.com/', [youtubeRule]),
+  );
 });
