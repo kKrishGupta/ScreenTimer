@@ -33,6 +33,18 @@ describe('employee wellbeing authorization', () => {
       },
     ];
 
+    employees.push({
+      id: 'charlie',
+      organizationId: orgA,
+      role: 'EMPLOYEE',
+      displayName: 'Charlie',
+      email: 'charlie@example.test',
+      employmentStatus: 'active',
+      monitoringAuthorized: true,
+      createdAt: new Date(),
+      devices: [],
+    });
+
     let organizationQueries = 0;
 
     const prisma = {
@@ -73,6 +85,34 @@ describe('employee wellbeing authorization', () => {
         organizationId: orgA,
       });
 
+      const employeeSession = await app.authService.createTestSession({
+        userId: 'alice',
+        email: 'alice@example.test',
+        role: 'EMPLOYEE',
+        organizationId: orgA,
+      });
+
+      const employeeSelf = await app.inject({
+        method: 'GET',
+        url: '/api/v1/employees/alice',
+        headers: employeeSession.headers,
+      });
+      assert.equal(employeeSelf.statusCode, 200, employeeSelf.body);
+
+      const employeeSameTenant = await app.inject({
+        method: 'GET',
+        url: '/api/v1/employees/charlie',
+        headers: employeeSession.headers,
+      });
+      assert.equal(employeeSameTenant.statusCode, 403, employeeSameTenant.body);
+
+      const employeeOtherTenant = await app.inject({
+        method: 'GET',
+        url: '/api/v1/employees/bob',
+        headers: employeeSession.headers,
+      });
+      assert.equal(employeeOtherTenant.statusCode, 404, employeeOtherTenant.body);
+
       const adminOrganizations = await app.inject({
         method: 'GET',
         url: '/api/v1/organizations',
@@ -107,7 +147,7 @@ describe('employee wellbeing authorization', () => {
       assert.equal(adminEmployees.statusCode, 200, adminEmployees.body);
       assert.deepEqual(
         adminEmployees.json().employees.map((item) => item.id),
-        ['alice']
+        ['alice', 'charlie']
       );
 
       const missingScope = await app.inject({
