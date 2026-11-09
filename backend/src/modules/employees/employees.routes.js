@@ -287,6 +287,21 @@ export default async function employeeRoutes(fastify) {
     };
   });
 
+  // Organization selector for Super Admin employee wellbeing.
+  fastify.get('/organizations', async (req, reply) => {
+    if (normalizeRole(req.user?.role) !== Roles.SUPER_ADMIN) {
+      return reply.code(403).send({
+        error: { code: 'FORBIDDEN', message: 'Super Admin access required' },
+      });
+    }
+
+    const organizations = await prisma.organization.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+
+    return { organizations };
+  });
   // GET /api/v1/employees (Protected: User authentication, scoped by role & tenant)
   fastify.get('/employees', async (req, reply) => {
     const user = req.user;
@@ -297,6 +312,11 @@ export default async function employeeRoutes(fastify) {
     }
 
     const userRole = normalizeRole(user.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN, Roles.EMPLOYEE].includes(userRole)) {
+      return reply.code(403).send({
+        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' },
+      });
+    }
 
     const orgId =
       userRole === Roles.SUPER_ADMIN
@@ -368,6 +388,11 @@ export default async function employeeRoutes(fastify) {
 
     const { id } = req.params;
     const userRole = normalizeRole(user.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN, Roles.EMPLOYEE].includes(userRole)) {
+      return reply.code(403).send({
+        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' },
+      });
+    }
     const orgId =
       userRole === Roles.SUPER_ADMIN
         ? req.query?.organizationId

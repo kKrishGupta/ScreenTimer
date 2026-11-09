@@ -32,7 +32,7 @@ const CATEGORY_COLORS = {
 /**
  * Interactive SVG Donut Chart
  */
-function DonutChart({ items, totalSeconds, label, onSelect, selectedItem }) {
+export function DonutChart({ items, totalSeconds, label, onSelect, selectedItem }) {
   const [hoveredItem, setHoveredItem] = useState(null);
   const activeItem = hoveredItem || selectedItem || items[0] || null;
 

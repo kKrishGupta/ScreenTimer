@@ -22,6 +22,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 const NAV = [
   { to: '/organization', label: 'Overview', icon: GridIcon, end: true },
   { to: '/organization/employees', label: 'Employees', icon: UsersIcon },
+  { to: '/organization/employee-wellbeing', label: 'Employee Wellbeing', icon: HeartIcon },
   { to: '/organization/employee-setup', label: 'My Device', icon: DeviceIcon },
   { to: '/organization/devices', label: 'Organization Devices', icon: ScreenIcon },
   { to: '/organization/screen-monitoring', label: 'Screen Monitoring', icon: ScreenIcon },

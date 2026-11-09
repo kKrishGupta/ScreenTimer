@@ -6,6 +6,7 @@ import EmployeesPage from './pages/EmployeesPage.jsx';
 import DevicesPage from './pages/DevicesPage.jsx';
 import TimelinePage from './pages/TimelinePage.jsx';
 import DigitalWellbeingPage from './pages/DigitalWellbeingPage.jsx';
+import EmployeeWellbeingPage from './pages/EmployeeWellbeingPage.jsx';
 import ApplicationsPage from './pages/ApplicationsPage.jsx';
 import WebsitesPage from './pages/WebsitesPage.jsx';
 import ScreenMonitoringPage from './pages/ScreenMonitoringPage.jsx';
@@ -108,6 +109,7 @@ export default function App() {
         <Route path="organization" element={<OrganizationRoutes />}>
           <Route index element={<RoleHomePage />} />
           <Route path="employees" element={<EmployeesPage />} />
+          <Route path="employee-wellbeing" element={<EmployeeWellbeingPage />} />
           <Route path="employee-setup" element={<EmployeeSetupPage />} />
           <Route path="devices" element={<DevicesPage />} />
           <Route path="screen-monitoring" element={<ScreenMonitoringPage />} />

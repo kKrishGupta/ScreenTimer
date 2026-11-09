@@ -225,9 +225,10 @@ export const api = {
   completeBreak: (opts = {}) => postJson('/wellbeing/break/complete', {}, opts),
 
   // Enterprise Employee Management
+  organizations: (opts = {}) => getJson('/organizations', opts),
   employees: (params = {}, opts = {}) => getJson(`/employees${toQueryString(params)}`, opts),
   liveEmployees: (params = {}, opts = {}) => getJson(`/employees/live${toQueryString(params)}`, opts),
-  employee: (id, opts = {}) => getJson(`/employees/${id}`, opts),
+  employee: (id, opts = {}) => getJson(`/employees/${id}${toQueryString(opts.organizationId ? { organizationId: opts.organizationId } : {})}`, opts),
   employeeSetupReminder: (employeeId, opts = {}) => postJson(`/employees/${encodeURIComponent(employeeId)}/setup-reminder`, {}, opts),
   createEmployee: (emp, opts = {}) => postJson('/employees', emp, opts),
   updateEmployee: (id, updates, opts = {}) => patchJson(`/employees/${id}`, updates, opts),
