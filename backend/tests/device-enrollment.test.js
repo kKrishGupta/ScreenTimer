@@ -16,16 +16,25 @@ function fakePrisma() {
         return data;
       },
       findUnique: async ({ where }) => tokens.find((t) => t.tokenHash === where.tokenHash) || null,
+      findFirst: async ({ where }) => tokens.find((t) => t.id === where.id && t.organizationId === where.organizationId) || null,
       updateMany: async ({ where, data }) => {
-        const token = tokens.find((item) => item.tokenHash === where.tokenHash && !item.usedAt && !item.revokedAt && item.expiresAt > where.expiresAt.gt);
+        const token = tokens.find((item) => {
+          if (where.id) return item.id === where.id && item.expiryRecordedAt == null;
+          return item.tokenHash === where.tokenHash && !item.usedAt && !item.revokedAt && item.expiresAt > where.expiresAt.gt;
+        });
         if (token) Object.assign(token, data);
         return { count: token ? 1 : 0 };
       },
       update: async ({ where, data }) => {
-        const t = tokens.find((item) => item.token === where.token);
+        const t = tokens.find((item) => (where.id && item.id === where.id) || (where.tokenHash && item.tokenHash === where.tokenHash) || (where.token && item.token === where.token));
         if (t) Object.assign(t, data);
         return t;
       },
+      findMany: async ({ where }) => tokens.filter((item) => (
+        item.organizationId === where.organizationId &&
+        (!where.userId || item.userId === where.userId) &&
+        !item.usedAt && !item.revokedAt && item.expiresAt > where.expiresAt.gt
+      )),
     },
     device: {
       create: async ({ data }) => {
@@ -247,6 +256,117 @@ describe('Secure Device Enrollment & Management (Milestone 3)', () => {
     });
     assert.equal(blockedBeat.statusCode, 403);
     assert.match(blockedBeat.json().error.message, /revoked/i);
+  });
+
+  it('records token accountability and rejects revoked and expired enrollment tokens', async () => {
+    const prisma = fakePrisma();
+    const service = new DeviceService(prisma);
+    const issued = await service.createEnrollmentToken({
+      organizationId: 'org-token-lifecycle',
+      deviceKind: 'DESKTOP_AGENT',
+      expiresInHours: 2,
+      createdByUserId: 'admin-token-creator',
+    });
+    assert.equal(prisma.__state.tokens[0].createdByUserId, 'admin-token-creator');
+    assert.equal(prisma.__state.tokens[0].maxUses, 1);
+    assert.equal(prisma.__state.tokens[0].useCount, 0);
+    assert.equal(prisma.__state.auditLogs[0].action, 'ENROLLMENT_TOKEN_CREATED');
+
+    await service.revokeEnrollmentToken(issued.tokenId, 'org-token-lifecycle', 'admin@example.test', 'admin-token-creator');
+    await assert.rejects(
+      service.enrollDevice({ token: issued.token, deviceId: '10000000-0000-4000-8000-000000000001' }),
+      /revoked/i,
+    );
+    assert.equal(prisma.__state.auditLogs.at(-1).action, 'ENROLLMENT_TOKEN_REVOKED');
+
+    const expired = await service.createEnrollmentToken({ organizationId: 'org-token-lifecycle', expiresInHours: 1 });
+    prisma.__state.tokens.at(-1).expiresAt = new Date(Date.now() - 1000);
+    await assert.rejects(
+      service.enrollDevice({ token: expired.token, deviceId: '10000000-0000-4000-8000-000000000002' }),
+      /expired/i,
+    );
+    assert.equal(prisma.__state.auditLogs.at(-1).action, 'ENROLLMENT_TOKEN_EXPIRED');
+  });
+
+  it('reconnects the same stable identity without creating a duplicate and rotates only that credential', async () => {
+    const prisma = fakePrisma();
+    const service = new DeviceService(prisma);
+    const identity = {
+      organizationId: 'org-stable-identity',
+      userId: 'employee-stable-identity',
+      deviceKind: 'BROWSER_EXTENSION',
+      expiresInHours: 4,
+    };
+    const deviceId = '20000000-0000-4000-8000-000000000001';
+    const firstToken = await service.createEnrollmentToken(identity);
+    const first = await service.enrollDevice({ token: firstToken.token, deviceId, browser: 'chrome', name: 'Work Chrome' });
+    const secondToken = await service.createEnrollmentToken(identity);
+    const second = await service.enrollDevice({ token: secondToken.token, deviceId, browser: 'chrome', name: 'Renamed Work Chrome' });
+
+    assert.equal(second.reconnected, true);
+    assert.equal(prisma.__state.devices.length, 1);
+    assert.equal(prisma.__state.devices[0].name, 'Renamed Work Chrome');
+    assert.equal((await service.validateDeviceCredentials(deviceId, first.deviceSecret)).valid, false);
+    assert.equal((await service.validateDeviceCredentials(deviceId, second.deviceSecret)).valid, true);
+    assert.ok(prisma.__state.auditLogs.some((entry) => entry.action === 'DEVICE_RECONNECTED'));
+    assert.ok(prisma.__state.auditLogs.some((entry) => entry.action === 'DEVICE_SECRET_ROTATED'));
+  });
+
+  it('enforces tenant-scoped archival, restoration and permanent revocation without deleting history', async () => {
+    const prisma = fakePrisma();
+    const service = new DeviceService(prisma);
+    const deviceId = '30000000-0000-4000-8000-000000000001';
+    const issued = await service.createEnrollmentToken({ organizationId: 'org-lifecycle-a', expiresInHours: 4 });
+    const enrolled = await service.enrollDevice({ token: issued.token, deviceId, name: 'Lifecycle PC' });
+
+    await assert.rejects(service.archiveDevice(deviceId, 'org-lifecycle-b'), /another organization/i);
+    await service.archiveDevice(deviceId, 'org-lifecycle-a', 'admin@example.test', 'Old device', 'admin-a');
+    assert.equal((await service.validateDeviceCredentials(deviceId, enrolled.deviceSecret)).code, 'DEVICE_ARCHIVED');
+    assert.equal((await service.listDevices('org-lifecycle-a')).length, 0);
+    assert.equal((await service.listDevices('org-lifecycle-a', null, { includeArchived: true }))[0].lifecycleStatus, 'ARCHIVED');
+
+    await service.restoreDevice(deviceId, 'org-lifecycle-a', 'admin@example.test', 'admin-a');
+    assert.equal((await service.validateDeviceCredentials(deviceId, enrolled.deviceSecret)).valid, true, 'restoring an archived device preserves its existing credential');
+    await service.revokeDevice(deviceId, 'org-lifecycle-a', 'admin@example.test', 'Employee offboarded', 'admin-a');
+    assert.equal(prisma.__state.devices.length, 1, 'lifecycle actions preserve the device and its historical relationships');
+    assert.equal(prisma.__state.devices[0].secretHash, null);
+    assert.equal((await service.validateDeviceCredentials(deviceId, enrolled.deviceSecret)).code, 'DEVICE_REVOKED');
+    await assert.rejects(service.restoreDevice(deviceId, 'org-lifecycle-a'), /revoked credential cannot be restored/i);
+    assert.ok(prisma.__state.auditLogs.some((entry) => entry.action === 'DEVICE_ARCHIVED'));
+    assert.ok(prisma.__state.auditLogs.some((entry) => entry.action === 'DEVICE_RESTORED'));
+    assert.ok(prisma.__state.auditLogs.some((entry) => entry.action === 'DEVICE_REVOKED' && entry.details.reason === 'Employee offboarded'));
+  });
+
+  it('enforces administrator RBAC and organization scope on lifecycle HTTP endpoints', async () => {
+    const prisma = fakePrisma();
+    const app = await buildApp({ config: loadConfig({ DATABASE_URL: 'postgresql://x:y@localhost:5433/dp' }), prisma, logger: false });
+    const deviceId = '40000000-0000-4000-8000-000000000001';
+    const issued = await app.deviceService.createEnrollmentToken({ organizationId: 'org-http-a', expiresInHours: 4 });
+    const enrolled = await app.deviceService.enrollDevice({ token: issued.token, deviceId });
+    const employee = await app.authService.createTestSession({ role: 'EMPLOYEE', organizationId: 'org-http-a' });
+    const otherAdmin = await app.authService.createTestSession({ role: 'ADMIN', organizationId: 'org-http-b' });
+    const admin = await app.authService.createTestSession({ role: 'ADMIN', organizationId: 'org-http-a' });
+
+    assert.equal((await app.inject({ method: 'POST', url: `/api/v1/devices/${deviceId}/archive`, headers: employee.headers })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'POST', url: `/api/v1/devices/${deviceId}/archive`, headers: otherAdmin.headers })).statusCode, 403);
+    assert.equal((await app.inject({ method: 'POST', url: `/api/v1/devices/${deviceId}/archive`, headers: admin.headers, payload: { reason: 'Replacement device' } })).statusCode, 200);
+
+    const normalList = await app.inject({ method: 'GET', url: '/api/v1/devices', headers: admin.headers });
+    assert.equal(normalList.json().devices.length, 0);
+    const archivedList = await app.inject({ method: 'GET', url: '/api/v1/devices?includeArchived=true', headers: admin.headers });
+    assert.equal(archivedList.json().devices[0].lifecycleStatus, 'ARCHIVED');
+    assert.equal((await app.inject({ method: 'POST', url: `/api/v1/devices/${deviceId}/restore`, headers: admin.headers })).statusCode, 200);
+
+    const revoked = await app.inject({ method: 'POST', url: `/api/v1/devices/${deviceId}/revoke`, headers: admin.headers, payload: { reason: 'Employee offboarded' } });
+    assert.equal(revoked.statusCode, 200, revoked.body);
+    const heartbeat = await app.inject({ method: 'POST', url: `/api/v1/devices/${deviceId}/heartbeat`, headers: { 'x-device-secret': enrolled.deviceSecret } });
+    assert.equal(heartbeat.statusCode, 403);
+
+    const pending = await app.deviceService.createEnrollmentToken({ organizationId: 'org-http-a', expiresInHours: 4 });
+    const tokenRevocation = await app.inject({ method: 'POST', url: `/api/v1/devices/enrollment-tokens/${pending.tokenId}/revoke`, headers: admin.headers });
+    assert.equal(tokenRevocation.statusCode, 200, tokenRevocation.body);
+    await assert.rejects(app.deviceService.enrollDevice({ token: pending.token, deviceId: '40000000-0000-4000-8000-000000000002' }), /revoked/i);
+    await app.close();
   });
 });
 

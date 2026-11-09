@@ -80,7 +80,7 @@ export default function BlockedActivityPage() {
     return <LoadingState label="Loading blocked website intelligence feed…" />;
   }
 
-  if (error) {
+  if (error && !violationsData) {
     return <ErrorState error={error} onRetry={reload} />;
   }
 

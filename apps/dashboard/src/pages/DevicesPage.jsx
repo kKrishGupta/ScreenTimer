@@ -5,6 +5,7 @@ import { useApi } from '../hooks/useApi.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/States.jsx';
+import DeviceLifecycleManager from '../components/devices/DeviceLifecycleManager.jsx';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DEFAULT_WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
@@ -39,7 +40,11 @@ function reasonText(reason) {
 
 export default function DevicesPage() {
   const { user } = useAuth();
-  const fetchDevices = useCallback((opts) => api.devices(opts), []);
+  const isEmployee = roleIs(user?.role, 'EMPLOYEE');
+  const isOrgAdmin = roleIs(user?.role, 'ADMIN');
+  const fetchDevices = useCallback((opts) => isOrgAdmin
+    ? api.deviceDirectory({ includeArchived: true }, opts)
+    : api.devices(opts), [isOrgAdmin]);
   const fetchMonitoring = useCallback((opts) => api.myMonitoringStatus(opts), []);
   const { data, error, loading, reload } = useApi(fetchDevices, { intervalMs: 10000 });
   const { data: monitoringData, error: monitoringError, reload: reloadMonitoring } = useApi(fetchMonitoring, { intervalMs: 15000 });
@@ -58,11 +63,8 @@ export default function DevicesPage() {
   const devices = data?.devices ?? [];
   const status = monitoringData?.monitoring;
   const settings = monitoringData?.settings;
-  const isEmployee = roleIs(user?.role, 'EMPLOYEE');
-  const isOrgAdmin = roleIs(user?.role, 'ADMIN');
   const canEnrollSelf = isEmployee || isOrgAdmin;
   const ownDevices = devices.filter((device) => device.userId === user?.id);
-  const organizationDevices = isOrgAdmin ? devices.filter((device) => device.userId !== user?.id) : [];
 
   useEffect(() => {
     if (!settings) return;
@@ -256,17 +258,7 @@ export default function DevicesPage() {
         )}
       </Card>
 
-      {isOrgAdmin && <Card title="Organization devices">
-        {organizationDevices.length === 0 ? <EmptyState title="No employee devices enrolled">Employee devices appear here after enrollment and a valid heartbeat.</EmptyState> : (
-          <div className="divide-y divide-white/5">
-            {organizationDevices.map((device) => <div key={device.id} className="grid gap-2 py-4 text-sm sm:grid-cols-[1.3fr_1fr_1fr] sm:items-center">
-              <div><p className="font-semibold text-slate-100">{device.name}</p><p className="text-xs text-slate-500">{device.assignedUser?.displayName || 'Unassigned'} · {device.assignedUser?.email || 'No employee email'}</p></div>
-              <div><p className="text-slate-300">{String(device.kind).toUpperCase() === 'DESKTOP_AGENT' ? 'Windows Desktop Agent' : `Browser Extension (${device.browser || 'Web'})`}</p><p className="text-xs text-slate-500">Last sync: {formatDate(device.lastSyncAt)}</p></div>
-              <div className="sm:text-right"><span className={`rounded-md px-2.5 py-1 text-xs font-medium ${device.status === 'online' ? 'bg-emerald-500/10 text-emerald-300' : device.status === 'revoked' ? 'bg-rose-500/10 text-rose-300' : 'bg-slate-500/10 text-slate-300'}`}>{device.status === 'online' ? 'Connected' : device.status === 'revoked' ? 'Revoked' : 'Offline'}</span><p className={`mt-2 text-xs ${device.monitoring?.allowed ? 'text-emerald-300' : 'text-amber-200'}`}>{device.monitoring?.allowed ? 'Monitoring authorized' : reasonText(device.monitoring?.reason)}</p></div>
-            </div>)}
-          </div>
-        )}
-      </Card>}
+      {isOrgAdmin && <DeviceLifecycleManager devices={devices} pendingEnrollments={data?.pendingEnrollments || []} reload={reload} announce={setMessage} />}
     </div>
   );
 }

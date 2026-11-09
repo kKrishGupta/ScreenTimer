@@ -1,6 +1,7 @@
 import { DeviceService } from './devices.service.js';
 import { normalizeRole, Roles } from '../auth/auth.service.js';
 import { getMonitoringAuthorization } from './monitoring-authorization.js';
+import { createRateLimiter } from '../../middleware/rate-limiter.js';
 
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -68,6 +69,8 @@ export default async function devicesRoutes(app) {
   }
 
   const authMiddleware = app.authMiddleware;
+  const tokenCreationLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10, excludedPaths: [] });
+  const tokenConsumptionLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 20, excludedPaths: [] });
 
   app.get('/devices/my-monitoring-status', async (request, reply) => {
     try {
@@ -282,13 +285,16 @@ export default async function devicesRoutes(app) {
     const targetUserId =
       userRole === Roles.EMPLOYEE ? user.id : null;
 
-    const devices = await deviceService.listDevices(orgId, targetUserId);
-    return reply.send({ devices, totalCount: devices.length });
+    const includeArchived = request.query?.includeArchived === 'true' && [Roles.ADMIN, Roles.SUPER_ADMIN].includes(userRole);
+    const devices = await deviceService.listDevices(orgId, targetUserId, { includeArchived });
+    const pendingEnrollments = await deviceService.listPendingEnrollments(orgId, targetUserId);
+    return reply.send({ devices, totalCount: devices.length, pendingEnrollments });
   });
 
   // POST /api/v1/devices/enrollment-tokens (Protected: Admin or Super Admin only)
   app.post(
     '/devices/enrollment-tokens',
+    { preHandler: [tokenCreationLimiter] },
     async (request, reply) => {
       const user = request.user;
       if (!user) {
@@ -306,6 +312,9 @@ export default async function devicesRoutes(app) {
       }
 
       const { userId, deviceKind, expiresInHours } = request.body || {};
+      if (deviceKind !== undefined && !['DESKTOP_AGENT', 'BROWSER_EXTENSION'].includes(deviceKind)) {
+        return reply.code(400).send({ error: { code: 'INVALID_DEVICE_KIND', message: 'Choose DESKTOP_AGENT or BROWSER_EXTENSION' } });
+      }
       const orgId =
         userRole === Roles.SUPER_ADMIN
           ? request.body?.organizationId
@@ -324,10 +333,11 @@ export default async function devicesRoutes(app) {
           userId,
           deviceKind,
           expiresInHours,
+          createdByUserId: user.id,
         });
         return reply.status(201).send({ success: true, ...tokenInfo });
       } catch (err) {
-        return reply.status(400).send({
+        return reply.status(err.statusCode || 400).send({
           error: { code: 'TOKEN_CREATION_FAILED', message: err.message },
         });
       }
@@ -337,7 +347,7 @@ export default async function devicesRoutes(app) {
   // Employees and organization administrators may create a short-lived token
   // only for their own device. Scope always comes from the authenticated user.
   app.post('/devices/my-enrollment-token', {
-    preHandler: [authMiddleware.requireRole(Roles.EMPLOYEE, Roles.ADMIN)],
+    preHandler: [tokenCreationLimiter, authMiddleware.requireRole(Roles.EMPLOYEE, Roles.ADMIN)],
   }, async (request, reply) => {
     const role = normalizeRole(request.user?.role);
     if (![Roles.EMPLOYEE, Roles.ADMIN].includes(role)) {
@@ -356,6 +366,7 @@ export default async function devicesRoutes(app) {
         userId: request.user.id,
         deviceKind,
         expiresInHours: 4,
+        createdByUserId: request.user.id,
       });
       return reply.code(201).send({ success: true, ...tokenInfo });
     } catch (err) {
@@ -363,8 +374,33 @@ export default async function devicesRoutes(app) {
     }
   });
 
+  app.post('/devices/enrollment-tokens/:tokenId/revoke', async (request, reply) => {
+    const role = normalizeRole(request.user?.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(role)) {
+      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only administrators can revoke enrollment tokens' } });
+    }
+    const organizationId = role === Roles.SUPER_ADMIN
+      ? request.body?.organizationId || request.query?.organizationId
+      : request.user.organizationId;
+    if (!organizationId) {
+      return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
+    }
+    try {
+      return reply.send(await deviceService.revokeEnrollmentToken(
+        request.params.tokenId,
+        organizationId,
+        request.user.email || request.user.id,
+        request.user.id,
+      ));
+    } catch (error) {
+      return reply.code(error.statusCode || 400).send({
+        error: { code: error.code || 'TOKEN_REVOCATION_FAILED', message: error.message },
+      });
+    }
+  });
+
   // POST /api/v1/devices/enroll (Public: Device consumes one-time enrollment token)
-  app.post('/devices/enroll', async (request, reply) => {
+  app.post('/devices/enroll', { preHandler: [tokenConsumptionLimiter] }, async (request, reply) => {
     const { token, deviceId, name, platform, browser, agentVersion } = request.body || {};
     try {
       const result = await deviceService.enrollDevice({
@@ -378,7 +414,7 @@ export default async function devicesRoutes(app) {
       return reply.status(201).send(result);
     } catch (err) {
       return reply.status(err.statusCode || 400).send({
-        error: { code: 'ENROLLMENT_FAILED', message: err.message },
+        error: { code: err.code || 'ENROLLMENT_FAILED', message: err.message },
       });
     }
   });
@@ -441,7 +477,11 @@ export default async function devicesRoutes(app) {
           : user.organizationId;
 
       try {
-        const result = await deviceService.revokeDevice(id, orgId, user.email || user.displayName || 'Administrator');
+        const reason = request.body?.reason;
+        if (reason !== undefined && (typeof reason !== 'string' || reason.trim().length > 500)) {
+          return reply.code(400).send({ error: { code: 'INVALID_REASON', message: 'Revocation reason must be at most 500 characters' } });
+        }
+        const result = await deviceService.revokeDevice(id, orgId, user.email || user.displayName || 'Administrator', reason, user.id);
         return reply.send(result);
       } catch (err) {
         return reply.status(err.statusCode || 400).send({
@@ -450,6 +490,88 @@ export default async function devicesRoutes(app) {
       }
     },
   );
+
+  app.post('/devices/:id/archive', async (request, reply) => {
+    const role = normalizeRole(request.user?.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(role)) return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only administrators can archive devices' } });
+    const reason = request.body?.reason;
+    if (reason !== undefined && (typeof reason !== 'string' || reason.trim().length > 500)) return reply.code(400).send({ error: { code: 'INVALID_REASON', message: 'Archive reason must be at most 500 characters' } });
+    const organizationId = role === Roles.SUPER_ADMIN ? null : request.user.organizationId;
+    try {
+      return reply.send(await deviceService.archiveDevice(request.params.id, organizationId, request.user.email || request.user.id, reason, request.user.id));
+    } catch (error) {
+      return reply.code(error.statusCode || 400).send({ error: { code: error.code || 'ARCHIVE_FAILED', message: error.message } });
+    }
+  });
+
+  app.post('/devices/:id/restore', async (request, reply) => {
+    const role = normalizeRole(request.user?.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(role)) return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only administrators can restore devices' } });
+    const organizationId = role === Roles.SUPER_ADMIN ? null : request.user.organizationId;
+    try {
+      return reply.send(await deviceService.restoreDevice(request.params.id, organizationId, request.user.email || request.user.id, request.user.id));
+    } catch (error) {
+      return reply.code(error.statusCode || 400).send({ error: { code: error.code || 'RESTORE_FAILED', message: error.message } });
+    }
+  });
+
+  app.get('/devices/duplicate-review', async (request, reply) => {
+    const role = normalizeRole(request.user?.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(role)) return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only administrators can review duplicate devices' } });
+    const organizationId = role === Roles.SUPER_ADMIN ? request.query?.organizationId : request.user.organizationId;
+    if (!organizationId) return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
+    return reply.send({ candidates: await deviceService.reviewDuplicateCandidates(organizationId) });
+  });
+
+  app.get('/devices/:id/audit', async (request, reply) => {
+    const role = normalizeRole(request.user?.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(role)) return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only administrators can view device audit history' } });
+    const organizationId = role === Roles.SUPER_ADMIN ? request.query?.organizationId : request.user.organizationId;
+    if (!organizationId) return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
+    try {
+      return reply.send({ events: await deviceService.listDeviceAudit(request.params.id, organizationId) });
+    } catch (error) {
+      return reply.code(error.statusCode || 400).send({ error: { code: 'DEVICE_AUDIT_FAILED', message: error.message } });
+    }
+  });
+
+  app.get('/devices/:id', async (request, reply) => {
+    const role = normalizeRole(request.user?.role);
+    const organizationId = role === Roles.SUPER_ADMIN ? request.query?.organizationId : request.user.organizationId;
+    if (!organizationId) return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
+    try {
+      const device = await deviceService.getDeviceDetails(request.params.id, organizationId);
+      if (role === Roles.EMPLOYEE && device?.userId !== request.user.id) return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Employees may only view their own devices' } });
+      return reply.send({ device });
+    } catch (error) {
+      return reply.code(error.statusCode || 400).send({ error: { code: 'DEVICE_DETAILS_FAILED', message: error.message } });
+    }
+  });
+
+  app.post('/devices/bulk-actions', async (request, reply) => {
+    const role = normalizeRole(request.user?.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(role)) return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only administrators can manage devices in bulk' } });
+    const deviceIds = [...new Set(Array.isArray(request.body?.deviceIds) ? request.body.deviceIds : [])];
+    const action = String(request.body?.action || '').toLowerCase();
+    const reason = request.body?.reason;
+    if (!deviceIds.length || deviceIds.length > 100 || deviceIds.some((id) => typeof id !== 'string')) return reply.code(400).send({ error: { code: 'INVALID_DEVICE_SELECTION', message: 'Select between 1 and 100 devices' } });
+    if (!['revoke', 'archive'].includes(action)) return reply.code(400).send({ error: { code: 'INVALID_BULK_ACTION', message: 'Choose revoke or archive' } });
+    if (reason !== undefined && (typeof reason !== 'string' || reason.trim().length > 500)) return reply.code(400).send({ error: { code: 'INVALID_REASON', message: 'Reason must be at most 500 characters' } });
+    const organizationId = role === Roles.SUPER_ADMIN ? request.body?.organizationId || null : request.user.organizationId;
+    const actor = request.user.email || request.user.id;
+    const results = [];
+    for (const deviceId of deviceIds) {
+      try {
+        const result = action === 'revoke'
+          ? await deviceService.revokeDevice(deviceId, organizationId, actor, reason, request.user.id)
+          : await deviceService.archiveDevice(deviceId, organizationId, actor, reason, request.user.id);
+        results.push({ deviceId, success: true, lifecycleStatus: result.lifecycleStatus });
+      } catch (error) {
+        results.push({ deviceId, success: false, code: error.code || 'DEVICE_ACTION_FAILED', message: error.message });
+      }
+    }
+    return reply.send({ success: results.every((result) => result.success), action, results });
+  });
 
   // POST /api/v1/devices/:id/rotate-secret (Protected: Admin or Authenticated Device)
   app.post('/devices/:id/rotate-secret', async (request, reply) => {

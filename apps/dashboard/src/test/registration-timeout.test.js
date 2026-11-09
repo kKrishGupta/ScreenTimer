@@ -5,7 +5,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 it('allows registration longer than eight seconds without retrying the write', async () => {
   vi.useFakeTimers();
-  const fetch = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true, status: 201, json: async () => ({ success: true }) }), 12000)));
+  const fetch = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(new Response(JSON.stringify({ success: true }), { status: 201 })), 12000)));
   vi.stubGlobal('fetch', fetch);
   const request = api.registerOrganization({ email: 'test@example.test' });
   await vi.advanceTimersByTimeAsync(12000);

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useApi } from '../hooks/useApi.js';
 import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
@@ -54,7 +54,29 @@ export default function ScreenMonitoringPage() {
     const query = search.trim().toLowerCase();
     return (employees.data?.employees || []).filter((row) => !query || row.employeeName.toLowerCase().includes(query) || row.deviceName.toLowerCase().includes(query));
   }, [employees.data, search]);
-  const captureList = captures.data?.captures || [];
+  const imageUrlCacheRef = useRef(new Map());
+  const captureList = useMemo(() => {
+    const raw = captures.data?.captures || [];
+    const now = Date.now();
+    const cache = imageUrlCacheRef.current;
+    const activeIds = new Set();
+    const normalized = raw.map((capture) => {
+      activeIds.add(capture.id);
+      if (!capture.imageUrl) return capture;
+      const cached = cache.get(capture.id);
+      if (cached && cached.expiresAt - now > 60_000) {
+        return cached.imageUrl === capture.imageUrl ? capture : { ...capture, imageUrl: cached.imageUrl };
+      }
+      const match = /[?&]expires=(\d+)/.exec(capture.imageUrl);
+      const expiresAt = match ? Number(match[1]) : now + 5 * 60_000;
+      cache.set(capture.id, { imageUrl: capture.imageUrl, expiresAt });
+      return capture;
+    });
+    for (const id of cache.keys()) {
+      if (!activeIds.has(id)) cache.delete(id);
+    }
+    return normalized;
+  }, [captures.data]);
   const selectedIndex = selected ? captureList.findIndex((capture) => capture.id === selected.id) : -1;
 
   async function saveSettings(event) {
@@ -85,7 +107,7 @@ export default function ScreenMonitoringPage() {
   }
 
   if ((settings.loading && !settings.data) || (employees.loading && !employees.data)) return <LoadingState label="Loading screen monitoring policy..." />;
-  if (settings.error || employees.error) return <ErrorState error={settings.error || employees.error} onRetry={() => { settings.reload(); employees.reload(); }} />;
+  if ((settings.error && !settings.data) || (employees.error && !employees.data)) return <ErrorState error={settings.error || employees.error} onRetry={() => { settings.reload(); employees.reload(); }} />;
 
   return (
     <div className="space-y-6">
@@ -148,7 +170,7 @@ export default function ScreenMonitoringPage() {
           <input type="date" value={date} onChange={(event) => { setDate(event.target.value); setPage(1); }} className="rounded-lg border border-white/10 bg-surface-950 px-3 py-2 text-sm" />
           <Button onClick={captures.reload}>Refresh gallery</Button>
         </div>
-        {captures.loading && !captures.data ? <LoadingState label="Loading captures..." /> : captures.error ? <ErrorState error={captures.error} onRetry={captures.reload} /> : captureList.length === 0 ? <EmptyState title="No screenshots in this range">Captures appear here only after every authorization and schedule gate passes.</EmptyState> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{captureList.map((capture) => <button type="button" key={capture.id} onClick={() => setSelected(capture)} className="overflow-hidden rounded-xl border border-white/10 bg-surface-950 text-left hover:border-sky-400/40">
+        {captures.loading && !captures.data ? <LoadingState label="Loading captures..." /> : captures.error && !captures.data ? <ErrorState error={captures.error} onRetry={captures.reload} /> : captureList.length === 0 ? <EmptyState title="No screenshots in this range">Captures appear here only after every authorization and schedule gate passes.</EmptyState> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{captureList.map((capture) => <button type="button" key={capture.id} onClick={() => setSelected(capture)} className="overflow-hidden rounded-xl border border-white/10 bg-surface-950 text-left hover:border-sky-400/40">
           <div className="aspect-video bg-black"><img loading="lazy" src={capture.imageUrl} alt={`Work screen captured for ${capture.employeeName}`} className="h-full w-full object-contain" /></div>
           <div className="p-3"><p className="font-medium text-white">{capture.employeeName}</p><p className="text-xs text-slate-400">{capture.deviceName} · {capture.collectorKind === 'BROWSER_EXTENSION' ? `${capture.browser === 'edge' ? 'Edge' : 'Chrome'} Browser Extension` : 'Windows Desktop Agent'}</p><p className="mt-2 text-xs text-sky-300">{new Date(capture.capturedAt).toLocaleString()}</p></div>
         </button>)}</div>}

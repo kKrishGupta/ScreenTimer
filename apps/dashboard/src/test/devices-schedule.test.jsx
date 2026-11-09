@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../context/AuthContext.jsx', () => ({ useAuth: () => ({ user: { id: 'user', role: mocks.role } }) }));
 vi.mock('../lib/api.js', () => ({ api: {
   devices: () => ({ devices: [] }),
+  deviceDirectory: () => ({ devices: [], pendingEnrollments: [] }),
   myMonitoringStatus: () => ({ settings: mocks.settings, monitoring: { allowed: false, reason: 'ORGANIZATION_TIMEZONE_REQUIRED' } }),
   updateOrganizationTimezone: mocks.saveTimezone,
   updateMyMonitoringSchedule: mocks.saveSchedule,

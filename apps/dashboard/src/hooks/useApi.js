@@ -7,33 +7,59 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export function useApi(fetcher, { intervalMs } = {}) {
   const [state, setState] = useState({ data: null, error: null, loading: true });
   const fetcherRef = useRef(fetcher);
+  const mountedRef = useRef(false);
+  const requestRef = useRef(null);
+  const sequenceRef = useRef(0);
   fetcherRef.current = fetcher;
 
-  const load = useCallback(async (signal) => {
-    try {
-      const data = await fetcherRef.current({ signal });
-      if (!signal?.aborted) setState({ data, error: null, loading: false });
-    } catch (error) {
-      if (!signal?.aborted) setState((s) => ({ data: s.data, error, loading: false }));
+  const load = useCallback(({ replace = false, showLoading = false } = {}) => {
+    const active = requestRef.current;
+    if (active && !replace) return active.promise;
+    if (active) active.controller.abort(new DOMException('Superseded', 'AbortError'));
+
+    const controller = new AbortController();
+    const sequence = ++sequenceRef.current;
+    if (showLoading && mountedRef.current) {
+      setState((current) => ({ ...current, loading: true }));
     }
+    const promise = (async () => {
+      try {
+        const data = await fetcherRef.current({ signal: controller.signal });
+        if (mountedRef.current && !controller.signal.aborted && sequence === sequenceRef.current) {
+          setState({ data, error: null, loading: false });
+        }
+        return data;
+      } catch (error) {
+        const isCanceled = controller.signal.aborted || error?.code === 'CANCELED' || error?.name === 'AbortError';
+        if (mountedRef.current && !isCanceled && sequence === sequenceRef.current) {
+          setState((current) => ({ data: current.data, error, loading: false }));
+        }
+        return undefined;
+      } finally {
+        if (requestRef.current?.sequence === sequence) requestRef.current = null;
+      }
+    })();
+    requestRef.current = { controller, promise, sequence };
+    return promise;
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    load(controller.signal);
-    if (!intervalMs) return () => controller.abort();
-    const id = setInterval(() => {
-      if (document.visibilityState === 'visible') load(controller.signal);
-    }, intervalMs);
+    mountedRef.current = true;
+    load({ replace: true });
+    const id = intervalMs ? setInterval(() => {
+      if (document.visibilityState === 'visible') load();
+    }, intervalMs) : null;
     return () => {
-      controller.abort();
-      clearInterval(id);
+      mountedRef.current = false;
+      sequenceRef.current += 1;
+      requestRef.current?.controller.abort(new DOMException('Unmounted', 'AbortError'));
+      requestRef.current = null;
+      if (id) clearInterval(id);
     };
-  }, [load, intervalMs]);
+  }, [fetcher, load, intervalMs]);
 
   const reload = useCallback(() => {
-    setState((s) => ({ ...s, loading: true }));
-    return load();
+    return load({ replace: true, showLoading: true });
   }, [load]);
 
   return { ...state, reload };

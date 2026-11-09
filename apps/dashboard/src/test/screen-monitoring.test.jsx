@@ -53,3 +53,22 @@ it('uses returned image URLs, opens the viewer, filters and deletes the selected
   await waitFor(() => expect(mocks.query).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'Test', page: 1 })));
   vi.restoreAllMocks();
 });
+
+it('preserves a valid signed thumbnail URL across gallery polls to prevent duplicate image downloads', () => {
+  const futureExpires = Date.now() + 4 * 60_000;
+  const firstUrl = `/api/v1/screen-monitoring/captures/cap-1/image?expires=${futureExpires}&token=first`;
+  const secondUrl = `/api/v1/screen-monitoring/captures/cap-1/image?expires=${futureExpires + 15_000}&token=second`;
+  mocks.captures = {
+    captures: [{ id: 'cap-1', employeeName: 'Test Employee', deviceName: 'Work PC', capturedAt: '2026-11-06T10:00:00Z', imageUrl: firstUrl, width: 100, height: 100 }],
+    totalPages: 1,
+  };
+  const { rerender } = render(<ScreenMonitoringPage />);
+  expect(screen.getByAltText('Work screen captured for Test Employee')).toHaveAttribute('src', firstUrl);
+
+  mocks.captures = {
+    captures: [{ id: 'cap-1', employeeName: 'Test Employee', deviceName: 'Work PC', capturedAt: '2026-11-06T10:00:00Z', imageUrl: secondUrl, width: 100, height: 100 }],
+    totalPages: 1,
+  };
+  rerender(<ScreenMonitoringPage />);
+  expect(screen.getByAltText('Work screen captured for Test Employee')).toHaveAttribute('src', firstUrl);
+});

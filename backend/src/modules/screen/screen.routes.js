@@ -7,7 +7,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SCREEN_CAPTURE_DEVICE_KINDS = ['DESKTOP_AGENT', 'BROWSER_EXTENSION'];
 
 function isScreenCaptureDevice(device) {
-  if (!device || device.isRevoked) return false;
+  if (!device || device.isRevoked || device.archivedAt) return false;
 
   if (device.kind === 'DESKTOP_AGENT') return true;
 
@@ -51,7 +51,7 @@ async function readSetting(prisma, organizationId) {
   return { ...DEFAULT_SETTING, ...(stored || {}), organizationId };
 }
 
-export async function evaluateDevicePolicy(prisma, device, at = new Date()) {
+export async function evaluateDevicePolicy(prisma, device, at = new Date(), preloaded = {}) {
   if (!isScreenCaptureDevice(device)) {
     return { allowed: false, reason: 'DEVICE_NOT_ELIGIBLE' };
   }
@@ -64,20 +64,23 @@ export async function evaluateDevicePolicy(prisma, device, at = new Date()) {
     return { allowed: false, reason: 'DEVICE_OWNER_REQUIRED' };
   }
 
-  const owner = await prisma.user.findUnique({
-    where: { id: device.userId },
-    include: {
-      organization: {
-        select: { timezone: true }
-      }
-    }
-  });
+  const owner =
+    preloaded.owner && preloaded.owner.id === device.userId && preloaded.owner.organization
+      ? preloaded.owner
+      : await prisma.user.findUnique({
+          where: { id: device.userId },
+          include: {
+            organization: {
+              select: { timezone: true }
+            }
+          }
+        });
 
   if (!owner || owner.organizationId !== device.organizationId) {
     return { allowed: false, reason: 'DEVICE_OWNER_REQUIRED' };
   }
 
-  const setting = await readSetting(prisma, device.organizationId);
+  const setting = preloaded.setting || (await readSetting(prisma, device.organizationId));
 
   if (!setting.enabled) {
     return { allowed: false, reason: 'SCREEN_MONITORING_DISABLED', setting, owner };
@@ -152,7 +155,8 @@ async function audit(prisma, organizationId, action, actor, details) {
 }
 
 function mapCapture(row, request) {
-  const expires = Date.now() + 5 * 60 * 1000;
+  const bucketMs = 5 * 60 * 1000;
+  const expires = Math.ceil((Date.now() + 60 * 1000) / bucketMs) * bucketMs;
   const token = createViewToken(row.id, request.user.id, expires);
   return {
     id: row.id, captureKey: row.captureKey, employeeId: row.employeeId,
@@ -259,6 +263,7 @@ export default async function screenRoutes(fastify) {
     const devices = await prisma.device.findMany({
       where: {
         organizationId,
+        archivedAt: null,
         OR: [
           { kind: 'DESKTOP_AGENT' },
           {
@@ -271,9 +276,10 @@ export default async function screenRoutes(fastify) {
       include: { user: { select: { id: true, displayName: true, email: true, screenMonitoringAcknowledgedAt: true } } },
       orderBy: { name: 'asc' },
     });
-    const policies = new Map(await Promise.all(devices.map(async (device) => [device.id, await evaluateDevicePolicy(prisma, device)])));
+    const setting = await readSetting(prisma, organizationId);
+    const policies = new Map(await Promise.all(devices.map(async (device) => [device.id, await evaluateDevicePolicy(prisma, device, new Date(), { setting })])));
     const latestCaptures = devices.length ? await prisma.screenCaptureMetadata.findMany({
-      where: { organizationId, deviceId: { in: devices.map((device) => device.id) }, captureStatus: 'stored' },
+      where: { organizationId, deviceId: { in: devices.map((device) => device.id) }, captureStatus: 'stored', expiresAt: { gt: new Date() } },
       select: { id: true, deviceId: true, capturedAt: true },
       orderBy: { capturedAt: 'desc' },
       distinct: ['deviceId'],
@@ -297,6 +303,7 @@ export default async function screenRoutes(fastify) {
         id: request.params.deviceId,
         organizationId,
         isRevoked: false,
+        archivedAt: null,
         userId: { not: null },
         OR: [
           { kind: 'DESKTOP_AGENT' },
@@ -311,16 +318,17 @@ export default async function screenRoutes(fastify) {
     });
     if (updated.count !== 1) return reply.code(404).send({ error: { code: 'DEVICE_NOT_FOUND', message: 'Eligible organization device not found' } });
     await audit(prisma, organizationId, 'SCREEN_MONITORING_DEVICE_UPDATED', request.user.email, { deviceId: request.params.deviceId, enabled: request.body.enabled });
+    await audit(prisma, organizationId, 'DEVICE_AUTHORIZATION_CHANGED', request.user.email, { deviceId: request.params.deviceId, authorization: 'SCREEN_CAPTURE', enabled: request.body.enabled });
     return { success: true };
   });
 
   fastify.get('/screen-monitoring/me', async (request) => {
     const owner = await prisma.user.findUnique({ where: { id: request.user.id }, include: { organization: { select: { timezone: true } } } });
     const setting = await readSetting(prisma, request.user.organizationId);
-    const devices = await prisma.device.findMany({ where: { organizationId: request.user.organizationId, userId: request.user.id }, select: { id: true, name: true, kind: true, platform: true, browser: true, isRevoked: true, screenCaptureEnabled: true, lastSeenAt: true, lastScreenCaptureAt: true, lastScreenCaptureFailureAt: true, lastScreenCaptureError: true } });
+    const devices = await prisma.device.findMany({ where: { organizationId: request.user.organizationId, userId: request.user.id, archivedAt: null }, select: { id: true, name: true, kind: true, platform: true, browser: true, isRevoked: true, archivedAt: true, screenCaptureEnabled: true, lastSeenAt: true, lastScreenCaptureAt: true, lastScreenCaptureFailureAt: true, lastScreenCaptureError: true } });
     const deviceStatuses = await Promise.all(devices.filter((device) => isScreenCaptureDevice(device)).map(async (device) => {
-      const latest = await prisma.screenCaptureMetadata.findFirst({ where: { organizationId: request.user.organizationId, deviceId: device.id, captureStatus: 'stored' }, select: { capturedAt: true }, orderBy: { capturedAt: 'desc' } });
-      const policy = await evaluateDevicePolicy(prisma, device);
+      const latest = await prisma.screenCaptureMetadata.findFirst({ where: { organizationId: request.user.organizationId, deviceId: device.id, captureStatus: 'stored', expiresAt: { gt: new Date() } }, select: { capturedAt: true }, orderBy: { capturedAt: 'desc' } });
+      const policy = await evaluateDevicePolicy(prisma, { ...device, organizationId: request.user.organizationId, userId: request.user.id }, new Date(), { owner, setting });
       return { ...device, policyAllowed: policy.allowed, policyReason: policy.reason, lastCaptureAt: latest?.capturedAt || null, connectivity: device.lastSeenAt && Date.now() - new Date(device.lastSeenAt).getTime() < 5 * 60 * 1000 ? 'online' : 'offline' };
     }));
     return { acknowledgedAt: owner?.screenMonitoringAcknowledgedAt || null, consentGranted: Boolean(owner?.monitoringConsentAt && (!owner?.monitoringConsentRevokedAt || owner.monitoringConsentRevokedAt < owner.monitoringConsentAt)), adminAuthorized: owner?.monitoringAuthorized === true, noticeVersion: 'screen-monitoring-v1', organizationEnabled: setting.enabled, captureIntervalSeconds: setting.captureIntervalSeconds, retentionDays: setting.retentionDays, workingDays: setting.workingDays, shiftStart: setting.shiftStart, shiftEnd: setting.shiftEnd, timezone: owner?.organization?.timezone || null, devices: deviceStatuses, explanation: 'DigitalPulse captures the authorized Windows desktop or only the visible active Chrome/Edge browser tab on selected enrolled work devices during authorized hours. Captures are private, access-audited, and automatically deleted after the retention period.' };

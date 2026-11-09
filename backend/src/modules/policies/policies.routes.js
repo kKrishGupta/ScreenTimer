@@ -844,22 +844,35 @@ export default async function policyRoutes(fastify) {
     };
   });
 
+  function resolvePolicyOrganizationId(req) {
+    const role = normalizeRole(req.user?.role);
+    if (role === Roles.SUPER_ADMIN) {
+      return req.query?.organizationId || req.body?.organizationId || req.user?.organizationId || null;
+    }
+    return req.user?.organizationId || null;
+  }
+
   // GET /api/v1/policies/grace
   fastify.get('/policies/grace', async (req, reply) => {
-    const org = await fastify.prisma.organization.findFirst({ where: { slug: 'local-dev' } });
-    if (!org) return reply.code(400).send({ error: { message: 'Organization not found' } });
-    const grants = await graceService.listGrants(org.id);
+    const organizationId = resolvePolicyOrganizationId(req);
+    if (!organizationId) {
+      return reply.code(403).send({ error: { code: 'ORGANIZATION_CONTEXT_REQUIRED', message: 'Authenticated organization context is required' } });
+    }
+    const grants = await graceService.listGrants(organizationId);
     return { grants, count: grants.length };
   });
 
   // POST /api/v1/policies/grace/visit
   fastify.post('/policies/grace/visit', async (req, reply) => {
-    const { domain, userId, deviceId } = req.body ?? {};
+    const { domain, deviceId } = req.body ?? {};
     if (!domain) return reply.code(400).send({ error: { message: 'domain is required' } });
-    const org = await fastify.prisma.organization.findFirst({ where: { slug: 'local-dev' } });
+    const organizationId = resolvePolicyOrganizationId(req);
+    if (!organizationId) {
+      return reply.code(403).send({ error: { code: 'ORGANIZATION_CONTEXT_REQUIRED', message: 'Authenticated organization context is required' } });
+    }
     const result = await graceService.registerVisit({
-      organizationId: org?.id,
-      userId,
+      organizationId,
+      userId: req.user.id,
       deviceId,
       domain,
     });
@@ -873,11 +886,12 @@ export default async function policyRoutes(fastify) {
 
     const { domain, resetBy = 'Admin', additionalMinutes = 15 } = req.body ?? {};
     if (!domain) return reply.code(400).send({ error: { message: 'domain is required' } });
-    const org = user?.organizationId
-      ? { id: user.organizationId }
-      : await fastify.prisma.organization.findFirst({ where: { slug: 'local-dev' } });
+    const organizationId = resolvePolicyOrganizationId(req);
+    if (!organizationId) {
+      return reply.code(403).send({ error: { code: 'ORGANIZATION_CONTEXT_REQUIRED', message: 'Authenticated organization context is required' } });
+    }
     const result = await graceService.resetGrace({
-      organizationId: org?.id,
+      organizationId,
       domain,
       resetBy: user?.displayName || user?.email || resetBy,
       additionalMinutes: Number(additionalMinutes) || 15,

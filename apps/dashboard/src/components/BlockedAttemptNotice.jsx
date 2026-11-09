@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { api } from '../lib/api.js';
+
+const VIOLATION_FEED_PATHS = new Set([
+  '/blocked-activity',
+  '/organization/blocked-activity',
+  '/policies',
+  '/family-policies',
+]);
 
 export default function BlockedAttemptNotice({ user }) {
   if (user?.role !== 'ADMIN' || !user.organizationId) return null;
@@ -9,25 +16,43 @@ export default function BlockedAttemptNotice({ user }) {
 
 function ScopedBlockedAttemptNotice({ user }) {
   const [notice, setNotice] = useState(null);
+  const location = useLocation();
+  const skipDuplicateFeedPoll = VIOLATION_FEED_PATHS.has(location.pathname);
+
   useEffect(() => {
-    if (user?.role !== 'ADMIN' || !user.organizationId) return;
+    if (user?.role !== 'ADMIN' || !user.organizationId || skipDuplicateFeedPoll) return;
     let stopped = false;
     let seen = null;
     let timer;
+    let activeController = null;
     async function poll() {
+      if (stopped) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        timer = setTimeout(poll, 5000);
+        return;
+      }
+      const controller = new AbortController();
+      activeController = controller;
       try {
-        const data = await api.policyViolations();
-        if (stopped) return;
+        const data = await api.policyViolations({ signal: controller.signal });
+        if (stopped || controller.signal.aborted) return;
         const rows = data.violations || [];
         const fresh = seen && rows.find((row) => !seen.has(row.id) && row.actionTaken === 'BLOCKED');
         seen = new Set(rows.map((row) => row.id));
         if (fresh) setNotice(fresh);
       } catch { /* Retain previous baseline on transient connection errors. */ }
-      finally { if (!stopped) timer = setTimeout(poll, 5000); }
+      finally {
+        if (activeController === controller) activeController = null;
+        if (!stopped) timer = setTimeout(poll, 5000);
+      }
     }
     void poll();
-    return () => { stopped = true; clearTimeout(timer); };
-  }, [user?.id, user?.role, user?.organizationId]);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      activeController?.abort(new DOMException('Unmounted', 'AbortError'));
+    };
+  }, [user?.id, user?.role, user?.organizationId, skipDuplicateFeedPoll]);
   if (!notice) return null;
   return <aside role="alert" className="fixed right-6 top-24 z-50 max-w-sm rounded-xl border border-red-500/40 bg-slate-900 p-5 shadow-xl">
     <strong className="text-red-300">Blocked website attempt</strong>

@@ -159,11 +159,11 @@ export default async function activityRoutes(app) {
       }
       const check = await app.deviceService.validateDeviceCredentials(devInfo.id, secret);
       if (!check.valid) {
-        if (check.code === 'DEVICE_REVOKED') {
+        if (['DEVICE_REVOKED', 'DEVICE_ARCHIVED'].includes(check.code)) {
           return reply.status(403).send({
             error: {
-              code: 'DEVICE_REVOKED',
-              message: 'This device has been revoked by an administrator',
+              code: check.code,
+              message: check.message,
             },
           });
         }

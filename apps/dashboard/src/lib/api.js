@@ -8,7 +8,12 @@ export const API_BASE = (
     ? '/api/v1'
     : configuredApiBase
 ).replace(/\/$/, '');
-const DEFAULT_TIMEOUT_MS = 8000;
+const configuredTimeout = Number(import.meta.env.VITE_API_TIMEOUT_MS);
+export const DEFAULT_TIMEOUT_MS = Number.isFinite(configuredTimeout)
+  ? Math.min(120_000, Math.max(1_000, configuredTimeout))
+  : 8_000;
+export const SLOW_ENDPOINT_TIMEOUT_MS = Math.max(DEFAULT_TIMEOUT_MS, 15_000);
+export const AUTH_WRITE_TIMEOUT_MS = Math.max(DEFAULT_TIMEOUT_MS, 45_000);
 
 function clearLegacyTokens() {
   if (typeof window !== 'undefined') {
@@ -38,31 +43,88 @@ export class ApiError extends Error {
   }
 }
 
+function readResponseText(res, signal) {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    res.text().then(
+      (text) => {
+        signal.removeEventListener('abort', onAbort);
+        if (signal.aborted) reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        else resolve(text);
+      },
+      (err) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 /**
  * Executes an HTTP fetch request with timeout and error wrapping.
  */
 async function request(path, { method = 'GET', body, signal, acceptStatuses = [], timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), timeoutMs);
-  const onAbort = () => controller.abort(signal?.reason);
-  signal?.addEventListener('abort', onAbort, { once: true });
+  const effectiveTimeout = Math.min(120_000, Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
+  const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), effectiveTimeout);
+  const onAbort = () => controller.abort(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener('abort', onAbort, { once: true });
 
   const headers = {
     Accept: 'application/json',
     ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
   };
 
-  let res;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    if (controller.signal.aborted) {
+      throw controller.signal.reason ?? new DOMException('Aborted', 'AbortError');
+    }
+    const res = await fetch(`${API_BASE}${path}`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
       credentials: 'include',
     });
+    // Keep timeout and caller cancellation connected until the response body is
+    // consumed. fetch() resolves when headers arrive, before a slow body ends.
+    const responseText = await readResponseText(res, controller.signal);
+    let resBody = null;
+    if (responseText) {
+      try {
+        resBody = JSON.parse(responseText);
+      } catch {
+        if (res.ok || acceptStatuses.includes(res.status)) {
+          throw new ApiError('The DigitalPulse service returned an invalid response.', {
+            status: res.status,
+            code: 'INVALID_RESPONSE',
+          });
+        }
+      }
+    }
+    const isProxyGatewayError = res.status === 503 && resBody?.error?.code === 'BACKEND_OFFLINE';
+    if ((res.ok || acceptStatuses.includes(res.status)) && !isProxyGatewayError) return resBody;
+    throw new ApiError(
+      resBody?.error?.message ?? (isProxyGatewayError
+        ? 'The DigitalPulse backend is temporarily unavailable.'
+        : `Request failed with status ${res.status}`),
+      {
+        status: res.status,
+        code: resBody?.error?.code ?? (isProxyGatewayError ? 'BACKEND_OFFLINE' : 'HTTP_ERROR'),
+        body: resBody,
+        retryAfterSeconds: res.status === 429 ? Math.max(0, Number(res.headers.get('Retry-After')) || 0) : 0,
+      },
+    );
   } catch (err) {
-    if (signal?.aborted) throw err;
+    if (err instanceof ApiError) throw err;
+    if (signal?.aborted) {
+      throw new ApiError('Request canceled.', { code: 'CANCELED' });
+    }
     const timedOut = controller.signal.reason?.name === 'TimeoutError' || err?.name === 'TimeoutError';
     throw new ApiError(timedOut ? 'The DigitalPulse service took too long to respond. It may be starting up. Please try again shortly.' : 'Cannot reach the DigitalPulse service. Check your connection and try again.', {
       code: timedOut ? 'TIMEOUT' : 'NETWORK_ERROR',
@@ -71,16 +133,6 @@ async function request(path, { method = 'GET', body, signal, acceptStatuses = []
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
   }
-
-  const resBody = await res.json().catch(() => null);
-  const isProxyGatewayError = res.status === 503 && resBody?.error?.code === 'BACKEND_OFFLINE';
-  if ((res.ok || acceptStatuses.includes(res.status)) && !isProxyGatewayError) return resBody;
-  throw new ApiError(resBody?.error?.message ?? `Request failed with status ${res.status}`, {
-    status: res.status,
-    code: resBody?.error?.code ?? 'HTTP_ERROR',
-    body: resBody,
-    retryAfterSeconds: res.status === 429 ? Math.max(0, Number(res.headers.get('Retry-After')) || 0) : 0,
-  });
 }
 
 export function getJson(path, opts) {
@@ -132,6 +184,15 @@ export const api = {
   apps: (params = {}, opts = {}) => getJson(`/activity/apps${toQueryString(params)}`, opts),
   websites: (params = {}, opts = {}) => getJson(`/activity/websites${toQueryString(params)}`, opts),
   devices: (opts = {}) => getJson('/devices', opts),
+  deviceDirectory: (params = {}, opts = {}) => getJson(`/devices${toQueryString(params)}`, opts),
+  deviceDetails: (deviceId, opts = {}) => getJson(`/devices/${encodeURIComponent(deviceId)}`, opts),
+  deviceAudit: (deviceId, opts = {}) => getJson(`/devices/${encodeURIComponent(deviceId)}/audit`, opts),
+  duplicateDeviceReview: (opts = {}) => getJson('/devices/duplicate-review', opts),
+  revokeDevice: (deviceId, reason, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/revoke`, { reason }, opts),
+  archiveDevice: (deviceId, reason, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/archive`, { reason }, opts),
+  restoreDevice: (deviceId, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/restore`, {}, opts),
+  bulkDeviceAction: (action, deviceIds, reason, opts = {}) => postJson('/devices/bulk-actions', { action, deviceIds, reason }, opts),
+  revokeEnrollmentToken: (tokenId, opts = {}) => postJson(`/devices/enrollment-tokens/${encodeURIComponent(tokenId)}/revoke`, {}, opts),
   myMonitoringStatus: (opts = {}) => getJson('/devices/my-monitoring-status', opts),
   setMyMonitoringConsent: (consent, opts = {}) => postJson('/devices/my-monitoring-consent', { consent }, opts),
   setMyMonitoringAuthorization: (authorized, opts = {}) => patchJson('/devices/my-monitoring-authorization', { authorized }, opts),
@@ -141,9 +202,9 @@ export const api = {
 
   screenSettings: (params = {}, opts = {}) => getJson(`/screen-monitoring/settings${toQueryString(params)}`, opts),
   updateScreenSettings: (settings, opts = {}) => patchJson('/screen-monitoring/settings', settings, opts),
-  screenEmployees: (params = {}, opts = {}) => getJson(`/screen-monitoring/employees${toQueryString(params)}`, opts),
+  screenEmployees: (params = {}, opts = {}) => getJson(`/screen-monitoring/employees${toQueryString(params)}`, { timeoutMs: SLOW_ENDPOINT_TIMEOUT_MS, ...opts }),
   updateScreenDevice: (deviceId, enabled, opts = {}) => patchJson(`/screen-monitoring/devices/${encodeURIComponent(deviceId)}`, { enabled }, opts),
-  screenCaptures: (params = {}, opts = {}) => getJson(`/screen-monitoring/captures${toQueryString(params)}`, opts),
+  screenCaptures: (params = {}, opts = {}) => getJson(`/screen-monitoring/captures${toQueryString(params)}`, { timeoutMs: SLOW_ENDPOINT_TIMEOUT_MS, ...opts }),
   screenCapture: (id, opts = {}) => getJson(`/screen-monitoring/captures/${encodeURIComponent(id)}`, opts),
   deleteScreenCapture: (id, opts = {}) => deleteJson(`/screen-monitoring/captures/${encodeURIComponent(id)}`, opts),
   myScreenMonitoring: (opts = {}) => getJson('/screen-monitoring/me', opts),
