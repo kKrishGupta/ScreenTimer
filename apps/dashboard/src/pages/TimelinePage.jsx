@@ -56,7 +56,7 @@ function TypeBadge({ type }) {
 
 export default function TimelinePage() {
   const fetchTimeline = useCallback((opts) => api.timeline({ limit: 100 }, opts), []);
-  const { data, error, loading, reload } = useApi(fetchTimeline, { intervalMs: 5000 });
+  const { data, error, loading, reload } = useApi(fetchTimeline, { intervalMs: 15000 });
 
   const events = data?.events ?? [];
 
@@ -65,7 +65,7 @@ export default function TimelinePage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <PageHeader
           title="Activity Timeline"
-          description="Chronological application, website and idle sessions collected locally."
+          description="Application, website and idle activity synchronized with the backend."
         />
         {events.length > 0 && (
           <Button onClick={reload} className="self-start sm:self-auto">
@@ -81,7 +81,7 @@ export default function TimelinePage() {
         {!loading && !error && events.length === 0 && (
           <EmptyState title="No timeline entries yet">
             Timeline entries appear when the desktop agent or browser extension sends activity to
-            the local backend. Start the agent to begin recording.
+            the backend. Start the authorized desktop agent to begin recording.
           </EmptyState>
         )}
 
