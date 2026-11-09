@@ -6,6 +6,14 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
+fn valid_headers(headers: &[(String, String)]) -> bool {
+    headers.iter().all(|(name, value)| {
+        !name.is_empty()
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            && !value.chars().any(char::is_control)
+    })
+}
+
 #[cfg(windows)]
 pub fn post_json(
     host: &str,
@@ -36,6 +44,10 @@ pub fn request(
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_DISABLE_REDIRECTS, WINHTTP_FLAG_SECURE,
         WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
     };
+
+    if !valid_headers(headers) {
+        return Err("invalid HTTP header".into());
+    }
 
     struct Handle(*mut core::ffi::c_void);
     impl Drop for Handle {
@@ -198,6 +210,27 @@ pub fn request(
         status: status as u16,
         body: response_body,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn credentials_cannot_inject_headers_or_truncate_winhttp_strings() {
+        for value in ["secret\r\nInjected: yes", "secret\0ignored", "secret\n"] {
+            assert!(!super::valid_headers(&[(
+                "X-Device-Secret".into(),
+                value.into()
+            )]));
+        }
+        assert!(super::valid_headers(&[(
+            "X-Device-Secret".into(),
+            "test-secret".into()
+        )]));
+        assert!(!super::valid_headers(&[(
+            "Bad:Name".into(),
+            "value".into()
+        )]));
+    }
 }
 
 #[cfg(not(windows))]

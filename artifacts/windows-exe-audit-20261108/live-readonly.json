@@ -1,0 +1,16 @@
+[
+  {
+    "path": "/api/v1/health/live",
+    "error": "The read operation timed out"
+  },
+  {
+    "path": "/api/v1/health",
+    "status": 200,
+    "body": "{\"status\":\"ok\",\"service\":\"digitalpulse-backend\",\"version\":\"0.1.0\",\"time\":\"2026-11-08T03:57:35.983Z\",\"uptimeSeconds\":17,\"database\":{\"status\":\"up\",\"latencyMs\":175}}"
+  },
+  {
+    "path": "/api/v1/screen-monitoring/captures",
+    "status": 401,
+    "body": "{\"error\":{\"code\":\"UNAUTHORIZED\",\"message\":\"Sign in to continue.\"}}"
+  }
+]

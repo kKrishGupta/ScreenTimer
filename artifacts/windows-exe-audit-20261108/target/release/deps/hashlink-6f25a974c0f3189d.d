@@ -1,0 +1,10 @@
+D:\desktop\task2_updated\DigitalPulse\artifacts\windows-exe-audit-20261108\target\release\deps\hashlink-6f25a974c0f3189d.d: C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\lib.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\linked_hash_map.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\linked_hash_set.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\lru_cache.rs
+
+D:\desktop\task2_updated\DigitalPulse\artifacts\windows-exe-audit-20261108\target\release\deps\libhashlink-6f25a974c0f3189d.rlib: C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\lib.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\linked_hash_map.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\linked_hash_set.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\lru_cache.rs
+
+D:\desktop\task2_updated\DigitalPulse\artifacts\windows-exe-audit-20261108\target\release\deps\libhashlink-6f25a974c0f3189d.rmeta: C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\lib.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\linked_hash_map.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\linked_hash_set.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\lru_cache.rs
+
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\lib.rs:
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\linked_hash_map.rs:
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\linked_hash_set.rs:
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\hashlink-0.10.0\src\lru_cache.rs:

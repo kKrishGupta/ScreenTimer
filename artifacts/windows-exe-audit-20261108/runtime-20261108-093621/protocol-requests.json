@@ -1,0 +1,186 @@
+[
+  {
+    "time": 1794110788.79232,
+    "method": "POST",
+    "path": "/api/v1/devices/enroll",
+    "status": 401,
+    "authenticated": false,
+    "request_bytes": 153
+  },
+  {
+    "time": 1794110791.9293957,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110792.0821004,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110797.3807144,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110797.6506643,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110802.9017398,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110803.0086606,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110808.313167,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110808.5610623,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110812.3338473,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 403,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110812.5164149,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 403,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110816.4119759,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 403,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110816.6080654,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 403,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110820.5186155,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 503,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110820.7649755,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 503,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110825.0461166,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110825.1808712,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110830.618713,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110830.8795998,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110838.8545578,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110838.926539,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 0
+  },
+  {
+    "time": 1794110841.1884665,
+    "method": "POST",
+    "path": "/api/v1/devices/dd1411ba-299d-45c5-86aa-603481acd6f2/heartbeat",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 119
+  },
+  {
+    "time": 1794110841.3194988,
+    "method": "GET",
+    "path": "/api/v1/screen-monitoring/device-policy?deviceId=dd1411ba-299d-45c5-86aa-603481acd6f2",
+    "status": 200,
+    "authenticated": true,
+    "request_bytes": 0
+  }
+]

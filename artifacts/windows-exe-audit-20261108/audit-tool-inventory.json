@@ -1,0 +1,8 @@
+{
+    "path":  "D:\\desktop\\task2_updated\\DigitalPulse\\artifacts\\windows-exe-audit-20261108\\audit-tools\\bin\\cargo-audit.exe",
+    "size":  36654322,
+    "sha256":  "1B2163F3B0B7EBCBEE8305CE37C6062AF6233ADAEBEB9047807EA2DA74C685BF",
+    "signature":  "NotSigned",
+    "version":  "cargo-audit 0.22.2",
+    "purpose":  "audit tooling, not shipped agent"
+}

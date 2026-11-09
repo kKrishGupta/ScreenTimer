@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const lastSyncEl = document.getElementById('last-sync');
   const lastHeartbeatEl = document.getElementById('last-heartbeat');
   const connectionKeys = [
-    'dp_device_connection_status', 'dp_last_heartbeat_at', 'dp_last_successful_sync_at',
+    'dp_device_connection_status', 'dp_device_lifecycle_status', 'dp_last_heartbeat_at', 'dp_last_successful_sync_at',
     'dp_sync_error', 'dp_monitoring_allowed', 'dp_monitoring_allowed_until', 'dp_monitoring_reason', 'dp_policy_sync',
   ];
 
@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const extensionVersion = workerDiagnostics?.workerVersion || chrome.runtime.getManifest?.()?.version || 'unknown';
   document.getElementById('extension-version').textContent = `v${extensionVersion} (${workerDiagnostics?.ok ? 'worker ready' : 'worker unavailable'})`;
   let isEnrolled = Boolean(enrollmentState?.enrolled);
+  let lifecycleStatus = enrollmentState?.lifecycleStatus || stored.dp_device_lifecycle_status || 'ACTIVE';
   let deviceId = stored[CONFIG.DEVICE_STORAGE_KEY] || '';
   if (!deviceId) {
     const identity = await chrome.runtime.sendMessage({ action: 'get_device_id' }).catch(() => null);
@@ -47,6 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateEnrollmentForm();
 
   function renderConnection(state) {
+    lifecycleStatus = state.dp_device_lifecycle_status || lifecycleStatus;
     updateEnrollmentForm();
     const policy = state.dp_policy_sync;
     const policyStatus = document.getElementById('policy-status');
@@ -56,10 +58,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const heartbeatAge = Date.now() - Date.parse(state.dp_last_heartbeat_at || '');
     const connected = isEnrolled && state.dp_device_connection_status === 'connected' && heartbeatAge >= 0 && heartbeatAge < 120000;
     const monitoringActive = state.dp_monitoring_allowed === true && Date.now() < Date.parse(state.dp_monitoring_allowed_until || '');
-    deviceStatus.textContent = connected ? 'Connected' : !isEnrolled ? 'Enrollment Pending' : state.dp_last_heartbeat_at ? 'Offline' : 'Connection Pending';
+    deviceStatus.textContent = lifecycleStatus === 'REVOKED' ? 'Revoked' : lifecycleStatus === 'ARCHIVED' ? 'Archived' : connected ? 'Connected' : !isEnrolled ? 'Enrollment Pending' : state.dp_last_heartbeat_at ? 'Offline' : 'Connection Pending';
     lastHeartbeatEl.textContent = state.dp_last_heartbeat_at ? new Date(state.dp_last_heartbeat_at).toLocaleString() : '—';
     lastSyncEl.textContent = state.dp_last_successful_sync_at ? new Date(state.dp_last_successful_sync_at).toLocaleString() : '—';
-    if (!isEnrolled) {
+    if (lifecycleStatus === 'REVOKED') {
+      enrollmentStatus.textContent = 'This device was revoked by an administrator. Monitoring, screenshots, and uploads are stopped. Pending events remain stored locally.';
+    } else if (lifecycleStatus === 'ARCHIVED') {
+      enrollmentStatus.textContent = 'This device is archived. Monitoring, screenshots, and uploads are stopped while local pending events are preserved.';
+    } else if (!isEnrolled) {
       enrollmentStatus.textContent = 'Enter a one-time enrollment token created for your account. Pending events stay on this device until authorized sync is available.';
     } else if (connected && !monitoringActive) {
       enrollmentStatus.textContent = `Monitoring paused: ${monitoringReason(state.dp_monitoring_reason)} Pending events are retained.`;

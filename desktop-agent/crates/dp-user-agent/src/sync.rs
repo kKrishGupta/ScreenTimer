@@ -2,9 +2,10 @@
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
-use dp_core::{ActivityBatch, ActivityEvent, DeviceInfo};
+use dp_core::{parse_backend_url, ActivityBatch, ActivityEvent, DeviceInfo};
 use dp_storage::Storage;
 use std::collections::HashSet;
+use std::fmt;
 #[cfg(not(windows))]
 use std::io::{Read, Write};
 #[cfg(not(windows))]
@@ -39,17 +40,49 @@ pub struct ScreenMonitoringPolicy {
     pub allowed_until: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedUrl {
-    scheme: String,
-    host: String,
-    port: u16,
-    base_path: String,
-}
-
 #[derive(Debug)]
 struct HttpResponse {
     body: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BackendRejection {
+    status: u16,
+    code: String,
+    message: String,
+}
+
+impl fmt::Display for BackendRejection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "backend rejected the device request with HTTP {} ({}): {}",
+            self.status, self.code, self.message
+        )
+    }
+}
+
+impl std::error::Error for BackendRejection {}
+
+fn backend_rejection(status: u16, body: &[u8]) -> anyhow::Error {
+    let parsed = serde_json::from_slice::<serde_json::Value>(body).ok();
+    let code = parsed
+        .as_ref()
+        .and_then(|value| value.pointer("/error/code"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("DEVICE_REQUEST_REJECTED")
+        .to_owned();
+    let message = parsed
+        .as_ref()
+        .and_then(|value| value.pointer("/error/message"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("The backend rejected this device request")
+        .to_owned();
+    anyhow::Error::new(BackendRejection {
+        status,
+        code,
+        message,
+    })
 }
 
 /// Attempts to synchronize valid pending events. Invalid rows are retained in a
@@ -166,7 +199,12 @@ pub fn sync_pending_events(
     storage
         .quarantine_events(&rejected_ids, "OUTSIDE_AUTHORIZED_WINDOW")
         .context("failed to quarantine unauthorized activity intervals")?;
-    let _ = storage.prune_synced_events(7);
+    let synced_retention_days = std::env::var("DP_SYNCED_QUEUE_RETENTION_DAYS")
+        .ok()
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .filter(|days| (1..=365).contains(days))
+        .unwrap_or(7);
+    let _ = storage.prune_synced_events(synced_retention_days);
 
     let synced = acked_ids.len();
     let rejected_count = rejected_ids.len();
@@ -210,79 +248,16 @@ fn post_batch_response(backend_url: &str, body: &[u8]) -> Result<serde_json::Val
         .context("backend returned invalid JSON for activity sync")
 }
 
-fn parse_url(raw: &str) -> Result<ParsedUrl> {
-    let (scheme, stripped) = if let Some(value) = raw.strip_prefix("http://") {
-        ("http", value)
-    } else if let Some(value) = raw.strip_prefix("https://") {
-        ("https", value)
-    } else {
-        bail!("backend URL must use explicit http:// or https:// scheme")
-    };
-    let (host_port, path) = match stripped.find('/') {
-        Some(idx) => (&stripped[..idx], &stripped[idx..]),
-        None => (stripped, ""),
-    };
-    if host_port.contains(['?', '#', '@', '\\'])
-        || path.contains(['?', '#', '\\'])
-        || raw.chars().any(char::is_whitespace)
-    {
-        bail!("backend URL must not include credentials, whitespace, a query or fragment")
-    }
-    let (host, port) = if let Some(bracketed) = host_port.strip_prefix('[') {
-        let (host, suffix) = bracketed
-            .split_once(']')
-            .context("invalid IPv6 backend host")?;
-        let port = if suffix.is_empty() {
-            if scheme == "https" {
-                443
-            } else {
-                80
-            }
-        } else {
-            suffix
-                .strip_prefix(':')
-                .context("invalid IPv6 backend port")?
-                .parse::<u16>()
-                .context("invalid backend port")?
-        };
-        (host.to_owned(), port)
-    } else {
-        match host_port.rsplit_once(':') {
-            Some((host, port)) => (
-                host.trim_matches(['[', ']']).to_string(),
-                port.parse::<u16>().context("invalid port in backend URL")?,
-            ),
-            None => (
-                host_port.trim_matches(['[', ']']).to_string(),
-                if scheme == "https" { 443 } else { 80 },
-            ),
-        }
-    };
-    if host.is_empty() || port == 0 {
-        bail!("backend host is required");
-    }
-    Ok(ParsedUrl {
-        scheme: scheme.into(),
-        host,
-        port,
-        base_path: path.trim_end_matches('/').to_string(),
-    })
-}
-
 fn remote_backend_allowed() -> bool {
     std::env::var("DP_ALLOW_REMOTE_BACKEND")
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
 
-fn is_loopback(host: &str) -> bool {
-    matches!(host, "127.0.0.1" | "localhost" | "::1")
-}
-
 #[cfg(any(test, not(windows)))]
 fn parse_local_url(raw: &str) -> Result<(String, u16, String)> {
-    let parsed = parse_url(raw)?;
-    if parsed.scheme != "http" || !is_loopback(&parsed.host) {
+    let parsed = parse_backend_url(raw, false)?;
+    if parsed.scheme != "http" {
         bail!("local HTTP backend must use a loopback address")
     }
     Ok((parsed.host, parsed.port, parsed.base_path))
@@ -295,10 +270,7 @@ fn request_backend(
     headers: &[(String, String)],
     body: &[u8],
 ) -> Result<HttpResponse> {
-    let parsed = parse_url(backend_url)?;
-    if !is_loopback(&parsed.host) && (parsed.scheme != "https" || !remote_backend_allowed()) {
-        bail!("remote device synchronization requires HTTPS and DP_ALLOW_REMOTE_BACKEND=true")
-    }
+    let parsed = parse_backend_url(backend_url, remote_backend_allowed())?;
     let path = format!("{}{endpoint}", parsed.base_path);
 
     #[cfg(windows)]
@@ -314,14 +286,11 @@ fn request_backend(
         )
         .map_err(|message| anyhow::anyhow!("device request failed: {message}"))?;
         if !(200..300).contains(&response.status) {
-            bail!(
-                "backend rejected the device request with HTTP {}",
-                response.status
-            )
+            return Err(backend_rejection(response.status, &response.body));
         }
-        return Ok(HttpResponse {
+        Ok(HttpResponse {
             body: response.body,
-        });
+        })
     }
 
     #[cfg(not(windows))]
@@ -379,7 +348,7 @@ fn request_backend(
             .and_then(|value| value.parse::<u16>().ok())
             .context("backend returned malformed HTTP status")?;
         if !(200..300).contains(&status) {
-            bail!("backend rejected the device request with HTTP {status}");
+            return Err(backend_rejection(status, &response[split + 4..]));
         }
         return Ok(HttpResponse {
             body: response[split + 4..].to_vec(),
@@ -404,13 +373,32 @@ pub fn send_startup_heartbeat(backend_url: &str, device: &DeviceInfo) -> Result<
         ("Content-Type".to_string(), "application/json".to_string()),
         ("X-Device-Secret".to_string(), secret.trim().to_string()),
     ];
-    let response = request_backend(
+    let response = match request_backend(
         "POST",
         backend_url,
         &format!("/api/v1/devices/{}/heartbeat", device.id),
         &headers,
         &body,
-    )?;
+    ) {
+        Ok(response) => response,
+        Err(error) => {
+            if let Some(rejection) = error.downcast_ref::<BackendRejection>() {
+                if matches!(
+                    rejection.code.as_str(),
+                    "DEVICE_REVOKED" | "DEVICE_ARCHIVED"
+                ) {
+                    warn!(device_id = %device.id, lifecycle = %rejection.code, "Device lifecycle prevents monitoring and uploads; local queues are preserved");
+                    return Ok(MonitoringGate {
+                        allowed: false,
+                        allowed_from: None,
+                        allowed_until: None,
+                        reason: Some(rejection.code.clone()),
+                    });
+                }
+            }
+            return Err(error);
+        }
+    };
     let parsed: serde_json::Value = serde_json::from_slice(&response.body)
         .context("backend returned invalid heartbeat JSON")?;
     let monitoring = parsed.get("monitoring");
@@ -650,10 +638,10 @@ mod tests {
 
     #[test]
     fn backend_parser_rejects_credentials_and_accepts_ipv6_loopback() {
-        assert!(parse_url("https://user:secret@example.test").is_err());
-        assert!(parse_url("http://localhost:3001/\r\nX-Header:secret").is_err());
+        assert!(parse_backend_url("https://user:secret@example.test", true).is_err());
+        assert!(parse_backend_url("http://localhost:3001/\r\nX-Header:secret", false).is_err());
         assert_eq!(
-            parse_local_url("http://[::1]:3001").unwrap(),
+            parse_local_url("http://[::1]:3001").expect("test fixture operation must succeed"),
             ("::1".into(), 3001, String::new())
         );
     }
@@ -664,7 +652,7 @@ mod tests {
             extract_device_secret(
                 &serde_json::json!({ "deviceSecret": "dp_sec_012345678901234567890123" })
             )
-            .unwrap(),
+            .expect("test fixture operation must succeed"),
             "dp_sec_012345678901234567890123"
         );
         assert!(
@@ -673,19 +661,49 @@ mod tests {
     }
 
     #[test]
+    fn backend_rejection_preserves_structured_device_lifecycle_without_credentials() {
+        let error = backend_rejection(
+            403,
+            br#"{"error":{"code":"DEVICE_REVOKED","message":"This device has been revoked by an administrator"}}"#,
+        );
+        let rejection = error
+            .downcast_ref::<BackendRejection>()
+            .expect("test fixture operation must succeed");
+        assert_eq!(rejection.status, 403);
+        assert_eq!(rejection.code, "DEVICE_REVOKED");
+        assert_eq!(
+            rejection.message,
+            "This device has been revoked by an administrator"
+        );
+        assert!(!error.to_string().contains("dp_sec_"));
+    }
+
+    #[test]
     fn screenshot_upload_matches_backend_http_contract() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let listener =
+            TcpListener::bind("127.0.0.1:0").expect("test fixture operation must succeed");
+        let port = listener
+            .local_addr()
+            .expect("test fixture operation must succeed")
+            .port();
         let device_id = Uuid::new_v4();
         let capture_key = "capture_key_1234567890";
         let captured_at = "2026-11-07T04:30:00.000Z";
         let jpeg = [0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0xff, 0xd9];
         let expected_jpeg = jpeg;
         let server_thread = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let (mut stream, _) = listener
+                .accept()
+                .expect("test fixture operation must succeed");
+            let mut reader = std::io::BufReader::new(
+                stream
+                    .try_clone()
+                    .expect("test fixture operation must succeed"),
+            );
             let mut request_line = String::new();
-            reader.read_line(&mut request_line).unwrap();
+            reader
+                .read_line(&mut request_line)
+                .expect("test fixture operation must succeed");
             assert_eq!(
                 request_line.trim_end(),
                 format!("POST /api/v1/screen-monitoring/captures?deviceId={device_id} HTTP/1.1")
@@ -694,11 +712,15 @@ mod tests {
             let mut headers = HashMap::new();
             loop {
                 let mut line = String::new();
-                reader.read_line(&mut line).unwrap();
+                reader
+                    .read_line(&mut line)
+                    .expect("test fixture operation must succeed");
                 if line == "\r\n" {
                     break;
                 }
-                let (name, value) = line.split_once(':').unwrap();
+                let (name, value) = line
+                    .split_once(':')
+                    .expect("test fixture operation must succeed");
                 headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
             }
             assert_eq!(
@@ -730,13 +752,19 @@ mod tests {
                 Some("Code.exeInjected")
             );
 
-            let length = headers["content-length"].parse::<usize>().unwrap();
+            let length = headers["content-length"]
+                .parse::<usize>()
+                .expect("test fixture operation must succeed");
             let mut body = vec![0; length];
-            reader.read_exact(&mut body).unwrap();
+            reader
+                .read_exact(&mut body)
+                .expect("test fixture operation must succeed");
             assert_eq!(body, expected_jpeg);
             let body = r#"{"success":true,"captureId":"capture-test"}"#;
             let response = format!("HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
-            stream.write_all(response.as_bytes()).unwrap();
+            stream
+                .write_all(response.as_bytes())
+                .expect("test fixture operation must succeed");
         });
 
         let device = DeviceInfo {
@@ -760,18 +788,21 @@ mod tests {
             },
             " dp_sec_contract_test_123456789 ",
         )
-        .unwrap();
-        server_thread.join().unwrap();
+        .expect("test fixture operation must succeed");
+        server_thread
+            .join()
+            .expect("test fixture operation must succeed");
     }
 
     #[test]
     fn local_url_parser_accepts_only_loopback_http() {
         assert_eq!(
-            parse_local_url("http://127.0.0.1:3001").unwrap(),
+            parse_local_url("http://127.0.0.1:3001").expect("test fixture operation must succeed"),
             ("127.0.0.1".into(), 3001, String::new())
         );
         assert_eq!(
-            parse_local_url("http://localhost:8080/prefix").unwrap(),
+            parse_local_url("http://localhost:8080/prefix")
+                .expect("test fixture operation must succeed"),
             ("localhost".into(), 8080, "/prefix".into())
         );
         assert!(parse_local_url("http://192.168.1.5:3001").is_err());
@@ -787,19 +818,30 @@ mod tests {
             Ok(value) => value,
             Err(_) => return,
         };
-        let port = listener.local_addr().unwrap().port();
+        let port = listener
+            .local_addr()
+            .expect("test fixture operation must succeed")
+            .port();
         let event_id = Uuid::new_v4();
         let server_thread = thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
-                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                let mut reader = std::io::BufReader::new(
+                    stream
+                        .try_clone()
+                        .expect("test fixture operation must succeed"),
+                );
                 let mut first_line = String::new();
-                reader.read_line(&mut first_line).unwrap();
+                reader
+                    .read_line(&mut first_line)
+                    .expect("test fixture operation must succeed");
                 let response_body = format!("{{\"accepted\":1,\"deduplicated\":0,\"rejected\":0,\"acceptedEventIds\":[\"{event_id}\"],\"deduplicatedEventIds\":[],\"rejectedEventIds\":[]}}");
                 let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response_body.len(), response_body);
-                stream.write_all(response.as_bytes()).unwrap();
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("test fixture operation must succeed");
             }
         });
-        let mut storage = Storage::open_in_memory().unwrap();
+        let mut storage = Storage::open_in_memory().expect("test fixture operation must succeed");
         let device_id = Uuid::new_v4();
         let event = ActivityEvent {
             schema_version: 1,
@@ -830,8 +872,11 @@ mod tests {
             created_at: Utc::now(),
         };
         storage
-            .record_session_with_event(&session, &serde_json::to_string(&event).unwrap())
-            .unwrap();
+            .record_session_with_event(
+                &session,
+                &serde_json::to_string(&event).expect("test fixture operation must succeed"),
+            )
+            .expect("test fixture operation must succeed");
         let device = DeviceInfo {
             id: device_id,
             kind: EventSource::DesktopAgent,
@@ -846,10 +891,17 @@ mod tests {
             &device,
             10,
         )
-        .unwrap();
+        .expect("test fixture operation must succeed");
         assert_eq!(outcome.attempted, 1);
         assert_eq!(outcome.synced, 1);
-        assert_eq!(storage.count_pending_sync().unwrap(), 0);
-        server_thread.join().unwrap();
+        assert_eq!(
+            storage
+                .count_pending_sync()
+                .expect("test fixture operation must succeed"),
+            0
+        );
+        server_thread
+            .join()
+            .expect("test fixture operation must succeed");
     }
 }

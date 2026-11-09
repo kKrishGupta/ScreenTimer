@@ -30,7 +30,23 @@ pub fn is_workstation_locked() -> bool {
         .iter()
         .position(|value| *value == 0)
         .unwrap_or(name.len());
-    String::from_utf16_lossy(&name[..end]).eq_ignore_ascii_case("Winlogon")
+    !is_collectable_desktop(&String::from_utf16_lossy(&name[..end]))
+}
+
+fn is_collectable_desktop(name: &str) -> bool {
+    name.eq_ignore_ascii_case("Default")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_default_interactive_desktop_is_collectable() {
+        assert!(super::is_collectable_desktop("Default"));
+        assert!(super::is_collectable_desktop("default"));
+        for name in ["", "Winlogon", "Disconnect", "SecureDesktop", "Unknown"] {
+            assert!(!super::is_collectable_desktop(name));
+        }
+    }
 }
 
 #[cfg(not(windows))]

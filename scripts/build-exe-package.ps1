@@ -1,9 +1,15 @@
 # DigitalPulse - Native Windows Package & Executable Builder
 # Compiles release binaries, builds Windows Launcher GUI, and packages distribution.
 
+[CmdletBinding()]
+param([switch]$Overwrite)
+
 $ErrorActionPreference = "Stop"
 $rootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $distDir = Join-Path $rootDir "dist\DigitalPulse-v0.1.0-win-x64"
+if ((Test-Path -LiteralPath $distDir) -and -not $Overwrite) {
+    throw 'Distribution already exists. Review it and pass -Overwrite explicitly before replacing artifacts.'
+}
 $cargoPath = "$env:USERPROFILE\.cargo\bin\cargo.exe"
 $cscPath = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
@@ -11,26 +17,23 @@ Write-Host "==========================================================" -Foregro
 Write-Host "       DigitalPulse Executable & Package Builder          " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# Stop any running launcher or agent before file updates so file locks are released
-Stop-Process -Name "dp-user-agent" -Force -ErrorAction SilentlyContinue
-Stop-Process -Name "DigitalPulse-Launcher" -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 800
+# Never terminate employee processes as a side effect of packaging.
 
 # 1. Build Rust Release Executables
 Write-Host "`n[1/5] Checking Rust desktop agent release binaries..." -ForegroundColor Yellow
 $releaseDir = Join-Path $rootDir "desktop-agent\target\release"
 $agentBin = Join-Path $releaseDir "dp-user-agent.exe"
 
-if (-not (Test-Path $agentBin)) {
+Push-Location -LiteralPath (Join-Path $rootDir 'desktop-agent')
+try {
     Write-Host "Compiling Rust desktop agent in release mode..." -ForegroundColor Yellow
     if (Test-Path $cargoPath) {
-        & $cargoPath build --release --manifest-path (Join-Path $rootDir "desktop-agent\Cargo.toml")
+        & $cargoPath build --release --workspace --locked
     } else {
-        cargo build --release --manifest-path (Join-Path $rootDir "desktop-agent\Cargo.toml")
+        cargo build --release --workspace --locked
     }
-} else {
-    Write-Host "Using latest release binaries from $releaseDir" -ForegroundColor Green
-}
+    if ($LASTEXITCODE -ne 0) { throw 'Release build failed; no distribution was written.' }
+} finally { Pop-Location }
 
 # 2. Prepare Dist Directory
 Write-Host "[2/5] Creating distribution directory structure..." -ForegroundColor Yellow
@@ -44,13 +47,13 @@ Write-Host "[3/5] Bundling native executables and extension..." -ForegroundColor
 try {
     Copy-Item (Join-Path $releaseDir "dp-user-agent.exe") -Destination $distDir -Force -ErrorAction Stop
 } catch {
-    Write-Host "dp-user-agent.exe is currently running; existing binary preserved." -ForegroundColor Yellow
+    throw 'Could not copy the freshly built agent; distribution is incomplete.'
 }
 
 try {
     Copy-Item (Join-Path $releaseDir "dp-service.exe") -Destination $distDir -Force -ErrorAction Stop
 } catch {
-    Write-Host "dp-service.exe is currently running; existing binary preserved." -ForegroundColor Yellow
+    throw 'Could not copy the freshly built service; distribution is incomplete.'
 }
 
 # Copy browser extension
@@ -59,18 +62,17 @@ Get-ChildItem -Path $extSrc -Exclude "node_modules", "tests" | Copy-Item -Destin
 
 # 4. Compile Modern Windows Enterprise Control Center (DigitalPulse-ControlCenter.exe)
 Write-Host "[4/5] Compiling native Windows Enterprise Control Center GUI..." -ForegroundColor Yellow
-Stop-Process -Name "DigitalPulse-ControlCenter", "DigitalPulse-Launcher" -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 300
 $controlCenterSrc = Join-Path $rootDir "apps\control-center\src\ControlCenter.cs"
 $controlCenterExe = Join-Path $distDir "DigitalPulse-ControlCenter.exe"
 $launcherExe = Join-Path $distDir "DigitalPulse-Launcher.exe"
 
 & $cscPath /target:winexe /optimize+ /codepage:65001 /out:$controlCenterExe /reference:System.Windows.Forms.dll,System.Drawing.dll,System.dll $controlCenterSrc
+if ($LASTEXITCODE -ne 0) { throw 'Control Center compilation failed; distribution is incomplete.' }
 
 try {
     Copy-Item $controlCenterExe $launcherExe -Force -ErrorAction Stop
 } catch {
-    Write-Host "Note: DigitalPulse-Launcher.exe was running; updated as DigitalPulse-ControlCenter.exe" -ForegroundColor Yellow
+    throw 'Could not copy the freshly built launcher; distribution is incomplete.'
 }
 
 # 5. Create Helper Batch Scripts

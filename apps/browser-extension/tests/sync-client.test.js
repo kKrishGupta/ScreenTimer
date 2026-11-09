@@ -191,6 +191,39 @@ test('stops retrying a rejected device credential and preserves its queue for re
   assert.match(storage.dp_sync_error, /rejected|invalid/i);
 });
 
+test('records revoked lifecycle, stops uploads, and preserves the stable identity and pending queue', async () => {
+  const queue = makeQueue(3);
+  let requests = 0;
+  const { client, storage } = setup({ queue, fetchImpl: async () => {
+    requests += 1;
+    return new Response(JSON.stringify({ error: { code: 'DEVICE_REVOKED', message: 'This device has been revoked by an administrator' } }), { status: 403 });
+  } });
+  const heartbeat = await client.sendHeartbeat();
+  assert.equal(heartbeat.lifecycleStatus, 'REVOKED');
+  assert.equal(storage.dp_device_lifecycle_status, 'REVOKED');
+  assert.equal(storage.dp_device_secret, 'dp_sec_test-secret-never-render', 'the installation identity remains available for administrator-approved recovery');
+  assert.equal(storage.dp_monitoring_allowed, false);
+  const sync = await client.syncQueue();
+  assert.equal(sync.lifecyclePaused, true);
+  assert.equal(requests, 1, 'no activity upload is attempted after lifecycle rejection');
+  assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY].length, 3);
+});
+
+test('records archive state and resumes only after a healthy heartbeat confirms administrator restore', async () => {
+  let archived = true;
+  const { client, storage } = setup({ queue: makeQueue(1), fetchImpl: async () => archived
+    ? new Response(JSON.stringify({ error: { code: 'DEVICE_ARCHIVED', message: 'This device has been archived by an administrator' } }), { status: 403 })
+    : new Response(JSON.stringify({ status: 'healthy', monitoring: { allowed: false, reason: 'DEVICE_NOT_SELECTED' } }), { status: 200 }) });
+  const rejected = await client.sendHeartbeat();
+  assert.equal(rejected.lifecycleStatus, 'ARCHIVED');
+  assert.equal((await client.syncQueue()).lifecyclePaused, true);
+  archived = false;
+  const restored = await client.sendHeartbeat();
+  assert.equal(restored.ok, true);
+  assert.equal(storage.dp_device_lifecycle_status, 'ACTIVE');
+  assert.equal(storage.dp_enrollment_status, 'enrolled');
+});
+
 test('retains malformed and conflicting queued rows during sync', async () => {
   const queue = [...makeQueue(1), { eventId: 'bad', deviceId: DEVICE_ID, type: 'web_session' }];
   let requestIds = [];

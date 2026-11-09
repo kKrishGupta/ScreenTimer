@@ -358,7 +358,7 @@ namespace DigitalPulse.ControlCenter
             };
             Label lblNotice = new Label
             {
-                Text = "RESILIENCE ARCHITECTURE:\n• When the backend control plane is offline, the agent safely buffers events in SQLite (agent_storage.db).\n• Zero data loss: All buffered events are automatically pushed on the next heartbeat or sync trigger.\n• Process Lifecycle: Duplicate agents are prevented automatically through single-instance locks.",
+                Text = "RESILIENCE ARCHITECTURE:\n• Completed authorized intervals are buffered in SQLite while the backend is offline.\n• A forced stop can lose the current in-progress interval; queued rows remain for retry.\n• Duplicate agents using the same database are prevented by a single-instance lock.",
                 ForeColor = Color.FromArgb(203, 213, 225),
                 Font = new Font("Segoe UI", 8.5f),
                 Location = new Point(14, 12),
@@ -749,13 +749,15 @@ namespace DigitalPulse.ControlCenter
             {
                 try
                 {
-                    int killed = 0;
-                    foreach (var p in Process.GetProcessesByName("dp-user-agent"))
+                    if (agentPid <= 0)
+                        throw new InvalidOperationException("The tracked agent process ID is unavailable. Stop it from its console with Ctrl+C.");
+                    using (var p = Process.GetProcessById(agentPid))
                     {
-                        p.Kill();
-                        killed++;
+                        bool closeRequested = p.CloseMainWindow();
+                        if (!closeRequested || !p.WaitForExit(8000))
+                            throw new InvalidOperationException("The agent did not acknowledge a graceful close. Use Ctrl+C in its console; a forced stop can lose the current interval.");
                     }
-                    LogEvent("Stopped " + killed + " Desktop Agent process(es).");
+                    LogEvent("Gracefully stopped tracked Desktop Agent PID " + agentPid + ".");
                     RefreshSubsystems();
                     MessageBox.Show("Desktop Agent stopped successfully.", "Agent Terminated", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }

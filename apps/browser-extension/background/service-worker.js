@@ -2,7 +2,13 @@ import { CONFIG } from '../shared/constants.js';
 import { recordBlockedAttempt, flushBlockedAttempts } from './blocked-attempts.js';
 import { TabManager, reconcileActiveTab } from './tab-manager.js';
 import { ActivityManager } from './activity-manager.js';
-import { syncBlockingRulesWithStatus as syncBlockingRules } from './policy-sync.js';
+import {
+  syncBlockingRulesWithStatus as syncBlockingRules,
+  enforceBlockedTabs,
+  markTabBlockedByDnr,
+  handleBlockedNavigationCompleted,
+  clearBlockedTabEnforcementState,
+} from './policy-sync.js';
 import { createSyncClient } from './sync-client.js';
 import { createScreenshotCapture } from './screenshot-capture.js';
 import { ensureSyncAlarm, singleFlight, serializeTasks, SYNC_ALARM_NAME } from './sync-scheduler.js';
@@ -148,20 +154,28 @@ function runSyncSafely(source) {
 }
 
 chrome.webNavigation.onErrorOccurred.addListener((details) => {
+  void markTabBlockedByDnr(chrome, details).catch((error) => console.debug('[DigitalPulse] Blocked state update:', error.message));
   recordBlockedAttempt(details).then(() => flushBlockedAttempts()).catch((error) => console.debug('[DigitalPulse] Blocked attempt:', error.message));
 });
+chrome.webNavigation?.onCompleted?.addListener((details) => {
+  void handleBlockedNavigationCompleted(chrome, details).catch((error) => console.debug('[DigitalPulse] Blocked navigation check:', error.message));
+});
+chrome.webNavigation?.onHistoryStateUpdated?.addListener((details) => {
+  void handleBlockedNavigationCompleted(chrome, details).catch((error) => console.debug('[DigitalPulse] Blocked history navigation check:', error.message));
+});
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.action === 'get_enrollment_state') { chrome.storage.local.get(['dp_device_secret']).then((stored) => sendResponse({ enrolled: Boolean(stored.dp_device_secret) })); return true; }
+  if (message.action === 'get_enrollment_state') { chrome.storage.local.get(['dp_device_secret', 'dp_device_lifecycle_status']).then((stored) => sendResponse({ enrolled: Boolean(stored.dp_device_secret), lifecycleStatus: stored.dp_device_lifecycle_status || 'ACTIVE' })); return true; }
   if (message.action === 'get_device_id') { deviceIdPromise.then((deviceId) => sendResponse({ deviceId })); return true; }
   if (message.action === 'get_worker_diagnostics') {
     Promise.all([
       deviceIdPromise,
-      chrome.storage.local.get([CONFIG.SYNC_QUEUE_STORAGE_KEY, 'dp_device_secret', 'dp_sync_error', 'dp_worker_warning']),
+      chrome.storage.local.get([CONFIG.SYNC_QUEUE_STORAGE_KEY, 'dp_device_secret', 'dp_device_lifecycle_status', 'dp_sync_error', 'dp_worker_warning']),
     ]).then(([deviceId, stored]) => sendResponse({
       ok: true,
       workerVersion: chrome.runtime.getManifest().version,
       deviceId,
       enrolled: Boolean(stored.dp_device_secret),
+      lifecycleStatus: stored.dp_device_lifecycle_status || 'ACTIVE',
       queued: (stored[CONFIG.SYNC_QUEUE_STORAGE_KEY] || []).length,
       syncError: stored.dp_sync_error || null,
       warning: stored.dp_worker_warning || null,
@@ -195,15 +209,26 @@ function handleBrowserTransition() {
     .catch((error) => console.debug('[DigitalPulse] Tab transition failed:', error.message));
 }
 chrome.tabs.onActivated.addListener(handleBrowserTransition);
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => { if (tab.active && changeInfo.url) handleBrowserTransition(); });
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.url || changeInfo.status === 'complete') {
+    void enforceBlockedTabs(chrome).catch((error) => console.debug('[DigitalPulse] Tab policy enforcement:', error.message));
+  }
+  if (tab.active && changeInfo.url) handleBrowserTransition();
+});
 chrome.windows.onFocusChanged.addListener(handleBrowserTransition);
 chrome.idle.setDetectionInterval(CONFIG.IDLE_THRESHOLD_SECS);
 chrome.idle.onStateChanged.addListener(handleBrowserTransition);
 if (chrome.alarms?.onAlarm) {
   chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === SYNC_ALARM_NAME) void runSyncSafely('alarm'); });
 }
-chrome.runtime.onInstalled?.addListener(() => { void ensurePeriodicSyncAlarm(); void runSyncSafely('installed'); });
-chrome.runtime.onStartup?.addListener(() => { void ensurePeriodicSyncAlarm(); void runSyncSafely('browser-startup'); });
+chrome.runtime.onInstalled?.addListener(() => {
+  void ensurePeriodicSyncAlarm();
+  void clearBlockedTabEnforcementState(chrome).finally(() => runSyncSafely('installed'));
+});
+chrome.runtime.onStartup?.addListener(() => {
+  void ensurePeriodicSyncAlarm();
+  void clearBlockedTabEnforcementState(chrome).finally(() => runSyncSafely('browser-startup'));
+});
 
 // Alarms may be cleared by a browser restart. Check without replacing an
 // existing alarm, then synchronize once whenever the worker is loaded.

@@ -12,6 +12,14 @@ pub const DEFAULT_IDLE_THRESHOLD: Duration = Duration::from_secs(60);
 /// Default local backend (development only, loopback).
 pub const DEFAULT_BACKEND_URL: &str = "http://127.0.0.1:3001";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendUrl {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+    pub base_path: String,
+}
+
 /// Runtime configuration for the user-session agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentConfig {
@@ -43,8 +51,10 @@ pub enum ConfigError {
     InvalidEnv { name: &'static str, value: String },
     #[error("idle threshold must be between 5 and 3600 seconds")]
     IdleThresholdOutOfRange,
-    #[error("backend URL must target the loopback interface in Stage 1: '{0}'")]
-    NonLocalBackend(String),
+    #[error("sync interval must be between 5 and 3600 seconds")]
+    SyncIntervalOutOfRange,
+    #[error("invalid backend URL: {0}")]
+    InvalidBackendUrl(String),
 }
 
 impl AgentConfig {
@@ -65,26 +75,97 @@ impl AgentConfig {
         if let Some(url) = lookup("DP_BACKEND_URL") {
             cfg.backend_url = url.trim_end_matches('/').to_owned();
         }
-        cfg.validate()?;
+        let allow_remote = lookup("DP_ALLOW_REMOTE_BACKEND")
+            .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+        cfg.validate_with_remote(allow_remote)?;
         Ok(cfg)
     }
 
     /// Validates invariants.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        let allow_remote = std::env::var("DP_ALLOW_REMOTE_BACKEND")
+            .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+        self.validate_with_remote(allow_remote)
+    }
+
+    fn validate_with_remote(&self, allow_remote: bool) -> Result<(), ConfigError> {
         if !(5..=3600).contains(&self.idle_threshold.as_secs()) {
             return Err(ConfigError::IdleThresholdOutOfRange);
         }
-        let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"]
-            .iter()
-            .any(|prefix| self.backend_url.starts_with(prefix));
-        let allow_remote = std::env::var("DP_ALLOW_REMOTE_BACKEND")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        if !local && !allow_remote {
-            return Err(ConfigError::NonLocalBackend(self.backend_url.clone()));
+        if !(5..=3600).contains(&self.sync_interval.as_secs()) {
+            return Err(ConfigError::SyncIntervalOutOfRange);
         }
+        parse_backend_url(&self.backend_url, allow_remote)?;
         Ok(())
     }
+}
+
+pub fn parse_backend_url(raw: &str, allow_remote: bool) -> Result<BackendUrl, ConfigError> {
+    let invalid = |message: &str| ConfigError::InvalidBackendUrl(message.to_owned());
+    let (scheme, stripped) = raw
+        .strip_prefix("http://")
+        .map(|value| ("http", value))
+        .or_else(|| raw.strip_prefix("https://").map(|value| ("https", value)))
+        .ok_or_else(|| invalid("an explicit http:// or https:// scheme is required"))?;
+    let (host_port, path) = stripped.find('/').map_or((stripped, ""), |index| {
+        (&stripped[..index], &stripped[index..])
+    });
+    if host_port.contains(['?', '#', '@', '\\'])
+        || path.contains(['?', '#', '\\'])
+        || raw.chars().any(char::is_whitespace)
+    {
+        return Err(invalid(
+            "credentials, whitespace, query strings, fragments and backslashes are forbidden",
+        ));
+    }
+    let (host, port) = if let Some(bracketed) = host_port.strip_prefix('[') {
+        let (host, suffix) = bracketed
+            .split_once(']')
+            .ok_or_else(|| invalid("invalid IPv6 host"))?;
+        let port = if suffix.is_empty() {
+            if scheme == "https" {
+                443
+            } else {
+                80
+            }
+        } else {
+            suffix
+                .strip_prefix(':')
+                .ok_or_else(|| invalid("invalid IPv6 port"))?
+                .parse::<u16>()
+                .map_err(|_| invalid("invalid port"))?
+        };
+        (host.to_ascii_lowercase(), port)
+    } else {
+        match host_port.rsplit_once(':') {
+            Some((host, port)) => (
+                host.to_ascii_lowercase(),
+                port.parse::<u16>().map_err(|_| invalid("invalid port"))?,
+            ),
+            None => (
+                host_port.to_ascii_lowercase(),
+                if scheme == "https" { 443 } else { 80 },
+            ),
+        }
+    };
+    if host.is_empty() || port == 0 {
+        return Err(invalid("host and non-zero port are required"));
+    }
+    let loopback = matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1");
+    if !loopback && scheme != "https" {
+        return Err(invalid("remote backends require HTTPS"));
+    }
+    if !loopback && !allow_remote {
+        return Err(invalid(
+            "remote HTTPS requires DP_ALLOW_REMOTE_BACKEND=true",
+        ));
+    }
+    Ok(BackendUrl {
+        scheme: scheme.into(),
+        host,
+        port,
+        base_path: path.trim_end_matches('/').to_owned(),
+    })
 }
 
 fn parse_secs(name: &'static str, raw: &str) -> Result<Duration, ConfigError> {
@@ -140,7 +221,32 @@ mod tests {
         );
         assert!(matches!(
             AgentConfig::from_lookup(lookup(&[("DP_BACKEND_URL", "https://example.com")])),
-            Err(ConfigError::NonLocalBackend(_))
+            Err(ConfigError::InvalidBackendUrl(_))
         ));
+    }
+
+    #[test]
+    fn backend_url_policy_is_exact_and_shared() {
+        assert!(parse_backend_url("http://localhost.evil.test", false).is_err());
+        assert!(parse_backend_url("http://10.0.0.2:3001", true).is_err());
+        assert!(parse_backend_url("https://api.example.test/base", false).is_err());
+        let remote = parse_backend_url("https://API.Example.test/base/", true)
+            .expect("remote HTTPS fixture must be accepted with explicit opt-in");
+        assert_eq!(remote.host, "api.example.test");
+        assert_eq!(remote.base_path, "/base");
+        assert!(parse_backend_url("https://user@api.example.test", true).is_err());
+    }
+
+    #[test]
+    fn sync_interval_rejects_busy_polling_and_excessive_delays() {
+        for value in ["0", "1", "4", "3601", "18446744073709551615"] {
+            assert_eq!(
+                AgentConfig::from_lookup(lookup(&[("DP_SYNC_INTERVAL_SECS", value)])),
+                Err(ConfigError::SyncIntervalOutOfRange)
+            );
+        }
+        for value in ["5", "30", "3600"] {
+            assert!(AgentConfig::from_lookup(lookup(&[("DP_SYNC_INTERVAL_SECS", value)])).is_ok());
+        }
     }
 }

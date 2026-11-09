@@ -1,0 +1,186 @@
+{
+  "sha256": "4198364d1008197a5f0d45e438d5892374d5b8b96f2b56e67d0f18e14658b974",
+  "unchanged_during_run": true,
+  "results": [
+    {
+      "name": "version",
+      "pid": 17432,
+      "exit_code": 0,
+      "elapsed_seconds": 1.33,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "unenrolled",
+      "pid": 21256,
+      "exit_code": 0,
+      "elapsed_seconds": 1.153,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "status-first",
+      "pid": 22112,
+      "exit_code": 0,
+      "elapsed_seconds": 1.097,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "status-restart",
+      "pid": 22132,
+      "exit_code": 0,
+      "elapsed_seconds": 0.625,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "unenrolled-oneshot",
+      "pid": 20364,
+      "exit_code": 1,
+      "elapsed_seconds": 0.592,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "unenrolled-sync",
+      "pid": 12544,
+      "exit_code": 1,
+      "elapsed_seconds": 0.584,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "missing-token",
+      "pid": 21208,
+      "exit_code": 1,
+      "elapsed_seconds": 0.535,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "invalid-token",
+      "pid": 21516,
+      "exit_code": 1,
+      "elapsed_seconds": 1.021,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "zero-interval",
+      "pid": 18472,
+      "exit_code": 1,
+      "elapsed_seconds": 0.546,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "invalid-url",
+      "pid": 6872,
+      "exit_code": 1,
+      "elapsed_seconds": 0.497,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "corrupt-identity",
+      "pid": 15300,
+      "exit_code": 1,
+      "elapsed_seconds": 0.536,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "duplicate-monitor",
+      "pid": 21956,
+      "exit_code": 1,
+      "elapsed_seconds": 0.958,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "denied-monitor",
+      "pid": 18064,
+      "exit_code": 0,
+      "elapsed_seconds": 16.694,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "restart-monitor",
+      "pid": 5456,
+      "exit_code": 0,
+      "elapsed_seconds": 3.571,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "revoked-protocol",
+      "pid": 21788,
+      "exit_code": 0,
+      "elapsed_seconds": 3.949,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "archived-protocol",
+      "pid": 3364,
+      "exit_code": 0,
+      "elapsed_seconds": 4.007,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "recovery-protocol",
+      "pid": 20576,
+      "exit_code": 0,
+      "elapsed_seconds": 13.34,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "offline-monitor",
+      "pid": 9840,
+      "exit_code": 0,
+      "elapsed_seconds": 6.021,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "terminated-monitor",
+      "pid": 20884,
+      "exit_code": 1,
+      "elapsed_seconds": 2.043,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "restart-after-termination",
+      "pid": 19964,
+      "exit_code": 0,
+      "elapsed_seconds": 3.269,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    }
+  ]
+}

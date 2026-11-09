@@ -1,0 +1,10 @@
+{
+  "device_id": "5fe92d34-47ca-4801-bb65-7c9fe3c6ccf1",
+  "activity_sessions": 0,
+  "tables": [
+    "schema_migrations",
+    "activity_sessions",
+    "sync_queue",
+    "agent_state"
+  ]
+}

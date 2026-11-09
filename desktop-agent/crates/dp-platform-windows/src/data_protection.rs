@@ -9,7 +9,7 @@ mod windows {
     };
 
     fn transform(bytes: &[u8], protect: bool) -> Result<Vec<u8>, String> {
-        let mut input = CRYPT_INTEGER_BLOB {
+        let input = CRYPT_INTEGER_BLOB {
             cbData: bytes.len() as u32,
             pbData: bytes.as_ptr() as *mut u8,
         };
@@ -20,7 +20,7 @@ mod windows {
         let ok = unsafe {
             if protect {
                 CryptProtectData(
-                    &mut input,
+                    &input,
                     std::ptr::null(),
                     std::ptr::null(),
                     std::ptr::null(),
@@ -30,7 +30,7 @@ mod windows {
                 )
             } else {
                 CryptUnprotectData(
-                    &mut input,
+                    &input,
                     std::ptr::null_mut(),
                     std::ptr::null(),
                     std::ptr::null(),

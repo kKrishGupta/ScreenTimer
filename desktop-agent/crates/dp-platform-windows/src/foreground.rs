@@ -67,6 +67,9 @@ pub fn get_foreground_hwnd() -> Option<HWND> {
 }
 
 /// Extracts the process ID owning the given window handle.
+// HWND is an opaque OS handle, not a pointer dereferenced by this wrapper.
+// Windows validates invalid/stale handles and leaves pid zero on failure.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn get_window_pid(hwnd: HWND) -> Option<u32> {
     let mut pid: u32 = 0;
     unsafe {

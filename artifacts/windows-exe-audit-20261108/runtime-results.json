@@ -1,0 +1,185 @@
+{
+  "sha256": "4844d6c4ce5bcdaf3c28c60d5635caf5248c26802a320281e2adadc8e8216900",
+  "results": [
+    {
+      "name": "version",
+      "pid": 22132,
+      "exit_code": 0,
+      "elapsed_seconds": 0.386,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "unenrolled",
+      "pid": 13296,
+      "exit_code": 0,
+      "elapsed_seconds": 0.353,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "status-first",
+      "pid": 12556,
+      "exit_code": 0,
+      "elapsed_seconds": 0.114,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "status-restart",
+      "pid": 21140,
+      "exit_code": 0,
+      "elapsed_seconds": 0.09,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "unenrolled-oneshot",
+      "pid": 5632,
+      "exit_code": 1,
+      "elapsed_seconds": 0.122,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "unenrolled-sync",
+      "pid": 17416,
+      "exit_code": 1,
+      "elapsed_seconds": 0.064,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "missing-token",
+      "pid": 21116,
+      "exit_code": 1,
+      "elapsed_seconds": 0.058,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "invalid-token",
+      "pid": 16516,
+      "exit_code": 1,
+      "elapsed_seconds": 0.195,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "zero-interval",
+      "pid": 20312,
+      "exit_code": 1,
+      "elapsed_seconds": 0.063,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "invalid-url",
+      "pid": 19744,
+      "exit_code": 1,
+      "elapsed_seconds": 0.065,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "corrupt-identity",
+      "pid": 15640,
+      "exit_code": 1,
+      "elapsed_seconds": 0.144,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "duplicate-monitor",
+      "pid": 22232,
+      "exit_code": 1,
+      "elapsed_seconds": 0.079,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "denied-monitor",
+      "pid": 15712,
+      "exit_code": 0,
+      "elapsed_seconds": 15.785,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "restart-monitor",
+      "pid": 5312,
+      "exit_code": 0,
+      "elapsed_seconds": 2.172,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "revoked-protocol",
+      "pid": 12752,
+      "exit_code": 0,
+      "elapsed_seconds": 2.427,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "archived-protocol",
+      "pid": 11852,
+      "exit_code": 0,
+      "elapsed_seconds": 2.547,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "recovery-protocol",
+      "pid": 18928,
+      "exit_code": 0,
+      "elapsed_seconds": 12.652,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "offline-monitor",
+      "pid": 13832,
+      "exit_code": 0,
+      "elapsed_seconds": 4.387,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    },
+    {
+      "name": "terminated-monitor",
+      "pid": 21508,
+      "exit_code": 1,
+      "elapsed_seconds": 2.178,
+      "timeout": false,
+      "expected_exit": 1,
+      "pass": true
+    },
+    {
+      "name": "restart-after-termination",
+      "pid": 15408,
+      "exit_code": 0,
+      "elapsed_seconds": 2.524,
+      "timeout": false,
+      "expected_exit": 0,
+      "pass": true
+    }
+  ]
+}

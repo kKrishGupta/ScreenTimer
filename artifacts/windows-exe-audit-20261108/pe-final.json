@@ -1,0 +1,1520 @@
+﻿[
+    {
+        "path":  "node_modules\\@prisma\\engines\\schema-engine-windows.exe",
+        "sha256":  "e6c4bb89d31f39f7ac601e264c998c0382c069df8485fb8810d0ba8fa806ea4a",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+        "sha256":  "c7bee37877d0aa6a046e52783fa0a2cf1a9ce5579d68bb3083bda99d4bff18ef",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "node_modules\\@digitalpulse\\dashboard\\public\\downloads\\digitalpulse-windows-agent.zip!digitalpulse-windows-agent/dp-user-agent.exe",
+        "sha256":  "f616f256513a6d1eae386ab653e9bf33a2d3b318f9f6c56ab85db7a4d98b8c7e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "node_modules\\@digitalpulse\\dashboard\\dist\\downloads\\digitalpulse-windows-agent.zip!digitalpulse-windows-agent/dp-user-agent.exe",
+        "sha256":  "f616f256513a6d1eae386ab653e9bf33a2d3b318f9f6c56ab85db7a4d98b8c7e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "node_modules\\@digitalpulse\\apps-container\\dashboard\\public\\downloads\\digitalpulse-windows-agent.zip!digitalpulse-windows-agent/dp-user-agent.exe",
+        "sha256":  "f616f256513a6d1eae386ab653e9bf33a2d3b318f9f6c56ab85db7a4d98b8c7e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "node_modules\\@digitalpulse\\apps-container\\dashboard\\dist\\downloads\\digitalpulse-windows-agent.zip!digitalpulse-windows-agent/dp-user-agent.exe",
+        "sha256":  "f616f256513a6d1eae386ab653e9bf33a2d3b318f9f6c56ab85db7a4d98b8c7e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\dp-service.exe",
+        "sha256":  "207704353ee87c383285ae0550431f43c9ac2eba5f1c6fb3c699f5522ac88617",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\dp-user-agent.exe",
+        "sha256":  "0575d1b9c4a89c068e6d04f0d96e421718d2ff105d1bda16c500687ae4a02158",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\deps\\dp_service-72b99ba6452a1f85.exe",
+        "sha256":  "207704353ee87c383285ae0550431f43c9ac2eba5f1c6fb3c699f5522ac88617",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\deps\\dp_user_agent-6d32e040600ed020.exe",
+        "sha256":  "8bbf3362724be48bada68044c4718f07a48278ec181d24547672be3fcb7f1dd9",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\deps\\dp_user_agent-e51abf8bc18eaae2.exe",
+        "sha256":  "0575d1b9c4a89c068e6d04f0d96e421718d2ff105d1bda16c500687ae4a02158",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\anyhow-f41e735410504d9d\\build-script-build.exe",
+        "sha256":  "1e7f85bf9ccd99793a2920acfe8eccf7469d35d698782d006a2ffcf99016cadb",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\anyhow-f41e735410504d9d\\build_script_build-f41e735410504d9d.exe",
+        "sha256":  "1e7f85bf9ccd99793a2920acfe8eccf7469d35d698782d006a2ffcf99016cadb",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\getrandom-9e75565bbb8d5bbd\\build-script-build.exe",
+        "sha256":  "89ae7d538b20102a21649198f01358e7d4b8bb895e817b5c9ba691c7b5deecf0",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\getrandom-9e75565bbb8d5bbd\\build_script_build-9e75565bbb8d5bbd.exe",
+        "sha256":  "89ae7d538b20102a21649198f01358e7d4b8bb895e817b5c9ba691c7b5deecf0",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\libsqlite3-sys-7e9b4f8a72c2cb35\\build-script-build.exe",
+        "sha256":  "20787856224698ee252f12765824820ae567666e546ec6c2167946fb319f78af",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\libsqlite3-sys-7e9b4f8a72c2cb35\\build_script_build-7e9b4f8a72c2cb35.exe",
+        "sha256":  "20787856224698ee252f12765824820ae567666e546ec6c2167946fb319f78af",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\num-traits-c2f9bfed08d468e2\\build-script-build.exe",
+        "sha256":  "c9120c08e46dbe96a4edb8d9f66a32c859e247246a7950655357167625b76843",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\num-traits-c2f9bfed08d468e2\\build_script_build-c2f9bfed08d468e2.exe",
+        "sha256":  "c9120c08e46dbe96a4edb8d9f66a32c859e247246a7950655357167625b76843",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\proc-macro2-8d87e9523b5b857b\\build-script-build.exe",
+        "sha256":  "b493e0dcaf706f096f4f07a5b86c20230ead0a0554a657eb892fcf96f77dfb50",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\proc-macro2-8d87e9523b5b857b\\build_script_build-8d87e9523b5b857b.exe",
+        "sha256":  "b493e0dcaf706f096f4f07a5b86c20230ead0a0554a657eb892fcf96f77dfb50",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\quote-94d4bd64eb4d3bc6\\build-script-build.exe",
+        "sha256":  "20fa6ffce70b586cc7d71190aa88dc71a009f7efc6361ee9247c26d1cbc49ae1",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\quote-94d4bd64eb4d3bc6\\build_script_build-94d4bd64eb4d3bc6.exe",
+        "sha256":  "20fa6ffce70b586cc7d71190aa88dc71a009f7efc6361ee9247c26d1cbc49ae1",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\serde-04a2c303677869c3\\build-script-build.exe",
+        "sha256":  "35c00568bfd0039c41aff294d6dc1e64bf29471845abb6bbd3c98c3127abe233",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\serde-04a2c303677869c3\\build_script_build-04a2c303677869c3.exe",
+        "sha256":  "35c00568bfd0039c41aff294d6dc1e64bf29471845abb6bbd3c98c3127abe233",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\serde_core-1741ac0555bc3308\\build-script-build.exe",
+        "sha256":  "9e3102c344a431ef48c0d30892fbd3dc7a028a4f187fa04c79851204ac5e7240",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\serde_core-1741ac0555bc3308\\build_script_build-1741ac0555bc3308.exe",
+        "sha256":  "9e3102c344a431ef48c0d30892fbd3dc7a028a4f187fa04c79851204ac5e7240",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\serde_json-92f4d7e68cd456a9\\build-script-build.exe",
+        "sha256":  "03d836bdfee2bfbdf49cb3e610a3e2274f9dc6956588b718be28c2d540dc6973",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\serde_json-92f4d7e68cd456a9\\build_script_build-92f4d7e68cd456a9.exe",
+        "sha256":  "03d836bdfee2bfbdf49cb3e610a3e2274f9dc6956588b718be28c2d540dc6973",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\thiserror-eae5b79fc819d54b\\build-script-build.exe",
+        "sha256":  "b9dd64a560bb2f7ff7d9fe9095794cb5cbd073bfa4e5583970c994fd2c169a64",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\thiserror-eae5b79fc819d54b\\build_script_build-eae5b79fc819d54b.exe",
+        "sha256":  "b9dd64a560bb2f7ff7d9fe9095794cb5cbd073bfa4e5583970c994fd2c169a64",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\zmij-cb88c4cfab10ae26\\build-script-build.exe",
+        "sha256":  "af63db8a47ddaa78c0bca64fce3d9006045816ec8c6770d989eb1f95527f7ff5",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\release\\build\\zmij-cb88c4cfab10ae26\\build_script_build-cb88c4cfab10ae26.exe",
+        "sha256":  "af63db8a47ddaa78c0bca64fce3d9006045816ec8c6770d989eb1f95527f7ff5",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\contract_fixtures-a03d0cd2e62588d4.exe",
+        "sha256":  "b9df61090a02366abd090c44048e72f83a19b228649082539188824bf5b0b8a4",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\contract_fixtures-cdccc5f02a4e5c20.exe",
+        "sha256":  "d32a66cffc52866ff9e3b5941bccdb59396740c8b263ba495bcf7fa47e478cbc",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_core-b2458dfeb2b2dd2d.exe",
+        "sha256":  "4447c36582779a34950f82b2673573de76d1b385f7a6d42d96ea43e33e9b1c28",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_core-cc3baccbcef569c3.exe",
+        "sha256":  "f34b1ea3d83c0fa769cb85403e74290d8f55f8e60d315ff37a2c2a2dc53dfefb",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_ipc-1b84d48ea7dc8eef.exe",
+        "sha256":  "08e8c38b7f128c2db1f447e1b9927c7a7b44d101554e41fd891022b069b8a9df",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_ipc-252a3ab8b2d9833c.exe",
+        "sha256":  "7548c631893177b41ad0950338a48677575f337a0487537c8baeb72f6e25ee3e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_platform_windows-046afeaf5f745686.exe",
+        "sha256":  "da565b1cb5720b2aaf2bcad8d48fe3d16197f5d08568c7f0f19ae970019167bc",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_platform_windows-098508be61573cdb.exe",
+        "sha256":  "e3c377a567b9aa6322433741d805e6b5ceb9811f240f18a67a9aedc8a333b3d4",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_platform_windows-190864621c2509df.exe",
+        "sha256":  "6a4919bcd1b429c7959459bfaf6190671429e844824f6e5ee901f58a0987d2db",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_service-93c723ee5a8a243f.exe",
+        "sha256":  "09f8779ce319dfa47e3f94d395397cef2f9d921dc27d50ceef7bda91f1a98ef9",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_service-afa06093b417be72.exe",
+        "sha256":  "5abcd222fc01770ea01e2b5a713015fc1f0925cb84763b1c5873b43d3a125fc2",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_service-da05e30a16478752.exe",
+        "sha256":  "6bea8fc2fccb1166860da1f60beb31eee62f663a6f27a0a959f86f0ea0674901",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_storage-67fadf26cd1dbb51.exe",
+        "sha256":  "b9d942ea32f2fb4256ca0e79ba4d7fb2fd66c8042716381d6bbc96f210d54759",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_storage-dff3777364cd03fd.exe",
+        "sha256":  "656957decf361780dceaf4f8284866d60dbde6b0513e9031e9aae5d99ab8137f",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_user_agent-4f00752328b1f01b.exe",
+        "sha256":  "8c44162c01bcd58e87cad9af8d74c3638e1d30e32b1a95536e67a16cb8a1079b",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_user_agent-8be52b1d40fa6bfa.exe",
+        "sha256":  "aa47f5a81011016fb9ce602ae9fe39a439fbd20875e3a388eba8bd118ead6f62",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\dp_user_agent-93e630c4291f256f.exe",
+        "sha256":  "6be0e8971c183546882eac84e73b47042c72e46499a77aea0994877d39f0bc16",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\monitor_integration-10a4bf567d11d643.exe",
+        "sha256":  "65ba0a5c8118b86d6973e7de23b4c0c50478d36a9779dd3405a3dfa62c5ca8c1",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\monitor_integration-6f531e42cf79736e.exe",
+        "sha256":  "f948e8f7e3488d5d932ab9a298b7dcd388c1f96df89485f3befda7ae09970a34",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\deps\\monitor_integration-fbb9d994dad85a60.exe",
+        "sha256":  "9863ddf7a28fae2d6ad695ea9debf65567d90ae601e4d149cdd4e241e0c6497e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\anyhow-189d86f1202d30a5\\build-script-build.exe",
+        "sha256":  "ae1006d3a325d8f80c6d1dc3058ac9eadb863cbb12b13e41d8dc78c8e7a49cee",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\anyhow-189d86f1202d30a5\\build_script_build-189d86f1202d30a5.exe",
+        "sha256":  "ae1006d3a325d8f80c6d1dc3058ac9eadb863cbb12b13e41d8dc78c8e7a49cee",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\getrandom-c03cb1b53b49af87\\build-script-build.exe",
+        "sha256":  "a2edf0623afd21f452a91d7f53454c1bab5fd63777ac6db27387bf9f055dbbb6",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\getrandom-c03cb1b53b49af87\\build_script_build-c03cb1b53b49af87.exe",
+        "sha256":  "a2edf0623afd21f452a91d7f53454c1bab5fd63777ac6db27387bf9f055dbbb6",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\libsqlite3-sys-54f1783f23e6dcc2\\build-script-build.exe",
+        "sha256":  "f52eab460647178b3463ba9881f603bebae3127a95c0e78d004590be64fc0b90",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\libsqlite3-sys-54f1783f23e6dcc2\\build_script_build-54f1783f23e6dcc2.exe",
+        "sha256":  "f52eab460647178b3463ba9881f603bebae3127a95c0e78d004590be64fc0b90",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\num-traits-da5639013b2cff62\\build-script-build.exe",
+        "sha256":  "afc671612ca450d47c30e9a8cb2f94c644c455eaef052661585dbbb4711d48fc",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\num-traits-da5639013b2cff62\\build_script_build-da5639013b2cff62.exe",
+        "sha256":  "afc671612ca450d47c30e9a8cb2f94c644c455eaef052661585dbbb4711d48fc",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\proc-macro2-b4e7129782b95bf9\\build-script-build.exe",
+        "sha256":  "e4a5d44cba32bde4172ea86080de3ebbfb68afd38357fb31e83c7e04d3ae8f7b",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\proc-macro2-b4e7129782b95bf9\\build_script_build-b4e7129782b95bf9.exe",
+        "sha256":  "e4a5d44cba32bde4172ea86080de3ebbfb68afd38357fb31e83c7e04d3ae8f7b",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\quote-0c0693e1f116e37f\\build-script-build.exe",
+        "sha256":  "b7a45c2ffdf0a8eb7d1967336a6346f48af3c23b3a42bc5114c59462130c27ba",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\quote-0c0693e1f116e37f\\build_script_build-0c0693e1f116e37f.exe",
+        "sha256":  "b7a45c2ffdf0a8eb7d1967336a6346f48af3c23b3a42bc5114c59462130c27ba",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\serde-cad781402da98651\\build-script-build.exe",
+        "sha256":  "1fe4ca23d5699b679b080c30f5b053f06722e7f1436cfe6a6d87072acb8fda1d",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\serde-cad781402da98651\\build_script_build-cad781402da98651.exe",
+        "sha256":  "1fe4ca23d5699b679b080c30f5b053f06722e7f1436cfe6a6d87072acb8fda1d",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\serde_core-a51de86db5ad14da\\build-script-build.exe",
+        "sha256":  "c30abc86a2a8d78eebe53f17249d47153385cf3eeb7178ba786867e3f374b475",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\serde_core-a51de86db5ad14da\\build_script_build-a51de86db5ad14da.exe",
+        "sha256":  "c30abc86a2a8d78eebe53f17249d47153385cf3eeb7178ba786867e3f374b475",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\serde_json-dfb22720f95e8cd6\\build-script-build.exe",
+        "sha256":  "aa8b59076aba95dbdad1825d9b3c76f0a0b340f57db7c20d68aaa309fbd77480",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\serde_json-dfb22720f95e8cd6\\build_script_build-dfb22720f95e8cd6.exe",
+        "sha256":  "aa8b59076aba95dbdad1825d9b3c76f0a0b340f57db7c20d68aaa309fbd77480",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\thiserror-79bfaf6e2a18c899\\build-script-build.exe",
+        "sha256":  "af4cc91953a3c756cbe6f0027d45dccea2e3ad69a70fa2141ecf5d558bf11031",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\thiserror-79bfaf6e2a18c899\\build_script_build-79bfaf6e2a18c899.exe",
+        "sha256":  "af4cc91953a3c756cbe6f0027d45dccea2e3ad69a70fa2141ecf5d558bf11031",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\zmij-2dc6ce0b1509015d\\build-script-build.exe",
+        "sha256":  "63eafea12912449e8c5086a062ac09636ca3690a886ca401b5b9d7d0db9754dc",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "desktop-agent\\target\\debug\\build\\zmij-2dc6ce0b1509015d\\build_script_build-2dc6ce0b1509015d.exe",
+        "sha256":  "63eafea12912449e8c5086a062ac09636ca3690a886ca401b5b9d7d0db9754dc",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\pe-inspection\\f616f256513a6d1eae386ab653e9bf33a2d3b318f9f6c56ab85db7a4d98b8c7e.exe",
+        "sha256":  "f616f256513a6d1eae386ab653e9bf33a2d3b318f9f6c56ab85db7a4d98b8c7e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\dp-service.exe",
+        "sha256":  "1e17eb68b6594d1be1d67bce827a69ed056f169d504d04d83b3465d85f65dbc4",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\dp-user-agent.exe",
+        "sha256":  "2e1b516a9058c2d8e7d3c1cc4df1e687bf658512c7df3a3360838bb7e718e5ab",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\dp-service.exe",
+        "sha256":  "8d45dc2bae1d67544ec676b5f08ac18e3980c933a13703441a2638c82219548d",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\dp-user-agent.exe",
+        "sha256":  "4198364d1008197a5f0d45e438d5892374d5b8b96f2b56e67d0f18e14658b974",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\deps\\dp_service-72b99ba6452a1f85.exe",
+        "sha256":  "8d45dc2bae1d67544ec676b5f08ac18e3980c933a13703441a2638c82219548d",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\deps\\dp_user_agent-e51abf8bc18eaae2.exe",
+        "sha256":  "4198364d1008197a5f0d45e438d5892374d5b8b96f2b56e67d0f18e14658b974",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\anyhow-f41e735410504d9d\\build-script-build.exe",
+        "sha256":  "cb44a512826d2a5ef085e1861620443a48f706afda778047c3e3d8eac2a91497",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\anyhow-f41e735410504d9d\\build_script_build-f41e735410504d9d.exe",
+        "sha256":  "cb44a512826d2a5ef085e1861620443a48f706afda778047c3e3d8eac2a91497",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\getrandom-9e75565bbb8d5bbd\\build-script-build.exe",
+        "sha256":  "664c830c1c328d28e34cb3c9edead92c9bda0058b89c5d363db3793995fdd5a4",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\getrandom-9e75565bbb8d5bbd\\build_script_build-9e75565bbb8d5bbd.exe",
+        "sha256":  "664c830c1c328d28e34cb3c9edead92c9bda0058b89c5d363db3793995fdd5a4",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\libsqlite3-sys-7e9b4f8a72c2cb35\\build-script-build.exe",
+        "sha256":  "56460ddd7c5f6be70d93051ae645f898ad14594b4dc60f1f4370205d6fc444b8",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\libsqlite3-sys-7e9b4f8a72c2cb35\\build_script_build-7e9b4f8a72c2cb35.exe",
+        "sha256":  "56460ddd7c5f6be70d93051ae645f898ad14594b4dc60f1f4370205d6fc444b8",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\num-traits-c2f9bfed08d468e2\\build-script-build.exe",
+        "sha256":  "dc5ef82000567b2acdc91a36209ccb4664f31e97ac14077ff9f49ae20dd8ecf7",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\num-traits-c2f9bfed08d468e2\\build_script_build-c2f9bfed08d468e2.exe",
+        "sha256":  "dc5ef82000567b2acdc91a36209ccb4664f31e97ac14077ff9f49ae20dd8ecf7",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\proc-macro2-8d87e9523b5b857b\\build-script-build.exe",
+        "sha256":  "8075bffa09f0084314522b5f7e75bc2fd62bfdaaa82beb183bb1f988946c6d08",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\proc-macro2-8d87e9523b5b857b\\build_script_build-8d87e9523b5b857b.exe",
+        "sha256":  "8075bffa09f0084314522b5f7e75bc2fd62bfdaaa82beb183bb1f988946c6d08",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\quote-94d4bd64eb4d3bc6\\build-script-build.exe",
+        "sha256":  "d324dbdbafebc586f9626dffc267dc01ced9275afafe35bdc56fac60e12d51ba",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\quote-94d4bd64eb4d3bc6\\build_script_build-94d4bd64eb4d3bc6.exe",
+        "sha256":  "d324dbdbafebc586f9626dffc267dc01ced9275afafe35bdc56fac60e12d51ba",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\serde-04a2c303677869c3\\build-script-build.exe",
+        "sha256":  "33a8709f4656436fbd5c79546e55beab13019e9575999ccbd0a66141b3a38626",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\serde-04a2c303677869c3\\build_script_build-04a2c303677869c3.exe",
+        "sha256":  "33a8709f4656436fbd5c79546e55beab13019e9575999ccbd0a66141b3a38626",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\serde_core-1741ac0555bc3308\\build-script-build.exe",
+        "sha256":  "144e292482c7b98128ec8e4f709d8162a55af42a36847e89c651de2ed88399ef",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\serde_core-1741ac0555bc3308\\build_script_build-1741ac0555bc3308.exe",
+        "sha256":  "144e292482c7b98128ec8e4f709d8162a55af42a36847e89c651de2ed88399ef",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\serde_json-92f4d7e68cd456a9\\build-script-build.exe",
+        "sha256":  "6db1b7293d2dbae317b44ce1c1fce65aa5a1a67513f548286e3e58ea5fd06f2d",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\serde_json-92f4d7e68cd456a9\\build_script_build-92f4d7e68cd456a9.exe",
+        "sha256":  "6db1b7293d2dbae317b44ce1c1fce65aa5a1a67513f548286e3e58ea5fd06f2d",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\thiserror-eae5b79fc819d54b\\build-script-build.exe",
+        "sha256":  "26e3205cd3635f413659c4e93ac2a3a177b93e84c6dd7c9e72e178318e3dae9c",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\thiserror-eae5b79fc819d54b\\build_script_build-eae5b79fc819d54b.exe",
+        "sha256":  "26e3205cd3635f413659c4e93ac2a3a177b93e84c6dd7c9e72e178318e3dae9c",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\zmij-cb88c4cfab10ae26\\build-script-build.exe",
+        "sha256":  "8cbfba05982c2eacee561849320ce8caec29e4b1fd107f6665e840bda8aae2ae",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\release\\build\\zmij-cb88c4cfab10ae26\\build_script_build-cb88c4cfab10ae26.exe",
+        "sha256":  "8cbfba05982c2eacee561849320ce8caec29e4b1fd107f6665e840bda8aae2ae",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\contract_fixtures-a03d0cd2e62588d4.exe",
+        "sha256":  "2b70b544ab6b0c9606a289906abe2890845888ad9a4403f7275721a19425c1c6",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\dp_core-cc3baccbcef569c3.exe",
+        "sha256":  "6c77b40ad3cfc22ada4efe0400e8310bf3a169a3b503997af3a805dc2957f9a1",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\dp_ipc-1b84d48ea7dc8eef.exe",
+        "sha256":  "16fdf6ef1b7f1d692a98166e3b34a6422fb9d3a5b24d7897b9386b04931736aa",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\dp_platform_windows-098508be61573cdb.exe",
+        "sha256":  "a41c6fc5e27b5f660c8c09f35359528170499a78d29a2781797ebe27321c9884",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\dp_service-17f6752bccc724c9.exe",
+        "sha256":  "1e17eb68b6594d1be1d67bce827a69ed056f169d504d04d83b3465d85f65dbc4",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\dp_service-93c723ee5a8a243f.exe",
+        "sha256":  "df3a1e976b20f43a26bfbdf86da74def953fe58d793f68c36c5ff341da64c916",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\dp_storage-dff3777364cd03fd.exe",
+        "sha256":  "6fb560b7b66f1cd50d24336b166370d56d433c60eac3f456557f8b0b1587f3f2",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\dp_user_agent-4f00752328b1f01b.exe",
+        "sha256":  "2a4daeab3de4e92e1f5f33d66311ae399198173b1adcab37140198e483125e06",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\dp_user_agent-8f6936f52f58fc3d.exe",
+        "sha256":  "2e1b516a9058c2d8e7d3c1cc4df1e687bf658512c7df3a3360838bb7e718e5ab",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\deps\\monitor_integration-6f531e42cf79736e.exe",
+        "sha256":  "aa5f4ff8d7d46668f8fc666b5c7b891efb56bc108704b3ad8cfd5ca2f688640f",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\anyhow-189d86f1202d30a5\\build-script-build.exe",
+        "sha256":  "48b0af7aed76eb71f687c5e3a65e2cc698da2cdc30bd6485ccd2e21947701bf0",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\anyhow-189d86f1202d30a5\\build_script_build-189d86f1202d30a5.exe",
+        "sha256":  "48b0af7aed76eb71f687c5e3a65e2cc698da2cdc30bd6485ccd2e21947701bf0",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\getrandom-c03cb1b53b49af87\\build-script-build.exe",
+        "sha256":  "2c326c4c853d9a33c4bfcc6d336e0b19add11be7bdd6adc40bc4dd6acf2499f3",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\getrandom-c03cb1b53b49af87\\build_script_build-c03cb1b53b49af87.exe",
+        "sha256":  "2c326c4c853d9a33c4bfcc6d336e0b19add11be7bdd6adc40bc4dd6acf2499f3",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\libsqlite3-sys-54f1783f23e6dcc2\\build-script-build.exe",
+        "sha256":  "603c055ecab624eb4b9c16e5bc07970c3d7c4d52ab08cce9173fcbea78996604",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\libsqlite3-sys-54f1783f23e6dcc2\\build_script_build-54f1783f23e6dcc2.exe",
+        "sha256":  "603c055ecab624eb4b9c16e5bc07970c3d7c4d52ab08cce9173fcbea78996604",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\num-traits-da5639013b2cff62\\build-script-build.exe",
+        "sha256":  "e070ea7077bec91beea9d1dc2752b14ee293878e8527e2e682fcceb1475585f3",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\num-traits-da5639013b2cff62\\build_script_build-da5639013b2cff62.exe",
+        "sha256":  "e070ea7077bec91beea9d1dc2752b14ee293878e8527e2e682fcceb1475585f3",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\proc-macro2-b4e7129782b95bf9\\build-script-build.exe",
+        "sha256":  "4ce5207ad58ecc5f3d3e663c65b3a3ec18e3c2dbb311c6e56bf7862c563f2e55",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\proc-macro2-b4e7129782b95bf9\\build_script_build-b4e7129782b95bf9.exe",
+        "sha256":  "4ce5207ad58ecc5f3d3e663c65b3a3ec18e3c2dbb311c6e56bf7862c563f2e55",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\quote-0c0693e1f116e37f\\build-script-build.exe",
+        "sha256":  "36f49f72edf83542ec3bf9ec4486d62a431aeb381934705046f5e1e7c93772ed",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\quote-0c0693e1f116e37f\\build_script_build-0c0693e1f116e37f.exe",
+        "sha256":  "36f49f72edf83542ec3bf9ec4486d62a431aeb381934705046f5e1e7c93772ed",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\serde-cad781402da98651\\build-script-build.exe",
+        "sha256":  "fdccd864f6c56637605ae8c370e2300b2b1132b6427a8845ef247d443591224c",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\serde-cad781402da98651\\build_script_build-cad781402da98651.exe",
+        "sha256":  "fdccd864f6c56637605ae8c370e2300b2b1132b6427a8845ef247d443591224c",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\serde_core-a51de86db5ad14da\\build-script-build.exe",
+        "sha256":  "d40a1c20207e6ac37c190f5ba2b3a3c604300c856272e11b84c9394f51894224",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\serde_core-a51de86db5ad14da\\build_script_build-a51de86db5ad14da.exe",
+        "sha256":  "d40a1c20207e6ac37c190f5ba2b3a3c604300c856272e11b84c9394f51894224",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\serde_json-dfb22720f95e8cd6\\build-script-build.exe",
+        "sha256":  "f63a44d7d616177299bbf5c012ffdf890c7e8ba00b10477749b43cfe4daccc2a",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\serde_json-dfb22720f95e8cd6\\build_script_build-dfb22720f95e8cd6.exe",
+        "sha256":  "f63a44d7d616177299bbf5c012ffdf890c7e8ba00b10477749b43cfe4daccc2a",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\thiserror-79bfaf6e2a18c899\\build-script-build.exe",
+        "sha256":  "e6c596c19edbd993bfca5ee8af93ac6a9c2e52f7ab321e7a05ac810f19103d3d",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\thiserror-79bfaf6e2a18c899\\build_script_build-79bfaf6e2a18c899.exe",
+        "sha256":  "e6c596c19edbd993bfca5ee8af93ac6a9c2e52f7ab321e7a05ac810f19103d3d",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\zmij-2dc6ce0b1509015d\\build-script-build.exe",
+        "sha256":  "efc7ae48f6f05b9d83253e9c80a2f0b148537dd6ef84bcc1d590c0cac44d6cd2",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\zmij-2dc6ce0b1509015d\\build_script_build-2dc6ce0b1509015d.exe",
+        "sha256":  "efc7ae48f6f05b9d83253e9c80a2f0b148537dd6ef84bcc1d590c0cac44d6cd2",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "apps\\dashboard\\public\\downloads\\digitalpulse-windows-agent.zip!digitalpulse-windows-agent/dp-user-agent.exe",
+        "sha256":  "f616f256513a6d1eae386ab653e9bf33a2d3b318f9f6c56ab85db7a4d98b8c7e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    },
+    {
+        "path":  "apps\\dashboard\\dist\\downloads\\digitalpulse-windows-agent.zip!digitalpulse-windows-agent/dp-user-agent.exe",
+        "sha256":  "f616f256513a6d1eae386ab653e9bf33a2d3b318f9f6c56ab85db7a4d98b8c7e",
+        "metadata":  {
+                         "signer":  null,
+                         "fileVersion":  null,
+                         "productName":  null,
+                         "productVersion":  null,
+                         "signatureStatus":  "NotSigned"
+                     }
+    }
+]

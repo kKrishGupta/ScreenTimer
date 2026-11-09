@@ -7,16 +7,28 @@
 //! - Suppressing sub-second window switching noise.
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
 use crate::contract::{ActivityEvent, AppInfo, EventSource, EventType, SCHEMA_VERSION};
 
 /// State of the currently tracked interval.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionState {
     ActiveApp,
     Idle,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionCheckpoint {
+    pub session_id: Uuid,
+    pub device_id: Uuid,
+    pub started_at: DateTime<Utc>,
+    pub last_observed_at: DateTime<Utc>,
+    pub state: SessionState,
+    pub app: Option<AppInfo>,
 }
 
 /// In-progress tracking interval.
@@ -47,6 +59,45 @@ impl SessionManager {
     /// Returns the currently active device ID.
     pub fn device_id(&self) -> Uuid {
         self.device_id
+    }
+
+    pub fn checkpoint(&self, last_observed_at: DateTime<Utc>) -> Option<SessionCheckpoint> {
+        let open = self.current_interval.as_ref()?;
+        Some(SessionCheckpoint {
+            session_id: open.session_id,
+            device_id: self.device_id,
+            started_at: open.started_at,
+            last_observed_at: last_observed_at.max(open.started_at),
+            state: open.state.clone(),
+            app: open.app.clone(),
+        })
+    }
+
+    /// Produces only the interval observed before the prior process stopped.
+    /// Time between the last durable observation and restart is never inferred.
+    pub fn event_from_checkpoint(checkpoint: &SessionCheckpoint) -> Option<ActivityEvent> {
+        let duration_seconds = (checkpoint.last_observed_at - checkpoint.started_at)
+            .num_milliseconds() as f64
+            / 1000.0;
+        if !(1.0..=crate::contract::MAX_EVENT_DURATION_SECONDS).contains(&duration_seconds) {
+            return None;
+        }
+        let event_type = match checkpoint.state {
+            SessionState::ActiveApp => EventType::AppSession,
+            SessionState::Idle => EventType::IdleSession,
+        };
+        Some(ActivityEvent {
+            schema_version: SCHEMA_VERSION,
+            event_id: checkpoint.session_id,
+            device_id: checkpoint.device_id,
+            source: EventSource::DesktopAgent,
+            event_type,
+            started_at: checkpoint.started_at,
+            ended_at: checkpoint.last_observed_at,
+            duration_seconds,
+            app: checkpoint.app.clone(),
+            web: None,
+        })
     }
 
     /// Handles foreground window focus.
@@ -242,9 +293,15 @@ mod tests {
         let event = manager.handle_app_focus("Edge".into(), "msedge.exe".into(), 200, t2);
 
         assert!(event.is_some());
-        let e = event.unwrap();
+        let e = event.expect("test fixture operation must succeed");
         assert_eq!(e.event_type, EventType::AppSession);
-        assert_eq!(e.app.as_ref().unwrap().executable, "Code.exe");
+        assert_eq!(
+            e.app
+                .as_ref()
+                .expect("test fixture operation must succeed")
+                .executable,
+            "Code.exe"
+        );
         assert_eq!(e.duration_seconds, 15.0);
         assert_eq!(e.validate(), Ok(()));
     }
@@ -294,5 +351,19 @@ mod tests {
             event.is_none(),
             "sub-second flicker should not emit session"
         );
+    }
+
+    #[test]
+    fn checkpoint_recovery_never_invents_restart_downtime() {
+        let device_id = Uuid::new_v4();
+        let mut manager = SessionManager::new(device_id);
+        let start = Utc::now() - chrono::Duration::minutes(5);
+        manager.handle_app_focus("Code".into(), "Code.exe".into(), 42, start);
+        let last_seen = start + chrono::Duration::seconds(10);
+        let checkpoint = manager.checkpoint(last_seen).expect("open checkpoint");
+        let recovered = SessionManager::event_from_checkpoint(&checkpoint).expect("event");
+        assert_eq!(recovered.ended_at, last_seen);
+        assert_eq!(recovered.duration_seconds, 10.0);
+        assert_eq!(recovered.event_id, checkpoint.session_id);
     }
 }

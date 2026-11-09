@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -17,6 +17,8 @@ pub enum StorageError {
     UuidParse(#[from] uuid::Error),
     #[error("Failed to parse timestamp in database record: {0}")]
     ChronoParse(#[from] chrono::ParseError),
+    #[error("storage backpressure: {0}")]
+    Capacity(String),
 }
 
 /// A stored activity session interval.
@@ -48,24 +50,29 @@ pub struct SyncQueueItem {
 #[derive(Debug)]
 pub struct Storage {
     conn: Connection,
+    path: Option<PathBuf>,
 }
 
 impl Storage {
     /// Opens or creates a persistent SQLite database file at `path`.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
-        let mut conn = Connection::open(path)?;
+        let path = path.as_ref().to_owned();
+        let mut conn = Connection::open(&path)?;
         // Enable Write-Ahead Logging (WAL) for concurrent read performance
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         run_migrations(&mut conn)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            path: Some(path),
+        })
     }
 
     /// Opens an isolated in-memory SQLite database (used for unit testing).
     pub fn open_in_memory() -> Result<Self, StorageError> {
         let mut conn = Connection::open_in_memory()?;
         run_migrations(&mut conn)?;
-        Ok(Self { conn })
+        Ok(Self { conn, path: None })
     }
 
     /// Persists a completed activity session and adds it to the outbound sync queue atomically.
@@ -74,7 +81,26 @@ impl Storage {
         session: &StoredActivitySession,
         event_payload_json: &str,
     ) -> Result<(), StorageError> {
+        self.record_session_with_event_bounded(session, event_payload_json, usize::MAX)
+    }
+
+    pub fn record_session_with_event_bounded(
+        &mut self,
+        session: &StoredActivitySession,
+        event_payload_json: &str,
+        max_pending: usize,
+    ) -> Result<(), StorageError> {
         let tx = self.conn.transaction()?;
+        let pending: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE synced_at IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        if max_pending != usize::MAX && (pending as u64) >= max_pending as u64 {
+            return Err(StorageError::Capacity(format!(
+                "activity queue limit {max_pending} reached; no unacknowledged rows were deleted"
+            )));
+        }
 
         // 1. Insert session record
         tx.execute(
@@ -201,10 +227,34 @@ impl Storage {
 
     /// Retains malformed events for review while preventing them from poisoning later batches.
     pub fn quarantine_events(&mut self, ids: &[Uuid], reason: &str) -> Result<(), StorageError> {
+        let limit = std::env::var("DP_MAX_QUARANTINED_EVENTS")
+            .ok()
+            .and_then(|raw| raw.parse::<usize>().ok())
+            .filter(|value| (10..=100_000).contains(value))
+            .unwrap_or(1_000);
+        self.quarantine_events_bounded(ids, reason, limit)
+    }
+
+    pub fn quarantine_events_bounded(
+        &mut self,
+        ids: &[Uuid],
+        reason: &str,
+        max_quarantined: usize,
+    ) -> Result<(), StorageError> {
         if ids.is_empty() {
             return Ok(());
         }
         let tx = self.conn.transaction()?;
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE synced_at IS NULL AND quarantined_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        if count.saturating_add(ids.len() as i64) > max_quarantined as i64 {
+            return Err(StorageError::Capacity(format!(
+                "quarantine limit {max_quarantined} reached; rows remain pending and were not deleted"
+            )));
+        }
         let now = Utc::now().to_rfc3339();
         let mut stmt = tx.prepare(
             "UPDATE sync_queue SET quarantined_at = ?1, quarantine_reason = ?2
@@ -287,6 +337,70 @@ impl Storage {
         )?;
         Ok(count as usize)
     }
+
+    pub fn logical_size_bytes(&self) -> Result<u64, StorageError> {
+        let page_count: u64 = self
+            .conn
+            .query_row("PRAGMA page_count", [], |row| row.get(0))?;
+        let page_size: u64 = self
+            .conn
+            .query_row("PRAGMA page_size", [], |row| row.get(0))?;
+        Ok(page_count.saturating_mul(page_size))
+    }
+
+    pub fn disk_footprint_bytes(&self) -> Result<u64, StorageError> {
+        let Some(path) = &self.path else {
+            return self.logical_size_bytes();
+        };
+        let mut total = std::fs::metadata(path)
+            .map(|value| value.len())
+            .unwrap_or(0);
+        let path_text = path.to_string_lossy();
+        for suffix in ["-wal", "-shm"] {
+            total = total.saturating_add(
+                std::fs::metadata(format!("{path_text}{suffix}"))
+                    .map(|value| value.len())
+                    .unwrap_or(0),
+            );
+        }
+        Ok(total)
+    }
+
+    /// Atomically persists a recovered completed interval and consumes its
+    /// checkpoint. INSERT OR IGNORE makes replay idempotent after any crash.
+    pub fn recover_checkpoint_event(
+        &mut self,
+        checkpoint_key: &str,
+        session: &StoredActivitySession,
+        event_payload_json: &str,
+        max_pending: usize,
+    ) -> Result<bool, StorageError> {
+        let tx = self.conn.transaction()?;
+        let pending: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM sync_queue WHERE synced_at IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        if max_pending != usize::MAX && (pending as u64) >= max_pending as u64 {
+            return Err(StorageError::Capacity(format!(
+                "activity queue limit {max_pending} reached; checkpoint retained"
+            )));
+        }
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO activity_sessions (id,device_id,application_name,executable_name,process_id,started_at,ended_at,duration_seconds,activity_state,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![session.id.to_string(),session.device_id.to_string(),session.application_name,session.executable_name,session.process_id,session.started_at.to_rfc3339(),session.ended_at.to_rfc3339(),session.duration_seconds,session.activity_state,session.created_at.to_rfc3339()],
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO sync_queue (id,event_type,payload,created_at,synced_at) VALUES (?1,?2,?3,?4,NULL)",
+            params![session.id.to_string(),session.activity_state,event_payload_json,session.created_at.to_rfc3339()],
+        )?;
+        tx.execute(
+            "DELETE FROM agent_state WHERE key=?1",
+            params![checkpoint_key],
+        )?;
+        tx.commit()?;
+        Ok(inserted == 1)
+    }
 }
 
 #[cfg(test)]
@@ -313,8 +427,18 @@ mod tests {
     fn in_memory_storage_migration_and_crud() {
         let mut storage = Storage::open_in_memory().expect("open in memory");
 
-        assert_eq!(storage.count_sessions().unwrap(), 0);
-        assert_eq!(storage.count_pending_sync().unwrap(), 0);
+        assert_eq!(
+            storage
+                .count_sessions()
+                .expect("test fixture operation must succeed"),
+            0
+        );
+        assert_eq!(
+            storage
+                .count_pending_sync()
+                .expect("test fixture operation must succeed"),
+            0
+        );
 
         let id = Uuid::new_v4();
         let session = sample_session(id);
@@ -322,8 +446,18 @@ mod tests {
             .record_session_with_event(&session, r#"{"test":true}"#)
             .expect("record session");
 
-        assert_eq!(storage.count_sessions().unwrap(), 1);
-        assert_eq!(storage.count_pending_sync().unwrap(), 1);
+        assert_eq!(
+            storage
+                .count_sessions()
+                .expect("test fixture operation must succeed"),
+            1
+        );
+        assert_eq!(
+            storage
+                .count_pending_sync()
+                .expect("test fixture operation must succeed"),
+            1
+        );
 
         // Fetch pending items
         let pending = storage.get_pending_sync_items(10).expect("pending items");
@@ -334,37 +468,97 @@ mod tests {
 
         // Mark synced
         storage.mark_events_synced(&[id]).expect("mark synced");
-        assert_eq!(storage.count_pending_sync().unwrap(), 0);
+        assert_eq!(
+            storage
+                .count_pending_sync()
+                .expect("test fixture operation must succeed"),
+            0
+        );
 
         // State get/set
-        assert_eq!(storage.get_state("device_id").unwrap(), None);
-        storage.set_state("device_id", "my-device-uuid").unwrap();
         assert_eq!(
-            storage.get_state("device_id").unwrap().as_deref(),
+            storage
+                .get_state("device_id")
+                .expect("test fixture operation must succeed"),
+            None
+        );
+        storage
+            .set_state("device_id", "my-device-uuid")
+            .expect("test fixture operation must succeed");
+        assert_eq!(
+            storage
+                .get_state("device_id")
+                .expect("test fixture operation must succeed")
+                .as_deref(),
             Some("my-device-uuid")
         );
     }
 
     #[test]
     fn quarantined_queue_rows_are_retained_and_do_not_block_later_valid_events() {
-        let mut storage = Storage::open_in_memory().unwrap();
+        let mut storage = Storage::open_in_memory().expect("test fixture operation must succeed");
         let mut first = sample_session(Uuid::new_v4());
         let malformed_id = first.id;
         storage
             .record_session_with_event(&first, "not-json")
-            .unwrap();
+            .expect("test fixture operation must succeed");
         first.id = Uuid::new_v4();
         storage
             .record_session_with_event(&first, "{\"valid\":true}")
-            .unwrap();
+            .expect("test fixture operation must succeed");
 
         storage
             .quarantine_events(&[malformed_id], "MALFORMED_EVENT")
-            .unwrap();
-        let pending = storage.get_pending_sync_items(10).unwrap();
+            .expect("test fixture operation must succeed");
+        let pending = storage
+            .get_pending_sync_items(10)
+            .expect("test fixture operation must succeed");
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].payload, "{\"valid\":true}");
-        assert_eq!(storage.count_pending_sync().unwrap(), 2);
-        assert_eq!(storage.count_quarantined_sync().unwrap(), 1);
+        assert_eq!(
+            storage
+                .count_pending_sync()
+                .expect("test fixture operation must succeed"),
+            2
+        );
+        assert_eq!(
+            storage
+                .count_quarantined_sync()
+                .expect("test fixture operation must succeed"),
+            1
+        );
+    }
+
+    #[test]
+    fn queue_backpressure_never_deletes_unacknowledged_rows() {
+        let mut storage = Storage::open_in_memory().expect("storage");
+        let first = sample_session(Uuid::new_v4());
+        storage
+            .record_session_with_event_bounded(&first, "{}", 1)
+            .expect("first queued");
+        let second = sample_session(Uuid::new_v4());
+        assert!(matches!(
+            storage.record_session_with_event_bounded(&second, "{}", 1),
+            Err(StorageError::Capacity(_))
+        ));
+        assert_eq!(storage.count_pending_sync().expect("count"), 1);
+        assert_eq!(storage.count_sessions().expect("sessions"), 1);
+    }
+
+    #[test]
+    fn checkpoint_recovery_is_atomic_and_idempotent() {
+        let mut storage = Storage::open_in_memory().expect("storage");
+        storage.set_state("checkpoint", "present").expect("marker");
+        let session = sample_session(Uuid::new_v4());
+        assert!(storage
+            .recover_checkpoint_event("checkpoint", &session, "{}", 10)
+            .expect("recover"));
+        assert!(storage.get_state("checkpoint").expect("read").is_none());
+        storage.set_state("checkpoint", "replay").expect("marker");
+        assert!(!storage
+            .recover_checkpoint_event("checkpoint", &session, "{}", 10)
+            .expect("idempotent replay"));
+        assert_eq!(storage.count_sessions().expect("sessions"), 1);
+        assert_eq!(storage.count_pending_sync().expect("pending"), 1);
     }
 }

@@ -1,0 +1,12 @@
+D:\desktop\task2_updated\DigitalPulse\artifacts\windows-exe-audit-20261108\target\debug\deps\serde-ac2310a83f579c6c.d: C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs D:\desktop\task2_updated\DigitalPulse\artifacts\windows-exe-audit-20261108\target\debug\build\serde-94d19e0df0307ef8\out/private.rs
+
+D:\desktop\task2_updated\DigitalPulse\artifacts\windows-exe-audit-20261108\target\debug\deps\libserde-ac2310a83f579c6c.rmeta: C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs D:\desktop\task2_updated\DigitalPulse\artifacts\windows-exe-audit-20261108\target\debug\build\serde-94d19e0df0307ef8\out/private.rs
+
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\lib.rs:
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\integer128.rs:
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\mod.rs:
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\de.rs:
+C:\Users\dell\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.229\src\private\ser.rs:
+D:\desktop\task2_updated\DigitalPulse\artifacts\windows-exe-audit-20261108\target\debug\build\serde-94d19e0df0307ef8\out/private.rs:
+
+# env-dep:OUT_DIR=D:\\desktop\\task2_updated\\DigitalPulse\\artifacts\\windows-exe-audit-20261108\\target\\debug\\build\\serde-94d19e0df0307ef8\\out

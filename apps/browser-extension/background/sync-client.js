@@ -3,6 +3,22 @@ import { resolveBackendUrl } from '../shared/backend-settings.js';
 export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) {
   const notEnrolledMessage = 'Enroll this device with the one-time token from your DigitalPulse account before monitoring can start.';
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const lifecycleCodes = new Set(['DEVICE_REVOKED', 'DEVICE_ARCHIVED']);
+
+  async function recordLifecycleRejection(code, message) {
+    const lifecycleStatus = code === 'DEVICE_REVOKED' ? 'REVOKED' : 'ARCHIVED';
+    await chromeApi.storage.local.set({
+      dp_device_lifecycle_status: lifecycleStatus,
+      dp_enrollment_status: lifecycleStatus.toLowerCase(),
+      dp_device_connection_status: 'stopped',
+      dp_backend_connection_status: 'connected',
+      dp_monitoring_allowed: false,
+      dp_monitoring_allowed_until: null,
+      dp_monitoring_reason: code,
+      dp_sync_error: message,
+    });
+    return { ok: false, lifecycleStatus, monitoring: { allowed: false, reason: code }, error: message };
+  }
 
   async function resetRejectedEnrollment(message) {
     await chromeApi.storage.local.remove('dp_device_secret');
@@ -90,6 +106,7 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
       [config.SETTINGS_STORAGE_KEY]: { ...stored[config.SETTINGS_STORAGE_KEY], backendUrl },
       dp_device_secret: result.deviceSecret,
       dp_enrollment_status: 'enrolled',
+      dp_device_lifecycle_status: 'ACTIVE',
       dp_device_connection_status: 'waiting',
       dp_sync_error: '',
     });
@@ -106,6 +123,7 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
       'dp_monitoring_allowed',
       'dp_monitoring_allowed_until',
       'dp_monitoring_reason',
+      'dp_device_lifecycle_status',
     ]);
     const deviceId = stored[config.DEVICE_STORAGE_KEY];
     const deviceSecret = stored.dp_device_secret;
@@ -136,13 +154,20 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
         body: JSON.stringify({ agentVersion: chromeApi.runtime.getManifest().version, metrics: { collector: 'browser-extension' } }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.status !== 'healthy') throw new Error(result.error?.message || `Heartbeat failed (${response.status}).`);
+      if (!response.ok || result.status !== 'healthy') {
+        const code = result.error?.code;
+        const message = result.error?.message || `Heartbeat failed (${response.status}).`;
+        if (lifecycleCodes.has(code)) return recordLifecycleRejection(code, message);
+        throw new Error(message);
+      }
       const at = new Date().toISOString();
       await chromeApi.storage.local.set({
         dp_device_connection_status: 'connected',
         dp_backend_connection_status: 'connected',
         dp_last_heartbeat_at: at,
         dp_sync_error: '',
+        dp_device_lifecycle_status: 'ACTIVE',
+        dp_enrollment_status: 'enrolled',
         dp_monitoring_allowed: result.monitoring?.allowed === true && Date.parse(result.monitoring?.allowedUntil || '') > Date.now(),
         dp_monitoring_allowed_until: result.monitoring?.allowedUntil || null,
         dp_monitoring_reason: result.monitoring?.reason || (result.monitoring?.allowed ? '' : 'MONITORING_CONFIGURATION_UNAVAILABLE'),
@@ -164,6 +189,7 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
       'dp_monitoring_allowed_until',
       'dp_monitoring_reason',
       'dp_rejected_event_ids',
+      'dp_device_lifecycle_status',
     ]);
     const queue = stored[config.SYNC_QUEUE_STORAGE_KEY] || [];
     const deviceId = stored[config.DEVICE_STORAGE_KEY];
@@ -171,6 +197,9 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
     if (!deviceId || !deviceSecret) {
       await chromeApi.storage.local.set({ dp_enrollment_status: 'pending', dp_sync_error: '', dp_monitoring_allowed: false });
       return { ok: false, deferred: true, error: notEnrolledMessage, queued: queue.length };
+    }
+    if (['REVOKED', 'ARCHIVED'].includes(stored.dp_device_lifecycle_status)) {
+      return { ok: false, lifecyclePaused: true, lifecycleStatus: stored.dp_device_lifecycle_status, reason: `DEVICE_${stored.dp_device_lifecycle_status}`, queued: queue.length };
     }
     const audit = auditQueue(queue, deviceId, stored.dp_rejected_event_ids || []);
     await chromeApi.storage.local.set({ dp_queue_audit: { total: queue.length, malformed: audit.malformed, duplicates: audit.duplicate, wrongDevice: audit.wrongDevice, conflicting: audit.conflicting, rejected: audit.rejected } });
@@ -209,7 +238,10 @@ export function createSyncClient({ chromeApi, fetchImpl, config, browserName }) 
       const result = await response.json().catch(() => ({}));
       if (!response.ok) {
         const message = result.error?.message || `Event sync failed (${response.status}).`;
-        if (response.status === 401 || response.status === 403) {
+        const code = result.error?.code;
+        if (lifecycleCodes.has(code)) {
+          await recordLifecycleRejection(code, message);
+        } else if (response.status === 401 || response.status === 403) {
           await resetRejectedEnrollment(`Device credential was rejected. Create a new browser-extension token and enroll again. Pending events were preserved. (${message})`);
         }
         throw new Error(message);

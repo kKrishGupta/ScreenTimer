@@ -72,6 +72,22 @@ pub fn prepare_database_path(
             match std::fs::hard_link(&staging, destination) {
                 Ok(()) => Ok(()),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                    let mut src = std::fs::File::open(&staging)?;
+                    match std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(destination)
+                    {
+                        Ok(mut dst) => {
+                            std::io::copy(&mut src, &mut dst)?;
+                            dst.sync_all()?;
+                            Ok(())
+                        }
+                        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+                        Err(err) => Err(err.into()),
+                    }
+                }
                 Err(error) => Err(error.into()),
             }
         })();
@@ -90,11 +106,12 @@ mod tests {
     fn windows_default_is_stable_and_override_is_preserved() {
         let root = std::env::temp_dir();
         assert_eq!(
-            database_path(None, Some(&root)).unwrap(),
+            database_path(None, Some(&root)).expect("test fixture operation must succeed"),
             root.join("DigitalPulse/agent_storage.db")
         );
         assert_eq!(
-            database_path(Some(Path::new("custom.db")), None).unwrap(),
+            database_path(Some(Path::new("custom.db")), None)
+                .expect("test fixture operation must succeed"),
             PathBuf::from("custom.db")
         );
         assert!(database_path(None, None).is_err());
@@ -104,12 +121,13 @@ mod tests {
     #[test]
     fn migration_preserves_identity_and_queue_across_reopens_without_deleting_source() {
         let root = std::env::temp_dir().join(format!("dp-paths-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&root).expect("test fixture operation must succeed");
         let source = root.join("legacy.db");
         let target = root.join("DigitalPulse/agent_storage.db");
         {
-            let mut old = Storage::open(&source).unwrap();
-            old.set_state("device_id", "persistent-device").unwrap();
+            let mut old = Storage::open(&source).expect("test fixture operation must succeed");
+            old.set_state("device_id", "persistent-device")
+                .expect("test fixture operation must succeed");
             let now = chrono::Utc::now();
             old.record_session_with_event(
                 &crate::StoredActivitySession {
@@ -126,35 +144,45 @@ mod tests {
                 },
                 "{}",
             )
-            .unwrap();
+            .expect("test fixture operation must succeed");
             // Keep the source open to exercise a database in WAL mode.
-            prepare_database_path(&target, &[source.clone()]).unwrap();
+            prepare_database_path(&target, std::slice::from_ref(&source))
+                .expect("test fixture operation must succeed");
         }
         for _ in 0..2 {
-            prepare_database_path(&target, &[source.clone()]).unwrap();
-            let stored = Storage::open(&target).unwrap();
+            prepare_database_path(&target, std::slice::from_ref(&source))
+                .expect("test fixture operation must succeed");
+            let stored = Storage::open(&target).expect("test fixture operation must succeed");
             assert_eq!(
-                stored.get_state("device_id").unwrap().as_deref(),
+                stored
+                    .get_state("device_id")
+                    .expect("test fixture operation must succeed")
+                    .as_deref(),
                 Some("persistent-device")
             );
-            assert_eq!(stored.count_pending_sync().unwrap(), 1);
+            assert_eq!(
+                stored
+                    .count_pending_sync()
+                    .expect("test fixture operation must succeed"),
+                1
+            );
         }
         assert!(source.is_file());
-        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(root).expect("test fixture operation must succeed");
     }
 
     #[test]
     fn ambiguous_legacy_files_fail_without_creating_an_empty_replacement() {
         let root = std::env::temp_dir().join(format!("dp-paths-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&root).expect("test fixture operation must succeed");
         let a = root.join("a.db");
         let b = root.join("b.db");
-        drop(Storage::open(&a).unwrap());
-        drop(Storage::open(&b).unwrap());
+        drop(Storage::open(&a).expect("test fixture operation must succeed"));
+        drop(Storage::open(&b).expect("test fixture operation must succeed"));
         let target = root.join("new/agent_storage.db");
         assert!(prepare_database_path(&target, &[a.clone(), b.clone()]).is_err());
         assert!(!target.exists());
         assert!(a.exists() && b.exists());
-        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(root).expect("test fixture operation must succeed");
     }
 }
