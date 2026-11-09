@@ -226,6 +226,11 @@ model DeviceEnrollmentToken {
   expiresAt      DateTime      @map("expires_at") @db.Timestamptz(3)
   usedAt         DateTime?     @map("used_at") @db.Timestamptz(3)
   revokedAt      DateTime?     @map("revoked_at") @db.Timestamptz(3)
+  createdByUserId String?       @map("created_by_user_id") @db.Uuid
+  consumedByDeviceId String?    @map("consumed_by_device_id") @db.Uuid
+  maxUses        Int           @default(1) @map("max_uses")
+  useCount       Int           @default(0) @map("use_count")
+  expiryRecordedAt DateTime?    @map("expiry_recorded_at") @db.Timestamptz(3)
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -233,6 +238,8 @@ model DeviceEnrollmentToken {
 
   @@index([token])
   @@index([organizationId])
+  @@index([createdByUserId])
+  @@index([consumedByDeviceId])
   @@map("device_enrollment_tokens")
 }
 
@@ -251,6 +258,11 @@ model Device {
   secretSalt                 String?       @map("secret_salt") @db.VarChar(128)
   isRevoked                  Boolean       @default(false) @map("is_revoked")
   revokedAt                  DateTime?     @map("revoked_at") @db.Timestamptz(3)
+  revokedByUserId            String?       @map("revoked_by_user_id") @db.Uuid
+  revocationReason           String?       @map("revocation_reason") @db.VarChar(500)
+  archivedAt                 DateTime?     @map("archived_at") @db.Timestamptz(3)
+  archivedByUserId           String?       @map("archived_by_user_id") @db.Uuid
+  archiveReason              String?       @map("archive_reason") @db.VarChar(500)
   lastSeenAt                 DateTime?     @map("last_seen_at") @db.Timestamptz(3)
   lastSyncAt                 DateTime?     @map("last_sync_at") @db.Timestamptz(3)
   screenCaptureEnabled       Boolean       @default(false) @map("screen_capture_enabled")
@@ -271,6 +283,8 @@ model Device {
 
   @@index([organizationId])
   @@index([userId])
+  @@index([organizationId, archivedAt])
+  @@index([organizationId, isRevoked])
   @@map("devices")
 }
 
