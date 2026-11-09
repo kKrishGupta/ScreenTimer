@@ -13,6 +13,57 @@ export const DEFAULT_TIMEOUT_MS = Number.isFinite(configuredTimeout)
   ? Math.min(120_000, Math.max(1_000, configuredTimeout))
   : 8_000;
 export const SLOW_ENDPOINT_TIMEOUT_MS = Math.max(DEFAULT_TIMEOUT_MS, 15_000);
+
+// Set by the authenticated dashboard session, never by browser storage.
+let superAdminOrganizationId = '';
+
+export function setSuperAdminOrganizationScope(organizationId = '') {
+  superAdminOrganizationId = organizationId || '';
+}
+
+const SCOPED_GET_PREFIXES = [
+  '/employees',
+  '/devices',
+  '/screen-monitoring',
+  '/activity',
+  '/analytics',
+  '/invitations',
+  '/departments',
+  '/policies',
+  '/alerts',
+  '/planner',
+];
+
+function withSuperAdminOrganizationScope(path, method) {
+  if (!superAdminOrganizationId) return path;
+
+  const isScopedGet = method === 'GET';
+  const isScreenWrite = ['PATCH', 'DELETE'].includes(method)
+    && (path === '/screen-monitoring' || path.startsWith('/screen-monitoring/'));
+  const pathname = path.split('?')[0];
+  const isEmployeeWrite =
+    (method === 'POST' && /^\/employees\/[^/]+\/setup-reminder$/.test(pathname))
+    || (['PATCH', 'DELETE'].includes(method) && /^\/employees\/[^/]+$/.test(pathname));
+  const isDepartmentDelete =
+    method === 'DELETE' && /^\/departments\/[^/]+$/.test(pathname);
+  const isEmployeeDeviceAssignment =
+    method === 'POST' && /^\/employees\/[^/]+\/devices$/.test(pathname);
+  const isInvitationWrite =
+    (method === 'DELETE' && /^\/invitations\/[^/]+$/.test(pathname))
+    || (method === 'POST' && /^\/invitations\/[^/]+\/resend$/.test(pathname));
+
+  if (!isScopedGet && !isScreenWrite && !isEmployeeWrite && !isDepartmentDelete && !isEmployeeDeviceAssignment && !isInvitationWrite) return path;
+
+  const [, query = ''] = path.split('?');
+  if (isScopedGet && !SCOPED_GET_PREFIXES.some((prefix) =>
+    pathname === prefix || pathname.startsWith(`${prefix}/`)
+  )) return path;
+
+  const params = new URLSearchParams(query);
+  params.set('organizationId', superAdminOrganizationId);
+
+  return `${pathname}?${params.toString()}`;
+}
 export const AUTH_WRITE_TIMEOUT_MS = Math.max(DEFAULT_TIMEOUT_MS, 45_000);
 
 function clearLegacyTokens() {
@@ -84,7 +135,7 @@ async function request(path, { method = 'GET', body, signal, acceptStatuses = []
     if (controller.signal.aborted) {
       throw controller.signal.reason ?? new DOMException('Aborted', 'AbortError');
     }
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${API_BASE}${withSuperAdminOrganizationScope(path, method)}`, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -154,7 +205,8 @@ export function deleteJson(path, opts) {
 export async function downloadActivityCsv(params = {}) {
   const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')).toString();
   const headers = { Accept: 'text/csv' };
-  const response = await fetch(`${API_BASE}/analytics/export/csv${query ? `?${query}` : ''}`, { headers, credentials: 'include' });
+  const exportPath = `/analytics/export/csv${query ? `?${query}` : ''}`;
+  const response = await fetch(`${API_BASE}${withSuperAdminOrganizationScope(exportPath, 'GET')}`, { headers, credentials: 'include' });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new ApiError(body?.error?.message || `CSV export failed with status ${response.status}`, { status: response.status, code: body?.error?.code || 'HTTP_ERROR', body });
@@ -191,8 +243,8 @@ export const api = {
   revokeDevice: (deviceId, reason, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/revoke`, { reason }, opts),
   archiveDevice: (deviceId, reason, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/archive`, { reason }, opts),
   restoreDevice: (deviceId, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/restore`, {}, opts),
-  bulkDeviceAction: (action, deviceIds, reason, opts = {}) => postJson('/devices/bulk-actions', { action, deviceIds, reason }, opts),
-  revokeEnrollmentToken: (tokenId, opts = {}) => postJson(`/devices/enrollment-tokens/${encodeURIComponent(tokenId)}/revoke`, {}, opts),
+  bulkDeviceAction: (action, deviceIds, reason, opts = {}) => postJson('/devices/bulk-actions', { action, deviceIds, reason, ...(superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}) }, opts),
+  revokeEnrollmentToken: (tokenId, opts = {}) => postJson(`/devices/enrollment-tokens/${encodeURIComponent(tokenId)}/revoke`, superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}, opts),
   myMonitoringStatus: (opts = {}) => getJson('/devices/my-monitoring-status', opts),
   setMyMonitoringConsent: (consent, opts = {}) => postJson('/devices/my-monitoring-consent', { consent }, opts),
   setMyMonitoringAuthorization: (authorized, opts = {}) => patchJson('/devices/my-monitoring-authorization', { authorized }, opts),
@@ -230,12 +282,12 @@ export const api = {
   liveEmployees: (params = {}, opts = {}) => getJson(`/employees/live${toQueryString(params)}`, opts),
   employee: (id, opts = {}) => getJson(`/employees/${id}${toQueryString(opts.organizationId ? { organizationId: opts.organizationId } : {})}`, opts),
   employeeSetupReminder: (employeeId, opts = {}) => postJson(`/employees/${encodeURIComponent(employeeId)}/setup-reminder`, {}, opts),
-  createEmployee: (emp, opts = {}) => postJson('/employees', emp, opts),
+  createEmployee: (emp, opts = {}) => postJson('/employees', { ...emp, ...(superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}) }, opts),
   updateEmployee: (id, updates, opts = {}) => patchJson(`/employees/${id}`, updates, opts),
   setEmployeeMonitoringAuthorization: (id, authorized, opts = {}) => patchJson(`/employees/${id}/monitoring-authorization`, { authorized }, opts),
   deleteEmployee: (id, opts = {}) => deleteJson(`/employees/${id}`, opts),
   assignEmployeeDevice: (id, deviceId, opts = {}) => postJson(`/employees/${id}/devices`, { deviceId }, opts),
-  inviteEmployee: (payload, opts = {}) => postJson('/invitations', payload, opts),
+  inviteEmployee: (payload, opts = {}) => postJson('/invitations', { ...payload, ...(superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}) }, opts),
   invitations: (opts = {}) => getJson('/invitations', opts),
   validateInvitation: (token, opts = {}) => postJson('/invitations/validate', { token }, opts),
   revokeInvitation: (id, opts = {}) => deleteJson(`/invitations/${id}`, opts),
@@ -243,7 +295,7 @@ export const api = {
 
   // Department Governance
   departments: (opts = {}) => getJson('/departments', opts),
-  createDepartment: (dept, opts = {}) => postJson('/departments', dept, opts),
+  createDepartment: (dept, opts = {}) => postJson('/departments', { ...dept, ...(superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}) }, opts),
   deleteDepartment: (id, opts = {}) => deleteJson(`/departments/${id}`, opts),
 
   // Family Management & Policy Engine (Legacy compatibility)

@@ -191,9 +191,20 @@ export default async function authRoutes(fastify) {
     }
   });
 
+  // Super Admin must explicitly choose a tenant; Admin stays bound to their own tenant.
+  function invitationOrganizationId(req) {
+    return String(req.user?.role || '').toUpperCase() === Roles.SUPER_ADMIN
+      ? req.body?.organizationId || req.query?.organizationId || null
+      : req.user?.organizationId || null;
+  }
+
   // Create Invitation (Protected: Admin or Super Admin)
   const inviteHandler = async (req, reply) => {
     const { email, role, departmentId, department, displayName, shiftStart, shiftEnd, workingDays, shiftTimezone } = req.body || {};
+    const organizationId = invitationOrganizationId(req);
+    if (!organizationId) {
+      return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization before managing invitations' } });
+    }
     try {
       if (!String(displayName || '').trim() || !String(email || '').trim() || !String(department || '').trim() && !departmentId && !req.user.departmentId) {
         return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'Employee name, email, and department are required' } });
@@ -211,19 +222,19 @@ export default async function authRoutes(fastify) {
       }
       let resolvedDepartmentId = departmentId || req.user.departmentId;
       if (department?.trim()) {
-        const existing = await fastify.prisma.department.findFirst({ where: { organizationId: req.user.organizationId, name: department.trim() } });
-        const saved = existing || await fastify.prisma.department.create({ data: { organizationId: req.user.organizationId, name: department.trim() } });
+        const existing = await fastify.prisma.department.findFirst({ where: { organizationId, name: department.trim() } });
+        const saved = existing || await fastify.prisma.department.create({ data: { organizationId, name: department.trim() } });
         resolvedDepartmentId = saved.id;
       }
       if (resolvedDepartmentId) {
         const scopedDepartment = await fastify.prisma.department.findFirst({
-          where: { id: resolvedDepartmentId, organizationId: req.user.organizationId },
+          where: { id: resolvedDepartmentId, organizationId },
           select: { id: true },
         });
         if (!scopedDepartment) return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'The selected department does not belong to your organization' } });
       }
       const result = await authService.createInvitation({
-        organizationId: req.user.organizationId,
+        organizationId,
         email,
         role: role || 'EMPLOYEE',
         departmentId: resolvedDepartmentId,
@@ -246,8 +257,12 @@ export default async function authRoutes(fastify) {
   fastify.post('/invitations', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, inviteHandler);
 
   // List Invitations (Protected: Admin or Super Admin)
-  const listInvitationsHandler = async (req) => {
-    const invitations = await authService.listInvitations(req.user?.organizationId);
+  const listInvitationsHandler = async (req, reply) => {
+    const organizationId = invitationOrganizationId(req);
+    if (!organizationId) {
+      return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization before viewing invitations' } });
+    }
+    const invitations = await authService.listInvitations(organizationId);
     return { invitations, count: invitations.length };
   };
   fastify.get('/auth/invitations', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, listInvitationsHandler);
@@ -255,9 +270,13 @@ export default async function authRoutes(fastify) {
 
   // Revoke Invitation (Protected: Admin only)
   const revokeInvitationHandler = async (req, reply) => {
+    const organizationId = invitationOrganizationId(req);
+    if (!organizationId) {
+      return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization before revoking invitations' } });
+    }
     const { id } = req.params;
     const res = await authService.revokeInvitation({
-      organizationId: req.user?.organizationId,
+      organizationId,
       invitationId: id,
     });
     return reply.send({ success: res.success, revokedId: id });
@@ -266,9 +285,13 @@ export default async function authRoutes(fastify) {
   fastify.delete('/invitations/:id', { preHandler: [authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN)] }, revokeInvitationHandler);
 
   const resendInvitationHandler = async (req, reply) => {
+    const organizationId = invitationOrganizationId(req);
+    if (!organizationId) {
+      return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization before resending invitations' } });
+    }
     try {
       const result = await authService.resendInvitation({
-        organizationId: req.user.organizationId,
+        organizationId,
         invitationId: req.params.id,
         invitedBy: req.user.email,
       });

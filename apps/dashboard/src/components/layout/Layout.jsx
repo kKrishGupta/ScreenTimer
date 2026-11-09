@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { NavLink, Outlet } from 'react-router';
+import { NavLink, useLocation, useOutlet } from 'react-router';
 import BackendStatus from './BackendStatus.jsx';
+import { api } from '../../lib/api.js';
 import BlockedAttemptNotice from '../BlockedAttemptNotice.jsx';
 import {
   AppIcon,
@@ -35,7 +36,13 @@ const NAV = [
 
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user, logout } = useAuth();
+  const outlet = useOutlet();
+  const location = useLocation();
+  const { user, logout, selectedOrganizationId, setSelectedOrganizationId } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const [organizations, setOrganizations] = useState([]);
+  const [organizationsLoading, setOrganizationsLoading] = useState(false);
+  const [organizationsError, setOrganizationsError] = useState('');
   const session = user ? { user } : null;
   const isEmployee = user?.role === 'EMPLOYEE';
   const nav = isEmployee
@@ -58,6 +65,32 @@ export default function Layout() {
 
     await logout(loginPath);
   }
+
+  useEffect(() => {
+    if (!isSuperAdmin) return undefined;
+
+    let active = true;
+    setOrganizationsLoading(true);
+    setOrganizationsError('');
+
+    api.organizations()
+      .then((result) => {
+        if (!active) return;
+        const rows = Array.isArray(result?.organizations) ? result.organizations : [];
+        setOrganizations(rows);
+      })
+      .catch((error) => {
+        if (active) {
+          setOrganizations([]);
+          setOrganizationsError(error.message || 'Unable to load organizations.');
+        }
+      })
+      .finally(() => {
+        if (active) setOrganizationsLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [isSuperAdmin]);
 
   // Close mobile drawer on Escape key
   useEffect(() => {
@@ -184,6 +217,31 @@ export default function Layout() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-3">
+            {isSuperAdmin && (
+              <div className="min-w-0">
+                <select
+                  aria-label="Select organization"
+                  value={selectedOrganizationId}
+                  onChange={(event) => setSelectedOrganizationId(event.target.value)}
+                  disabled={organizationsLoading || Boolean(organizationsError)}
+                  className="w-40 max-w-[42vw] rounded-lg border border-white/10 bg-slate-900 px-2 py-2 text-xs text-white sm:w-56"
+                >
+                  <option value="">
+                    {organizationsLoading ? 'Loading organizations...' : 'Select organization'}
+                  </option>
+                  {organizations.map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </select>
+                {organizationsError && (
+                  <p role="alert" className="mt-1 max-w-56 text-xs text-rose-300">
+                    {organizationsError}
+                  </p>
+                )}
+              </div>
+            )}
             {session?.user && (
               <>
                <span className="hidden rounded-full border border-sky-500/20 bg-sky-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-sky-300 sm:inline">
@@ -201,7 +259,21 @@ export default function Layout() {
           </div>
         </header>
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 md:px-6 md:py-8">
-          <Outlet />
+          {isSuperAdmin && !selectedOrganizationId && location.pathname !== '/settings' ? (
+            <div className="rounded-xl border border-sky-500/20 bg-slate-900 p-8 text-center">
+              <h2 className="text-xl font-semibold text-white">
+                Select an organization
+              </h2>
+              <p className="mt-2 text-sm text-slate-400">
+                Choose an organization from the header to view its employees,
+                devices, monitoring and activity.
+              </p>
+            </div>
+          ) : (
+            <div key={isSuperAdmin ? selectedOrganizationId : 'default'}>
+              {outlet}
+            </div>
+          )}
         </main>
       </div>
     </div>

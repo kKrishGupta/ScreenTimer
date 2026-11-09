@@ -674,6 +674,17 @@ export default async function employeeRoutes(fastify) {
       });
     }
     const body = req.body ?? {};
+    const organizationId = userRole === Roles.SUPER_ADMIN
+      ? body.organizationId
+      : user.organizationId;
+    if (!organizationId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before inviting employees',
+        },
+      });
+    }
     const displayName = body.displayName || `${body.firstName || ''} ${body.lastName || ''}`.trim();
     const email = body.companyEmail || body.email;
     if (!displayName || !email) {
@@ -682,16 +693,16 @@ export default async function employeeRoutes(fastify) {
     try {
       let departmentId = body.departmentId || user.departmentId || null;
       if (body.department?.trim()) {
-        const found = await prisma.department.findFirst({ where: { organizationId: user.organizationId, name: body.department.trim() } });
-        const department = found || await prisma.department.create({ data: { organizationId: user.organizationId, name: body.department.trim() } });
+        const found = await prisma.department.findFirst({ where: { organizationId: organizationId, name: body.department.trim() } });
+        const department = found || await prisma.department.create({ data: { organizationId: organizationId, name: body.department.trim() } });
         departmentId = department.id;
       }
       if (departmentId) {
-        const scopedDepartment = await prisma.department.findFirst({ where: { id: departmentId, organizationId: user.organizationId }, select: { id: true } });
+        const scopedDepartment = await prisma.department.findFirst({ where: { id: departmentId, organizationId: organizationId }, select: { id: true } });
         if (!scopedDepartment) return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'The selected department does not belong to your organization' } });
       }
       const invitation = await fastify.authService.createInvitation({
-        organizationId: user.organizationId,
+        organizationId: organizationId,
         email,
         displayName,
         role: 'EMPLOYEE',

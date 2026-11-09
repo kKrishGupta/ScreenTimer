@@ -1,6 +1,6 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { api, setAuthToken } from '../lib/api.js';
+import { api, setAuthToken, setSuperAdminOrganizationScope } from '../lib/api.js';
 
 const AuthContext = createContext(null);
 
@@ -25,6 +25,9 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [logoutDestination, setLogoutDestination] = useState(null);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState('');
+
+  // Scope is synchronized by session and organization-selection events.
 
   useEffect(() => {
     let active = true;
@@ -33,6 +36,7 @@ export function AuthProvider({ children }) {
       .then((result) => {
         if (active) {
           const profile = normalizeDashboardUser(result.user || result);
+          setSuperAdminOrganizationScope('');
           setUser(profile?.id && ['SUPER_ADMIN', 'ADMIN', 'EMPLOYEE'].includes(profile.role) ? profile : null);
         }
       })
@@ -55,6 +59,15 @@ export function AuthProvider({ children }) {
     user,
     loading,
     logoutDestination,
+    selectedOrganizationId,
+    setSelectedOrganizationId(organizationId) {
+      if (typeof organizationId !== 'string') {
+        throw new TypeError('Organization ID must be a string.');
+      }
+      const nextId = organizationId;
+      setSuperAdminOrganizationScope(user?.role === 'SUPER_ADMIN' ? nextId : '');
+      setSelectedOrganizationId(nextId);
+    },
     isAuthenticated: Boolean(user),
 
     async login(credentials, options = {}) {
@@ -83,11 +96,15 @@ export function AuthProvider({ children }) {
         }
 
         setLogoutDestination(null);
+        setSuperAdminOrganizationScope('');
+        setSelectedOrganizationId('');
         setUser(authenticatedUser);
         return { ...result, user: authenticatedUser };
       } catch (error) {
         await api.logout().catch(() => {});
         setAuthToken(null);
+        setSuperAdminOrganizationScope('');
+        setSelectedOrganizationId('');
         setUser(null);
         throw error;
       }
@@ -103,10 +120,12 @@ export function AuthProvider({ children }) {
         await api.logout();
       } finally {
         setAuthToken(null);
+        setSuperAdminOrganizationScope('');
+        setSelectedOrganizationId('');
         setUser(null);
       }
     },
-  }), [loading, logoutDestination, user]);
+  }), [loading, logoutDestination, selectedOrganizationId, user]);
 
   return (
     <AuthContext.Provider value={value}>

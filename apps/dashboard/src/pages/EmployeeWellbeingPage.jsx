@@ -184,23 +184,11 @@ function ScopedEmployeeWellbeing({ organizationId, isSuperAdmin }) {
 }
 
 export default function EmployeeWellbeingPage() {
-  const { user } = useAuth();
+  const { user, selectedOrganizationId } = useAuth();
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
-  const [organizationId, setOrganizationId] = useState('');
-
-  const loadOrganizations = useCallback(
-    (opts) => isSuperAdmin
-      ? api.organizations(opts)
-      : Promise.resolve({ organizations: [] }),
-    [isSuperAdmin]
-  );
-
-  const organizationsRequest = useApi(loadOrganizations);
-  const organizations = organizationsRequest.data?.organizations || [];
-
-  const selectedOrganizationId = organizations.some(
-    (organization) => organization.id === organizationId
-  ) ? organizationId : '';
+  const organizationId = isSuperAdmin
+    ? selectedOrganizationId
+    : user?.organizationId;
 
   return (
     <div className="space-y-6">
@@ -209,51 +197,15 @@ export default function EmployeeWellbeingPage() {
         description="Today's recorded activity and digital wellbeing for employees."
       />
 
-      {isSuperAdmin ? (
-        <>
-          {organizationsRequest.loading && !organizationsRequest.data ? (
-            <LoadingState label="Loading organizations..." />
-          ) : organizationsRequest.error ? (
-            <ErrorState
-              error={organizationsRequest.error}
-              onRetry={organizationsRequest.reload}
-            />
-          ) : (
-            <>
-              <Card title="Select organization">
-                <select
-                  value={selectedOrganizationId}
-                  onChange={(event) => setOrganizationId(event.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white"
-                  aria-label="Select organization"
-                >
-                  <option value="">Choose an organization</option>
-                  {organizations.map((organization) => (
-                    <option key={organization.id} value={organization.id}>
-                      {organization.name}
-                    </option>
-                  ))}
-                </select>
-              </Card>
-
-              {selectedOrganizationId ? (
-                <ScopedEmployeeWellbeing
-                  key={selectedOrganizationId}
-                  organizationId={selectedOrganizationId}
-                  isSuperAdmin
-                />
-              ) : (
-                <EmptyState title="Select an organization">
-                  Choose an organization to view employee wellbeing.
-                </EmptyState>
-              )}
-            </>
-          )}
-        </>
+      {isSuperAdmin && !organizationId ? (
+        <EmptyState title="Select an organization">
+          Choose an organization from the Admin Console header.
+        </EmptyState>
       ) : (
         <ScopedEmployeeWellbeing
-          organizationId={user?.organizationId}
-          isSuperAdmin={false}
+          key={organizationId || 'admin'}
+          organizationId={organizationId}
+          isSuperAdmin={isSuperAdmin}
         />
       )}
     </div>
