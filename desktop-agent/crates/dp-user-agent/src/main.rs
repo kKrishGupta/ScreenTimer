@@ -1,6 +1,6 @@
 //! DigitalPulse user-session agent.
 //!
-//! Milestone 3: Activity session management and SQLite persistence.
+//! Milestone 3: Activity session management and DPAPI encrypted offline persistence.
 
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
@@ -49,6 +49,8 @@ fn bounded_env(name: &str, default: u64, min: u64, max: u64) -> u64 {
         .unwrap_or(default)
 }
 
+mod local_control;
+mod monitoring_control;
 mod screenshot;
 mod sync;
 use sync::sync_pending_events;
@@ -94,6 +96,14 @@ fn main() -> Result<()> {
         return run_enroll();
     }
 
+    if std::env::args().nth(1).as_deref() == Some("employee-sign-in") {
+        return run_employee_sign_in();
+    }
+
+    if std::env::args().any(|a| a == "--enrollment-status") {
+        return run_enrollment_status();
+    }
+
     if std::env::args().any(|a| a == "--status" || a == "status") {
         return run_status();
     }
@@ -136,7 +146,7 @@ fn load_stored_credentials(storage: &mut Storage, device_id: &Uuid) -> Result<Op
                 .map_err(|_| anyhow::anyhow!("Could not migrate the device secret to Windows Credential Manager; monitoring is paused"))?;
             storage
                 .delete_state("device_secret")
-                .context("failed to remove the migrated device secret from SQLite")?;
+                .context("failed to remove the migrated device secret from offline storage")?;
             std::env::set_var("DP_DEVICE_SECRET", &legacy);
             if std::env::var("DP_BACKEND_URL").is_err() {
                 if let Ok(Some(url)) = storage.get_state("backend_url") {
@@ -157,11 +167,24 @@ fn load_stored_credentials(storage: &mut Storage, device_id: &Uuid) -> Result<Op
 }
 
 fn run_enroll() -> Result<()> {
-    let token = parse_arg_value("--token")
-        .or_else(|| parse_arg_value("-t"))
-        .context(
-            "Missing required --token argument (e.g. dp-user-agent enroll --token dp_enroll_...)",
-        )?;
+    let token = if std::env::args().any(|arg| arg == "--secret-key-stdin" || arg == "--token-stdin") {
+        use std::io::BufRead;
+        let mut token = String::new();
+        std::io::stdin()
+            .lock()
+            .read_line(&mut token)
+            .context("failed to read employee secret key from stdin")?;
+        let token = token.trim().to_string();
+        if token.is_empty() {
+            bail!("Employee secret key cannot be empty");
+        }
+        token
+    } else {
+        parse_arg_value("--secret-key")
+            .or_else(|| parse_arg_value("--token"))
+            .or_else(|| parse_arg_value("-t"))
+            .context("Missing employee secret key; use --secret-key-stdin, --token-stdin, or --secret-key")?
+    };
 
     let backend_url = parse_arg_value("--server")
         .or_else(|| parse_arg_value("--backend-url"))
@@ -169,10 +192,10 @@ fn run_enroll() -> Result<()> {
         .unwrap_or_else(|| "http://127.0.0.1:3001".to_string());
 
     let db_path = get_database_path()?;
-    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let mut storage = Storage::open(&db_path).context("failed to open offline storage")?;
     let device_id = get_or_create_device_id(&mut storage)?;
     if storage.get_state(ENROLLMENT_RECOVERY_KEY)?.is_some() {
-        bail!("A previous enrollment reached the server but local credential storage did not complete. The consumed token will not be retried. Ask an administrator to revoke the incomplete device shown by --status, then clear the recovery marker only as part of the documented re-enrollment procedure.");
+        bail!("A previous enrollment reached the server but local credential storage did not complete. The consumed key will not be retried. Ask an administrator to revoke the incomplete device shown by --status, then clear the recovery marker only as part of the documented re-enrollment procedure.");
     }
     let device_name = parse_arg_value("--name")
         .or_else(|| std::env::var("COMPUTERNAME").ok())
@@ -184,7 +207,7 @@ fn run_enroll() -> Result<()> {
     println!("Target Backend:  {}", backend_url);
     println!("Device ID:       {}", device_id);
     println!("Device Name:     {}", device_name);
-    println!("Enrolling with token...");
+    println!("Enrolling with employee secret key...");
 
     let secret = sync::enroll_device_token(&backend_url, &token, &device_id, &device_name)
         .context("device enrollment failed")?;
@@ -207,9 +230,80 @@ fn run_enroll() -> Result<()> {
     Ok(())
 }
 
+fn run_enrollment_status() -> Result<()> {
+    let mut storage =
+        Storage::open(get_database_path()?).context("failed to open offline storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    if load_stored_credentials(&mut storage, &device_id)?.is_some() {
+        println!("ENROLLED");
+        Ok(())
+    } else {
+        bail!("NOT_ENROLLED")
+    }
+}
+
+fn run_employee_sign_in() -> Result<()> {
+    use std::io::BufRead;
+
+    let backend_url = parse_arg_value("--server")
+        .or_else(|| parse_arg_value("--backend-url"))
+        .or_else(|| std::env::var("DP_BACKEND_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:3001".to_string());
+    let mut input = std::io::stdin().lock();
+    let mut session_cookie = String::new();
+    let mut secret_key = String::new();
+    input
+        .read_line(&mut session_cookie)
+        .context("failed to read employee session from stdin")?;
+    input
+        .read_line(&mut secret_key)
+        .context("failed to read employee secret key from stdin")?;
+    let mut session_cookie = session_cookie.trim().to_string();
+    let mut secret_key = secret_key.trim().to_string();
+
+    let mut storage =
+        Storage::open(get_database_path()?).context("failed to open offline storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    if storage.get_state(ENROLLMENT_RECOVERY_KEY)?.is_some() {
+        bail!("A previous enrollment requires administrator recovery; the one-time key was not retried");
+    }
+    let stored_secret = load_stored_credentials(&mut storage, &device_id)?;
+    if stored_secret.is_none() && secret_key.is_empty() {
+        bail!("Employee Secret Key is required for first-time enrollment");
+    }
+    let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into());
+    let enrolled_secret = sync::employee_device_sign_in(
+        &backend_url,
+        &session_cookie,
+        if stored_secret.is_none() {
+            Some(secret_key.as_str())
+        } else {
+            None
+        },
+        &device_id,
+        &device_name,
+        stored_secret.as_deref(),
+    )
+    .context("employee device sign-in failed")?;
+
+    if let Some(secret) = enrolled_secret {
+        persist_enrollment_secret(
+            &mut storage,
+            device_id,
+            &backend_url,
+            &secret,
+            dp_platform_windows::credential_store::store_device_secret,
+        )?;
+    }
+    session_cookie.clear();
+    secret_key.clear();
+    println!("EMPLOYEE_DEVICE_SIGN_IN_OK");
+    Ok(())
+}
+
 fn run_status() -> Result<()> {
     let db_path = get_database_path()?;
-    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let mut storage = Storage::open(&db_path).context("failed to open offline storage")?;
     let device_id = get_or_create_device_id(&mut storage)?;
     let credentials = load_stored_credentials(&mut storage, &device_id)?;
     let backend_url = storage
@@ -264,7 +358,7 @@ fn run_status() -> Result<()> {
 
 fn run_sync_now() -> Result<()> {
     let db_path = get_database_path()?;
-    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let mut storage = Storage::open(&db_path).context("failed to open offline storage")?;
     let device_id = get_or_create_device_id(&mut storage)?;
     if load_stored_credentials(&mut storage, &device_id)?.is_none() {
         bail!("device is not enrolled; no activity will be synchronized");
@@ -306,7 +400,7 @@ fn run_sync_now() -> Result<()> {
 
 fn run_oneshot() -> Result<()> {
     let mut storage =
-        Storage::open(get_database_path()?).context("failed to open SQLite storage")?;
+        Storage::open(get_database_path()?).context("failed to open offline storage")?;
     let device_id = get_or_create_device_id(&mut storage)?;
     if load_stored_credentials(&mut storage, &device_id)?.is_none() {
         bail!("device is not enrolled; no live activity data was read");
@@ -351,9 +445,9 @@ fn run_oneshot() -> Result<()> {
 fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
     let db_path = get_database_path()?;
     let _instance_guard = acquire_monitor_lock(&db_path)?;
-    info!(path = %db_path.display(), "Opening SQLite local storage buffer");
+    info!(path = %db_path.display(), "Opening encrypted offline storage buffer");
 
-    let mut storage = Storage::open(&db_path).context("failed to initialize SQLite storage")?;
+    let mut storage = Storage::open(&db_path).context("failed to initialize offline storage")?;
     let device_id = get_or_create_device_id(&mut storage)?;
     if load_stored_credentials(&mut storage, &device_id)?.is_none() {
         warn!("Device is not enrolled; monitor will not collect activity");
@@ -375,11 +469,20 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
 
     let mut monitor = ActivityMonitor::new(config.idle_threshold);
     let mut session_manager = SessionManager::new(device_id);
-    let mut screenshot_scheduler = screenshot::ScreenshotScheduler::new(
+    let mut screenshot_scheduler = match screenshot::ScreenshotScheduler::new(
         db_path
             .parent()
             .unwrap_or_else(|| std::path::Path::new(".")),
-    )?;
+    ) {
+        Ok(scheduler) => Some(scheduler),
+        Err(error) => {
+            warn!(
+                error = %error,
+                "Screenshot subsystem unavailable; screenshot capture disabled"
+            );
+            None
+        }
+    };
     let mut screen_monitoring_indicator =
         dp_platform_windows::tray::ScreenMonitoringIndicator::new();
 
@@ -431,15 +534,62 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
                 "Flushed acknowledged offline events"
             ),
             Ok(_) => {}
-            Err(err) => warn!(error = %err, "Startup sync deferred; pending rows remain in SQLite"),
+            Err(err) => warn!(error = %err, "Startup sync deferred; pending records remain in offline queue"),
         }
     } else {
         warn!(reason = gate.reason.as_deref().unwrap_or("MONITORING_CONFIGURATION_UNAVAILABLE"), "Monitoring paused until consent, authorization, organization time zone, and schedule checks pass");
     }
 
+    let mut monitoring_control = monitoring_control::MonitoringControl::new();
+    let control_requests = local_control::start_listener()
+        .context("failed to start authenticated local monitoring control")?;
+    let mut screenshot_was_active = false;
     let sample_interval = config.sample_interval;
 
-    while running.load(Ordering::SeqCst) {
+    while running.load(Ordering::SeqCst) && !monitoring_control.is_stopped() {
+        while let Ok(request) = control_requests.try_recv() {
+            let command = request.command;
+            let mut acknowledged = true;
+            let suspends = matches!(
+                command,
+                monitoring_control::MonitoringCommand::Stop
+                    | monitoring_control::MonitoringCommand::Pause
+            );
+            if suspends {
+                if let Some(scheduler) = screenshot_scheduler.as_ref() {
+                    if let Err(error) = scheduler.cancel_and_wait(Duration::from_secs(3)) {
+                        warn!(error = %error, "Local control screenshot cancellation not acknowledged");
+                        acknowledged = false;
+                    }
+                }
+                if acknowledged {
+                    let closed_at = Utc::now();
+                    if let Some(event) = session_manager.close_active_session(closed_at) {
+                        match save_completed_event(&mut storage, &event, storage_limits) {
+                            Ok(()) => recorded_sessions += 1,
+                            Err(error) => {
+                                warn!(error = %error, "Could not persist session before local control acknowledgement");
+                                acknowledged = false;
+                            }
+                        }
+                    }
+                    monitor.reset();
+                }
+            }
+            if acknowledged {
+                monitoring_control.apply(command, Instant::now());
+                if suspends {
+                    screenshot_was_active = false;
+                }
+            }
+            let _ = request.reply.send(acknowledged);
+            if monitoring_control.is_stopped() {
+                break;
+            }
+        }
+        if monitoring_control.is_stopped() {
+            break;
+        }
         if let Some(max_secs) = max_duration_secs {
             if start_time.elapsed() >= Duration::from_secs(max_secs) {
                 info!("Max run duration of {max_secs}s reached, exiting monitoring loop");
@@ -473,13 +623,22 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
             && storage
                 .count_pending_sync()
                 .is_ok_and(|count| count < storage_limits.max_pending_events);
-        let monitoring_now = gate_is_active(&gate, now) && storage_available;
+        let monitoring_now = monitoring_control.collection_allowed(
+            Instant::now(),
+            gate_is_active(&gate, now) && storage_available,
+        );
         if gate_is_active(&gate, now) && !storage_available {
             warn!("Activity collection paused by non-destructive storage backpressure; synchronize or increase the documented limits after capacity review");
         }
         if !monitoring_now {
             if let Some(event) =
-                session_manager.close_active_session(gate.allowed_until.unwrap_or(now))
+                session_manager.close_active_session(
+                    if monitoring_control.is_paused(Instant::now()) {
+                        now
+                    } else {
+                        gate.allowed_until.unwrap_or(now)
+                    }
+                )
             {
                 match save_completed_event(&mut storage, &event, storage_limits) {
                     Ok(()) => recorded_sessions += 1,
@@ -543,6 +702,18 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
             storage.delete_state(SESSION_CHECKPOINT_KEY)?;
         }
 
+        if !monitoring_now {
+            if let Some(scheduler) = screenshot_scheduler.as_ref() {
+                if screenshot_was_active {
+                    if let Err(error) = scheduler.cancel_and_wait(Duration::from_secs(3)) {
+                        warn!(error = %error, "Screenshot cancellation not acknowledged");
+                    }
+                } else {
+                    scheduler.cancel();
+                }
+            }
+        }
+        screenshot_was_active = monitoring_now;
         let mut effective_screen_policy = screen_policy.clone();
         if !monitoring_now
             || is_workstation_locked()
@@ -571,12 +742,14 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
         if foreground_name.is_none() {
             effective_screen_policy.allowed = false;
         }
-        screenshot_scheduler.tick(
-            &effective_screen_policy,
-            &config.backend_url,
-            &device_info,
-            foreground_name.as_deref().unwrap_or_default(),
-        );
+        if let Some(scheduler) = screenshot_scheduler.as_mut() {
+            scheduler.tick(
+                &effective_screen_policy,
+                &config.backend_url,
+                &device_info,
+                foreground_name.as_deref().unwrap_or_default(),
+            );
+        }
 
         // Periodic background synchronization to backend
         if last_sync_time.elapsed() >= config.sync_interval {
@@ -605,7 +778,9 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
                     sync::ScreenMonitoringPolicy { allowed: false, reason: Some("POLICY_UNAVAILABLE".into()), interval_seconds: 300, excluded_applications: Vec::new(), visible_indicator: true, allowed_until: None }
                 });
             if !gate_is_active(&gate, Utc::now()) || !screen_policy.allowed {
-                screenshot_scheduler.cancel();
+                if let Some(scheduler) = screenshot_scheduler.as_ref() { if let Err(error) = scheduler.cancel_and_wait(Duration::from_secs(3)) {
+    warn!(error = %error, "Screenshot cancellation not acknowledged");
+} }
             }
             if !gate_is_active(&gate, Utc::now()) && previous_gate.allowed {
                 let end = if gate.reason.as_deref() == Some("OUTSIDE_SCHEDULE") {
@@ -633,7 +808,7 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
                     Ok(_) => {}
                     Err(err) => warn!(
                         error = format!("{:#}", err),
-                        "Periodic sync deferred; pending records remain in SQLite"
+                        "Periodic sync deferred; pending records remain in offline queue"
                     ),
                 }
             } else {
@@ -652,7 +827,9 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
     }
 
     // Stop accepting screenshot work before any shutdown persistence/network work.
-    screenshot_scheduler.cancel();
+    if let Some(scheduler) = screenshot_scheduler.as_ref() { if let Err(error) = scheduler.cancel_and_wait(Duration::from_secs(3)) {
+    warn!(error = %error, "Screenshot cancellation not acknowledged");
+} }
     let console_shutdown_requested = !running.load(Ordering::SeqCst);
 
     // Flush any pending active session on shutdown
@@ -691,7 +868,7 @@ fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
         }
         Ok(_) => {}
         Err(err) => {
-            info!(error = %err, "Shutdown sync note: remaining events safely stored in SQLite for next start");
+            info!(error = %err, "Shutdown sync note: remaining events safely stored in offline queue for next start");
         }
     }
 
@@ -765,7 +942,7 @@ fn persist_enrollment_secret(
         .set_state(ENROLLMENT_RECOVERY_KEY, &marker.to_string())
         .context("server enrollment succeeded but the local recovery marker could not be written; do not retry the consumed token")?;
     store(&device_id.to_string(), secret).map_err(|_| {
-        anyhow::anyhow!("Server enrollment succeeded, but Windows Credential Manager rejected the device secret. The secret was not logged or written to SQLite. Monitoring remains disabled and this consumed token will not be retried. Ask an administrator to revoke device {device_id} and issue a new token after Credential Manager is repaired.")
+        anyhow::anyhow!("Server enrollment succeeded, but Windows Credential Manager rejected the device secret. The secret was not logged or written to storage. Monitoring remains disabled and this consumed key will not be retried. Ask an administrator to revoke device {device_id} and issue a new key after Credential Manager is repaired.")
     })?;
     storage.delete_state("device_secret")?;
     storage.set_state("backend_url", backend_url)?;
@@ -903,7 +1080,7 @@ fn save_completed_event(
         .context(
             "failed to persist session; collection will pause rather than delete pending activity",
         )?;
-    info!(event_id = %event.event_id, duration_secs = event.duration_seconds, event_type = ?event.event_type, "Saved session to local SQLite buffer");
+    info!(event_id = %event.event_id, duration_secs = event.duration_seconds, event_type = ?event.event_type, "Saved session to encrypted offline buffer");
     Ok(())
 }
 

@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 const REFRESH_INTERVAL_MS = 30000;
 
-function UsageBreakdown({ title, items }) {
+export function UsageBreakdown({ title, items, emptyMessage, note }) {
   const totalSeconds = items.reduce((sum, item) => sum + item.totalSeconds, 0);
 
   return (
@@ -21,14 +21,15 @@ function UsageBreakdown({ title, items }) {
             {items.map((item) => (
               <li key={item.name} className="flex justify-between gap-3 text-sm text-slate-300">
                 <span className="break-all">{item.name}</span>
-                <span>{formatDuration(item.totalSeconds)}</span>
+                <span className="whitespace-nowrap">{formatDuration(item.totalSeconds)} · {item.percentage ?? Math.round((item.totalSeconds / totalSeconds) * 1000) / 10}%</span>
               </li>
             ))}
           </ul>
+          {note && <p className="mt-3 text-xs text-slate-500">{note}</p>}
         </>
       ) : (
         <p className="text-sm text-slate-400">
-          No recorded usage for this category.
+          {emptyMessage || 'No recorded usage for this category.'}
         </p>
       )}
     </Card>
@@ -54,11 +55,15 @@ function EmployeeDetails({ employeeId, organizationId }) {
   const websites = (analytics?.websiteUsage || []).map((item) => ({
     name: item.name,
     totalSeconds: item.seconds || 0,
+    percentage: item.percentage,
+    domain: item.domain,
   }));
 
   const applications = (analytics?.applicationUsage || []).map((item) => ({
     name: item.name,
     totalSeconds: item.seconds || 0,
+    percentage: item.percentage,
+    executable: item.executable,
   }));
 
   const topWebsite = [...websites]
@@ -94,8 +99,19 @@ function EmployeeDetails({ employeeId, organizationId }) {
             </Card>
           </div>
 
+          {analytics.reportingPeriod && (
+            <p className="text-xs text-slate-500">
+              Reporting day: {analytics.reportingPeriod.date} in {analytics.reportingPeriod.timezone}.
+            </p>
+          )}
+
           <div className="grid gap-6 lg:grid-cols-2">
-            <UsageBreakdown title="Website usage breakdown" items={websites} />
+            <UsageBreakdown
+              title="Website usage breakdown"
+              items={websites}
+              emptyMessage="No browser-domain activity was synchronized for this reporting day. Website time requires an enrolled, active browser extension."
+              note="Website time comes only from focused, non-idle browser-extension sessions and is independent of desktop application time."
+            />
             <UsageBreakdown title="Application usage breakdown" items={applications} />
           </div>
         </>

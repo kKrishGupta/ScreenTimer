@@ -89,6 +89,10 @@ export async function buildApp({ config, prisma, logger }) {
   app.addHook('onRequest', async (req, reply) => {
     const hasSessionCookie = req.headers.cookie?.split(';').some((part) => part.trim().startsWith(`${SESSION_COOKIE_NAME}=`));
     if (!hasSessionCookie || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return;
+    // The signed Windows Control Center is a native client, so it has no browser
+    // Origin. Requiring this explicit non-simple header keeps browser CSRF
+    // protection intact (an untrusted origin would require a CORS preflight).
+    if (!req.headers.origin && req.headers['x-digitalpulse-native-client'] === 'control-center') return;
     const origin = req.headers.origin;
     if (!origin || !config.corsOrigins.includes(origin)) {
       return reply.code(403).send({ error: { code: 'CSRF_ORIGIN_REJECTED', message: 'This request origin is not allowed.' } });

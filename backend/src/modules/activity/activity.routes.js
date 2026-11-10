@@ -2,6 +2,7 @@ import { activityBatchSchema } from '@digitalpulse/contracts';
 import { badRequest } from '../../shared/errors.js';
 import { Roles, normalizeRole } from '../auth/auth.service.js';
 import { getMonitoringAuthorization, isEventWithinSchedule } from '../devices/monitoring-authorization.js';
+import { aggregateIntervals, exclusiveUsage } from './activity-aggregation.js';
 
 const ACTIVITY_TYPE_MAP = {
   app_session: 'APP_SESSION',
@@ -9,24 +10,37 @@ const ACTIVITY_TYPE_MAP = {
   idle_session: 'IDLE_SESSION',
 };
 
-function unionSecondsForType(sessions, types) {
-  const intervals = sessions
-    .filter((session) => types.includes(session.type))
-    .map((session) => [new Date(session.startedAt).getTime(), new Date(session.endedAt).getTime()])
-    .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start)
-    .sort((a, b) => a[0] - b[0]);
-  let seconds = 0;
-  let current = null;
-  for (const interval of intervals) {
-    if (!current) current = interval;
-    else if (interval[0] <= current[1]) current[1] = Math.max(current[1], interval[1]);
-    else {
-      seconds += (current[1] - current[0]) / 1000;
-      current = interval;
-    }
+function requestedRange({ date, from, to }) {
+  if (date && !from && !to) {
+    const start = new Date(`${date}T00:00:00.000Z`);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 1);
+    return { start, end };
   }
-  if (current) seconds += (current[1] - current[0]) / 1000;
-  return seconds;
+  return {
+    start: from ? new Date(from) : null,
+    end: to ? new Date(to) : null,
+  };
+}
+
+function applyOverlapRange(where, range) {
+  if (range.start) where.endedAt = { gt: range.start };
+  if (range.end) where.startedAt = { lt: range.end };
+}
+
+function effectiveRange(sessions, range) {
+  let earliest = null;
+  let latest = null;
+  for (const session of sessions) {
+    const start = new Date(session.startedAt).getTime();
+    const end = new Date(session.endedAt).getTime();
+    if (Number.isFinite(start) && (earliest === null || start < earliest)) earliest = start;
+    if (Number.isFinite(end) && (latest === null || end > latest)) latest = end;
+  }
+  return {
+    start: range.start || new Date(earliest ?? 0),
+    end: range.end || new Date(latest ?? 0),
+  };
 }
 
 async function getCategoryOverride(prisma, organizationId, target, targetType) {
@@ -67,7 +81,20 @@ export function categorizeTarget(nameOrDomain) {
 
 export function normalizeDomain(rawDomain) {
   if (!rawDomain) return '';
-  let d = String(rawDomain).toLowerCase().trim().split(':')[0];
+  let d = String(rawDomain).toLowerCase().trim();
+  try {
+    if (d.includes('://')) d = new URL(d).hostname;
+  } catch {
+    return '';
+  }
+  d = d.split(/[/?#]/, 1)[0];
+  if (d.startsWith('[')) {
+    const close = d.indexOf(']');
+    d = close >= 0 ? d.slice(1, close) : '';
+  } else {
+    d = d.replace(/:\d+$/, '');
+  }
+  d = d.replace(/\.$/, '');
   if (d.startsWith('www.')) d = d.slice(4);
   for (const base of KNOWN_BASE_DOMAINS) {
     if (d === base || d.endsWith('.' + base)) {
@@ -483,16 +510,8 @@ export default async function activityRoutes(app) {
 
     const where = { ...scopeWhere, type: 'APP_SESSION' };
     if (deviceId) where.deviceId = deviceId;
-    if (date && !from && !to) {
-      where.startedAt = {
-        gte: new Date(`${date}T00:00:00.000Z`),
-        lte: new Date(`${date}T23:59:59.999Z`),
-      };
-    } else if (from || to) {
-      where.startedAt = {};
-      if (from) where.startedAt.gte = new Date(from);
-      if (to) where.startedAt.lte = new Date(to);
-    }
+    const range = requestedRange({ date, from, to });
+    applyOverlapRange(where, range);
 
     try {
       const sessions = await prisma.activitySession.findMany({
@@ -502,42 +521,22 @@ export default async function activityRoutes(app) {
         },
       });
 
-      const appMap = new Map();
-      let totalSecondsAll = 0;
-
-      for (const s of sessions) {
-        if (!s.application) continue;
-        const key = s.application.executableName;
-        totalSecondsAll += s.durationSeconds;
-
-        if (!appMap.has(key)) {
-          const category = await getCategoryOverride(prisma, scopeWhere.organizationId, key || s.application.displayName, 'APPLICATION') || categorizeTarget(key || s.application.displayName);
-          appMap.set(key, {
-            name: s.application.displayName,
-            executable: s.application.executableName,
-            category,
-            totalSeconds: 0,
-            sessionCount: 0,
-          });
-        }
-        const entry = appMap.get(key);
-        entry.totalSeconds += s.durationSeconds;
-        entry.sessionCount++;
+      const bounds = effectiveRange(sessions, range);
+      const usage = exclusiveUsage(sessions, {
+        type: 'APP_SESSION',
+        start: bounds.start,
+        end: bounds.end,
+        identity: (session) => String(session.application?.executableName || '').toLowerCase().trim(),
+        describe: (session, executable) => ({ name: session.application?.displayName || executable, executable }),
+      });
+      const appsList = [];
+      for (const item of usage.items) {
+        const category = await getCategoryOverride(prisma, scopeWhere.organizationId, item.executable || item.name, 'APPLICATION') || categorizeTarget(item.executable || item.name);
+        appsList.push({ ...item, category });
       }
 
-      const appsList = Array.from(appMap.values())
-        .map((item) => ({
-          ...item,
-          durationSeconds: Math.round(item.totalSeconds),
-          percentage:
-            totalSecondsAll > 0
-              ? Math.round((item.totalSeconds / totalSecondsAll) * 1000) / 10
-              : 0,
-        }))
-        .sort((a, b) => b.totalSeconds - a.totalSeconds);
-
       return reply.send({
-        totalSeconds: totalSecondsAll,
+        totalSeconds: usage.totalSeconds,
         apps: appsList,
         applications: appsList,
       });
@@ -564,16 +563,8 @@ export default async function activityRoutes(app) {
 
     const where = { ...scopeWhere, type: 'WEB_SESSION' };
     if (deviceId) where.deviceId = deviceId;
-    if (date && !from && !to) {
-      where.startedAt = {
-        gte: new Date(`${date}T00:00:00.000Z`),
-        lte: new Date(`${date}T23:59:59.999Z`),
-      };
-    } else if (from || to) {
-      where.startedAt = {};
-      if (from) where.startedAt.gte = new Date(from);
-      if (to) where.startedAt.lte = new Date(to);
-    }
+    const range = requestedRange({ date, from, to });
+    applyOverlapRange(where, range);
 
     try {
       const sessions = await prisma.activitySession.findMany({
@@ -583,41 +574,22 @@ export default async function activityRoutes(app) {
         },
       });
 
-      const webMap = new Map();
-      let totalSecondsAll = 0;
-
-      for (const s of sessions) {
-        if (!s.website) continue;
-        const key = normalizeDomain(s.website.domain);
-        totalSecondsAll += s.durationSeconds;
-
-        if (!webMap.has(key)) {
-          const category = await getCategoryOverride(prisma, scopeWhere.organizationId, key, 'WEBSITE') || categorizeTarget(key);
-          webMap.set(key, {
-            domain: key,
-            category,
-            totalSeconds: 0,
-            visitCount: 0,
-          });
-        }
-        const entry = webMap.get(key);
-        entry.totalSeconds += s.durationSeconds;
-        entry.visitCount++;
+      const bounds = effectiveRange(sessions, range);
+      const usage = exclusiveUsage(sessions, {
+        type: 'WEB_SESSION',
+        start: bounds.start,
+        end: bounds.end,
+        identity: (session) => normalizeDomain(session.website?.domain),
+        describe: (_session, domain) => ({ name: domain, domain, visitCount: 0 }),
+      });
+      const websitesList = [];
+      for (const item of usage.items) {
+        const category = await getCategoryOverride(prisma, scopeWhere.organizationId, item.domain, 'WEBSITE') || categorizeTarget(item.domain);
+        websitesList.push({ ...item, category, visitCount: item.sessionCount });
       }
 
-      const websitesList = Array.from(webMap.values())
-        .map((item) => ({
-          ...item,
-          durationSeconds: Math.round(item.totalSeconds),
-          percentage:
-            totalSecondsAll > 0
-              ? Math.round((item.totalSeconds / totalSecondsAll) * 1000) / 10
-              : 0,
-        }))
-        .sort((a, b) => b.totalSeconds - a.totalSeconds);
-
       return reply.send({
-        totalSeconds: totalSecondsAll,
+        totalSeconds: usage.totalSeconds,
         websites: websitesList,
       });
     } catch (err) {
@@ -641,22 +613,16 @@ export default async function activityRoutes(app) {
       });
     }
 
-    let whereStartedAt = {};
-    if (date) {
-      whereStartedAt = {
-        gte: new Date(`${date}T00:00:00.000Z`),
-        lte: new Date(`${date}T23:59:59.999Z`),
-      };
-    } else if (from || to) {
-      if (from) whereStartedAt.gte = new Date(from);
-      if (to) whereStartedAt.lte = new Date(to);
-    } else {
+    const range = requestedRange({ date, from, to });
+    if (!range.start && !range.end) {
       const startOfToday = new Date();
       startOfToday.setUTCHours(0, 0, 0, 0);
-      whereStartedAt = { gte: startOfToday };
+      range.start = startOfToday;
+      range.end = new Date();
     }
 
-    const where = { ...scopeWhere, startedAt: whereStartedAt };
+    const where = { ...scopeWhere };
+    applyOverlapRange(where, range);
     if (deviceId) where.deviceId = deviceId;
 
     try {
@@ -668,14 +634,11 @@ export default async function activityRoutes(app) {
         },
       });
 
-      const activeSeconds = unionSecondsForType(sessions, ['APP_SESSION', 'WEB_SESSION']);
-      const idleSeconds = unionSecondsForType(sessions, ['IDLE_SESSION']);
-      const observedSeconds = unionSecondsForType(sessions, ['APP_SESSION', 'WEB_SESSION', 'IDLE_SESSION']);
+      const bounds = effectiveRange(sessions, range);
+      const totals = aggregateIntervals(sessions, bounds.start, bounds.end);
       let appSessionCount = 0;
       let webSessionCount = 0;
       let idleSessionCount = 0;
-      const appUsage = new Map();
-      const webUsage = new Map();
 
       for (const s of sessions) {
         if (s.type === 'IDLE_SESSION') {
@@ -683,30 +646,31 @@ export default async function activityRoutes(app) {
         } else {
           if (s.type === 'APP_SESSION') {
             appSessionCount++;
-            if (s.application) {
-              const name = s.application.displayName;
-              appUsage.set(name, (appUsage.get(name) || 0) + s.durationSeconds);
-            }
           } else if (s.type === 'WEB_SESSION') {
             webSessionCount++;
-            if (s.website) {
-              const domain = normalizeDomain(s.website.domain);
-              webUsage.set(domain, (webUsage.get(domain) || 0) + s.durationSeconds);
-            }
           }
         }
       }
 
-      const sortedApps = Array.from(appUsage.entries()).sort((a, b) => b[1] - a[1]);
-      const topAppEntry = sortedApps[0] ? { name: sortedApps[0][0], durationSeconds: sortedApps[0][1] } : null;
-
-      const sortedWebsites = Array.from(webUsage.entries()).sort((a, b) => b[1] - a[1]);
-      const topDomainEntry = sortedWebsites[0] ? { domain: sortedWebsites[0][0], durationSeconds: sortedWebsites[0][1] } : null;
+      const appUsage = exclusiveUsage(sessions, {
+        type: 'APP_SESSION', start: bounds.start, end: bounds.end,
+        identity: (session) => String(session.application?.executableName || session.application?.displayName || '').toLowerCase().trim(),
+        describe: (session) => ({ name: session.application?.displayName || session.application?.executableName }),
+      });
+      const webUsage = exclusiveUsage(sessions, {
+        type: 'WEB_SESSION', start: bounds.start, end: bounds.end,
+        identity: (session) => normalizeDomain(session.website?.domain),
+        describe: (_session, domain) => ({ name: domain, domain }),
+      });
+      const topApp = appUsage.items[0];
+      const topWebsite = webUsage.items[0];
+      const topAppEntry = topApp ? { name: topApp.name, durationSeconds: topApp.totalSeconds } : null;
+      const topDomainEntry = topWebsite ? { domain: topWebsite.domain, durationSeconds: topWebsite.totalSeconds } : null;
 
       return reply.send({
-        totalActiveSeconds: Math.round(activeSeconds),
-        totalIdleSeconds: Math.round(idleSeconds),
-        totalScreenTimeSeconds: Math.round(observedSeconds),
+        totalActiveSeconds: totals.activeSeconds,
+        totalIdleSeconds: totals.idleSeconds,
+        totalScreenTimeSeconds: totals.monitoredSeconds,
         appSessionCount,
         webSessionCount,
         idleSessionCount,
@@ -714,10 +678,10 @@ export default async function activityRoutes(app) {
         topApp: topAppEntry,
         topDomain: topDomainEntry,
         today: {
-          activeSeconds,
-          idleSeconds,
-          appCount: appUsage.size,
-          websiteCount: webUsage.size,
+          activeSeconds: totals.activeSeconds,
+          idleSeconds: totals.idleSeconds,
+          appCount: appUsage.items.length,
+          websiteCount: webUsage.items.length,
           topApp: topAppEntry?.name || null,
           topWebsite: topDomainEntry?.domain || null,
         },

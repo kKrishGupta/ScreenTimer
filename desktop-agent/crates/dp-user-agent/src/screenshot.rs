@@ -18,8 +18,8 @@ const DEFAULT_MAX_PENDING_CAPTURES: usize = 50;
 const DEFAULT_RETENTION_HOURS: i64 = 24;
 
 #[cfg(windows)]
-const RESTRICT_QUEUE_ACL_SCRIPT: &str = r#"$ErrorActionPreference='Stop'
-$path=$args[0]
+const RESTRICT_QUEUE_ACL_SCRIPT: &str = r#"param([Parameter(Mandatory=$true)][string]$QueuePath)
+$ErrorActionPreference='Stop'
 $acl=New-Object System.Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true,$false)
 $inherit=[System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
@@ -29,7 +29,7 @@ $current=[System.Security.Principal.WindowsIdentity]::GetCurrent().User
 $system=New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-18'
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($current,'FullControl',$inherit,$propagate,$allow)))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system,'FullControl',$inherit,$propagate,$allow)))
-Set-Acl -LiteralPath $path -AclObject $acl
+(Get-Item -LiteralPath $QueuePath).SetAccessControl($acl)
 "#;
 
 // JPEG encoding and DPAPI protection both happen in memory. The helper's only
@@ -44,12 +44,10 @@ if($bounds.Width -lt 1 -or $bounds.Height -lt 1){throw 'No interactive display'}
 $bitmap=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
 $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
 $stream=New-Object System.IO.MemoryStream
+$plain=$null
 try{
   $graphics.CopyFromScreen($bounds.Left,$bounds.Top,0,0,$bitmap.Size,[System.Drawing.CopyPixelOperation]::SourceCopy)
-  $codec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object{$_.MimeType -eq 'image/jpeg'}|Select-Object -First 1
-  $parameters=New-Object System.Drawing.Imaging.EncoderParameters 1
-  $parameters.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality),75L
-  $bitmap.Save($stream,$codec,$parameters)
+  $bitmap.Save($stream,[System.Drawing.Imaging.ImageFormat]::Jpeg)
   $plain=$stream.ToArray()
   if($plain.Length -lt 32 -or $plain.Length -gt 5242880){throw 'Invalid screenshot size'}
   $protected=[Security.Cryptography.ProtectedData]::Protect($plain,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
@@ -114,6 +112,7 @@ struct CaptureJob {
 enum Work {
     Capture(Box<CaptureJob>),
     Clear,
+    Barrier(SyncSender<bool>),
 }
 
 #[derive(Debug)]
@@ -154,6 +153,16 @@ impl ScreenshotScheduler {
                             if let Err(error) = clear_pending(&worker_dir) {
                                 warn!(error = %error, "SCREEN_QUEUE_CLEANUP_FAILED");
                             }
+                        }
+                        Work::Barrier(ack) => {
+                            let cleared = match clear_pending(&worker_dir) {
+                                Ok(()) => true,
+                                Err(error) => {
+                                    warn!(error = %error, "SCREEN_QUEUE_CLEANUP_FAILED");
+                                    false
+                                }
+                            };
+                            let _ = ack.send(cleared);
                         }
                     }
                     if worker_stopping.load(Ordering::Acquire) {
@@ -232,20 +241,86 @@ impl ScreenshotScheduler {
         self.authorized.store(false, Ordering::Release);
         let _ = self.sender.try_send(Work::Clear);
     }
+
+    /// Revoke capture permission and wait for the worker to acknowledge
+    /// completion of all work preceding this barrier.
+    pub fn cancel_and_wait(&self, timeout: Duration) -> Result<()> {
+        self.authorized.store(false, Ordering::Release);
+
+        let (ack_sender, ack_receiver) = mpsc::sync_channel(1);
+        let deadline = Instant::now() + timeout;
+
+        loop {
+            match self.sender.try_send(Work::Barrier(ack_sender.clone())) {
+                Ok(()) => break,
+                Err(TrySendError::Full(_)) => {
+                    if Instant::now() >= deadline {
+                        bail!("screenshot worker cancellation acknowledgement timed out");
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    bail!("screenshot worker is disconnected");
+                }
+            }
+        }
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let cleared = ack_receiver
+            .recv_timeout(remaining)
+            .context("screenshot worker did not acknowledge cancellation")?;
+
+        if !cleared {
+            bail!("screenshot worker could not clear pending capture data");
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
 fn restrict_queue_acl(queue_dir: &Path) -> Result<()> {
+    let escaped_path = queue_dir.to_string_lossy().replace('\'', "''");
+    let script = RESTRICT_QUEUE_ACL_SCRIPT.replacen(
+        "param([Parameter(Mandatory=$true)][string]$QueuePath)",
+        &format!("$QueuePath='{}'", escaped_path),
+        1,
+    );
+
+    let encoded = {
+
+        let mut base64 = String::new();
+        let bytes: Vec<u8> = script
+            .encode_utf16()
+            .flat_map(|unit| unit.to_le_bytes())
+            .collect();
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        for chunk in bytes.chunks(3) {
+            let a = chunk[0];
+            let b = *chunk.get(1).unwrap_or(&0);
+            let c = *chunk.get(2).unwrap_or(&0);
+            let value = ((a as u32) << 16) | ((b as u32) << 8) | c as u32;
+            for index in 0..4 {
+                if index > chunk.len() {
+                    base64.push('=');
+                } else {
+                    let shift = 18 - index * 6;
+                    base64.push(TABLE[((value >> shift) & 63) as usize] as char);
+                }
+            }
+        }
+        base64
+    };
     let mut child = Command::new("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
-            "-Command",
-            RESTRICT_QUEUE_ACL_SCRIPT,
+            "-EncodedCommand",
+            &encoded,
         ])
-        .arg(queue_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -253,7 +328,11 @@ fn restrict_queue_acl(queue_dir: &Path) -> Result<()> {
         .context("failed to start screenshot queue ACL helper")?;
     let output = wait_for_child(&mut child, Duration::from_secs(10), || true)?;
     if !output.status.success() {
-        bail!("failed to restrict screenshot queue access; capture remains disabled");
+        bail!(
+            "failed to restrict screenshot queue access; capture remains disabled; exit={:?}; stderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     Ok(())
 }
@@ -336,6 +415,15 @@ fn capture(
     let protected_temp = queue_dir.join(format!("{capture_key}.dpapi.tmp"));
     let metadata_path = queue_dir.join(format!("{capture_key}.json"));
     let metadata_temp = queue_dir.join(format!("{capture_key}.json.tmp"));
+    let helper_path = queue_dir.join("capture.ps1");
+    let needs_helper_write = match fs::read_to_string(&helper_path) {
+        Ok(existing) => existing != CAPTURE_SCRIPT,
+        Err(_) => true,
+    };
+    if needs_helper_write {
+        fs::write(&helper_path, CAPTURE_SCRIPT)
+            .context("failed to install screenshot capture helper")?;
+    }
     let result = (|| -> Result<()> {
         let mut child = Command::new("powershell.exe")
             .args([
@@ -345,7 +433,7 @@ fn capture(
                 "Bypass",
                 "-File",
             ])
-            .arg(queue_dir.join("capture.ps1"))
+            .arg(&helper_path)
             .arg("-ProtectedOutputPath")
             .arg(&protected_temp)
             .stdin(Stdio::null())
@@ -356,8 +444,18 @@ fn capture(
         let output = wait_for_child(&mut child, config.timeout, || {
             policy_active(&job.policy, authorized)
         })?;
-        if !output.status.success() || !protected_temp.is_file() {
-            bail!("screen capture helper failed without retaining plaintext screen data");
+        let exit_code = output.status.code().unwrap_or(-1);
+        if !output.status.success() {
+            let diag = sanitize_diagnostics(&output.stderr);
+            bail!(
+                "screen capture helper exited with code {exit_code}: {diag}; without retaining plaintext screen data"
+            );
+        }
+        if !protected_temp.is_file() {
+            let diag = sanitize_diagnostics(&output.stderr);
+            bail!(
+                "screen capture helper completed (exit {exit_code}) but protected payload file is missing: {diag}; without retaining plaintext screen data"
+            );
         }
         let dimensions = String::from_utf8_lossy(&output.stdout);
         let dimensions = dimensions
@@ -446,6 +544,43 @@ fn wait_for_child(
         stdout,
         stderr,
     })
+}
+
+fn sanitize_diagnostics(stderr: &[u8]) -> String {
+    let raw = String::from_utf8_lossy(stderr);
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return "no stderr output".to_string();
+    }
+    let mut safe = String::with_capacity(trimmed.len());
+    for line in trimmed.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if !safe.is_empty() {
+            safe.push_str(" | ");
+        }
+        safe.push_str(line);
+        if safe.len() >= 300 {
+            safe.truncate(300);
+            safe.push_str("...");
+            break;
+        }
+    }
+    // Redact sensitive patterns if present without suppressing error context
+    if safe.contains("dp_sec_") {
+        let parts: Vec<&str> = safe.split("dp_sec_").collect();
+        let mut redacted = parts[0].to_string();
+        for part in &parts[1..] {
+            redacted.push_str("dp_sec_[REDACTED]");
+            if let Some(space_idx) = part.find(|c: char| c.is_whitespace() || c == '|' || c == ';') {
+                redacted.push_str(&part[space_idx..]);
+            }
+        }
+        safe = redacted;
+    }
+    safe
 }
 
 fn flush_pending(
@@ -713,13 +848,117 @@ mod tests {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "(Get-Acl -LiteralPath $args[0]).AreAccessRulesProtected",
+                "(Get-Acl -LiteralPath $env:DP_ACL_TEST_PATH).AreAccessRulesProtected",
             ])
-            .arg(&root)
+            .env("DP_ACL_TEST_PATH", &root)
             .output()
             .expect("inspect queue ACL");
-        assert!(output.status.success());
+        assert!(
+            output.status.success(),
+            "ACL verification failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "True");
         fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn screenshot_queue_acl_grants_exclusive_user_and_system_access_without_sacl() {
+        let root = std::env::temp_dir().join(format!("dp-screen-acl-reg-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("test directory");
+        restrict_queue_acl(&root).expect("restrict queue ACL without SeSecurityPrivilege");
+
+        // Verify DACL rules: only current user SID and LocalSystem S-1-5-18 FullControl,
+        // without touching SACL / requiring SeSecurityPrivilege.
+        let output = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$acl = (Get-Item -LiteralPath $env:DP_ACL_TEST_PATH).GetAccessControl([System.Security.AccessControl.AccessControlSections]::Access); \
+                 $rules = @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier])); \
+                 $curr = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; \
+                 $hasCurr = ($rules | Where-Object { $_.IdentityReference.Value -eq $curr -and $_.FileSystemRights -eq 'FullControl' -and $_.AccessControlType -eq 'Allow' }).Count -eq 1; \
+                 $hasSys = ($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-18' -and $_.FileSystemRights -eq 'FullControl' -and $_.AccessControlType -eq 'Allow' }).Count -eq 1; \
+                 Write-Output ($acl.AreAccessRulesProtected.ToString() + ':' + $rules.Count.ToString() + ':' + $hasCurr.ToString() + ':' + $hasSys.ToString())",
+            ])
+            .env("DP_ACL_TEST_PATH", &root)
+            .output()
+            .expect("inspect queue ACL rules");
+
+        assert!(
+            output.status.success(),
+            "ACL inspection failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "True:2:True:True"
+        );
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn failure_diagnostics_sanitize_secrets_and_provide_safe_actionable_context() {
+        let fake_stderr = b"At line:1 char:1\nError: connection failed with secret dp_sec_topsecret12345 in path C:\\Users\\test\nCategoryInfo: InvalidOperation";
+        let diag = sanitize_diagnostics(fake_stderr);
+        assert!(!diag.contains("dp_sec_topsecret12345"), "Must redact device secrets");
+        assert!(diag.contains("dp_sec_[REDACTED]"), "Must indicate redaction");
+        assert!(diag.contains("CategoryInfo: InvalidOperation"), "Must retain actionable error");
+
+        let empty_stderr = b"";
+        assert_eq!(sanitize_diagnostics(empty_stderr), "no stderr output");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn capture_helper_executes_without_amsi_block_and_writes_valid_dpapi_jpeg() {
+        let root = std::env::temp_dir().join(format!("dp-screen-helper-reg-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("test directory");
+        let script_path = root.join("capture.ps1");
+        fs::write(&script_path, CAPTURE_SCRIPT).expect("write capture script");
+        let protected_path = root.join("test.dpapi");
+
+        let output = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(&script_path)
+            .arg("-ProtectedOutputPath")
+            .arg(&protected_path)
+            .output()
+            .expect("execute capture helper");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("blocked by your antivirus software"),
+            "Capture helper must not trigger AMSI block; stderr: {stderr}"
+        );
+
+        if output.status.success() {
+            assert!(protected_path.is_file(), "DPAPI protected output file must exist");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(stdout.contains("OK:"), "Helper must output dimensions: {stdout}");
+
+            let ciphertext = fs::read(&protected_path).expect("read dpapi file");
+            assert!(ciphertext.len() >= 32, "Protected file must not be empty");
+
+            let plaintext = dp_platform_windows::data_protection::unprotect(&ciphertext)
+                .expect("decrypt DPAPI ciphertext");
+            assert!(plaintext.len() >= 32, "Decrypted JPEG must be valid size");
+            assert_eq!(&plaintext[0..2], &[0xff, 0xd8], "Decrypted payload must have JPEG SOI magic");
+        } else {
+            assert!(
+                stderr.contains("No interactive display") || stderr.contains("handle is invalid"),
+                "Expected display error if headless, but got: {stderr}"
+            );
+        }
+
+        let _ = fs::remove_dir_all(root);
     }
 }

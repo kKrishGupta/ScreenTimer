@@ -1,0 +1,1089 @@
+﻿//! DigitalPulse user-session agent.
+//!
+//! Milestone 3: Activity session management and SQLite persistence.
+
+use anyhow::{bail, Context, Result};
+use chrono::Utc;
+use dp_core::{
+    ActivityEvent, AgentConfig, DeviceInfo, EventSource, EventType, SessionCheckpoint,
+    SessionManager, AGENT_VERSION,
+};
+use dp_platform_windows::{
+    get_current_foreground_app, get_current_process_metrics, get_system_idle_duration,
+    is_workstation_locked, ActivityMonitor, PlatformEvent,
+};
+use dp_storage::{Storage, StoredActivitySession};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+use tracing::{error, info, warn};
+use tracing_subscriber::EnvFilter;
+use uuid::Uuid;
+
+const SESSION_CHECKPOINT_KEY: &str = "active_session_checkpoint_v1";
+const ENROLLMENT_RECOVERY_KEY: &str = "enrollment_recovery_required_v1";
+
+#[derive(Debug, Clone, Copy)]
+struct RuntimeStorageLimits {
+    max_database_bytes: u64,
+    max_pending_events: usize,
+}
+
+impl RuntimeStorageLimits {
+    fn from_env() -> Self {
+        Self {
+            max_database_bytes: bounded_env("DP_MAX_DATABASE_MIB", 512, 16, 4096) * 1024 * 1024,
+            max_pending_events: bounded_env("DP_MAX_PENDING_EVENTS", 100_000, 100, 1_000_000)
+                as usize,
+        }
+    }
+}
+
+fn bounded_env(name: &str, default: u64, min: u64, max: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+        .filter(|value| (min..=max).contains(value))
+        .unwrap_or(default)
+}
+
+mod screenshot;
+mod sync;
+use sync::sync_pending_events;
+
+fn main() -> Result<()> {
+    init_logging();
+
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!(
+            "dp-user-agent {AGENT_VERSION} ({})",
+            env!("DP_BUILD_REVISION")
+        );
+        return Ok(());
+    }
+
+    if std::env::args().any(|a| a == "--build-info") {
+        println!(
+            "{}",
+            serde_json::json!({
+                "application": "dp-user-agent",
+                "version": AGENT_VERSION,
+                "sourceRevision": env!("DP_BUILD_REVISION"),
+                "buildTimestampEpoch": env!("DP_BUILD_TIMESTAMP_EPOCH"),
+                "profile": env!("DP_BUILD_PROFILE"),
+                "target": env!("DP_BUILD_TARGET"),
+                "cryptographicProvenance": false,
+            })
+        );
+        return Ok(());
+    }
+
+    if !dp_platform_windows::is_supported_platform() {
+        bail!("DigitalPulse user agent only supports Windows 11");
+    }
+
+    if let Some(server) = parse_arg_value("--server").or_else(|| parse_arg_value("--backend-url")) {
+        std::env::set_var("DP_BACKEND_URL", server);
+    }
+
+    if std::env::args().nth(1).as_deref() == Some("enroll")
+        || std::env::args().any(|a| a == "--enroll")
+    {
+        return run_enroll();
+    }
+
+    if std::env::args().any(|a| a == "--status" || a == "status") {
+        return run_status();
+    }
+
+    if std::env::args().any(|a| a == "--oneshot") {
+        return run_oneshot();
+    }
+
+    if std::env::args().any(|a| a == "--sync-now") {
+        return run_sync_now();
+    }
+
+    let run_duration_secs = parse_arg_value("--run-duration").and_then(|s| s.parse::<u64>().ok());
+    run_monitor(run_duration_secs)
+}
+
+fn load_stored_credentials(storage: &mut Storage, device_id: &Uuid) -> Result<Option<String>> {
+    if let Ok(secret) = std::env::var("DP_DEVICE_SECRET") {
+        if !secret.trim().is_empty() {
+            return Ok(Some(secret));
+        }
+    }
+    if let Some(secret) = dp_platform_windows::credential_store::read_device_secret(
+        &device_id.to_string(),
+    )
+    .map_err(|_| {
+        anyhow::anyhow!("Windows Credential Manager could not be read; monitoring is paused")
+    })? {
+        std::env::set_var("DP_DEVICE_SECRET", &secret);
+        if std::env::var("DP_BACKEND_URL").is_err() {
+            if let Ok(Some(url)) = storage.get_state("backend_url") {
+                std::env::set_var("DP_BACKEND_URL", url);
+            }
+        }
+        return Ok(Some(secret));
+    }
+    if let Some(legacy) = storage.get_state("device_secret")? {
+        if !legacy.trim().is_empty() {
+            dp_platform_windows::credential_store::store_device_secret(&device_id.to_string(), &legacy)
+                .map_err(|_| anyhow::anyhow!("Could not migrate the device secret to Windows Credential Manager; monitoring is paused"))?;
+            storage
+                .delete_state("device_secret")
+                .context("failed to remove the migrated device secret from SQLite")?;
+            std::env::set_var("DP_DEVICE_SECRET", &legacy);
+            if std::env::var("DP_BACKEND_URL").is_err() {
+                if let Ok(Some(url)) = storage.get_state("backend_url") {
+                    std::env::set_var("DP_BACKEND_URL", url);
+                }
+            }
+            return Ok(Some(legacy));
+        }
+    }
+    if std::env::var("DP_BACKEND_URL").is_err() {
+        if let Ok(Some(url)) = storage.get_state("backend_url") {
+            if !url.trim().is_empty() {
+                std::env::set_var("DP_BACKEND_URL", url);
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn run_enroll() -> Result<()> {
+    let token = parse_arg_value("--token")
+        .or_else(|| parse_arg_value("-t"))
+        .context(
+            "Missing required --token argument (e.g. dp-user-agent enroll --token dp_enroll_...)",
+        )?;
+
+    let backend_url = parse_arg_value("--server")
+        .or_else(|| parse_arg_value("--backend-url"))
+        .or_else(|| std::env::var("DP_BACKEND_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:3001".to_string());
+
+    let db_path = get_database_path()?;
+    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    if storage.get_state(ENROLLMENT_RECOVERY_KEY)?.is_some() {
+        bail!("A previous enrollment reached the server but local credential storage did not complete. The consumed token will not be retried. Ask an administrator to revoke the incomplete device shown by --status, then clear the recovery marker only as part of the documented re-enrollment procedure.");
+    }
+    let device_name = parse_arg_value("--name")
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .unwrap_or_else(|| "Windows Device".into());
+
+    println!("==================================================");
+    println!("   DIGITALPULSE ENDPOINT AGENT ENROLLMENT         ");
+    println!("==================================================");
+    println!("Target Backend:  {}", backend_url);
+    println!("Device ID:       {}", device_id);
+    println!("Device Name:     {}", device_name);
+    println!("Enrolling with token...");
+
+    let secret = sync::enroll_device_token(&backend_url, &token, &device_id, &device_name)
+        .context("device enrollment failed")?;
+
+    persist_enrollment_secret(
+        &mut storage,
+        device_id,
+        &backend_url,
+        &secret,
+        dp_platform_windows::credential_store::store_device_secret,
+    )?;
+
+    println!("[âœ“] Device successfully enrolled!");
+    println!("Device Secret:   [PROTECTED AND STORED SECURELY]");
+    println!("Backend URL:     {}", backend_url);
+    println!("Status:          Enrolled; connection requires an authenticated heartbeat.");
+    println!("Run 'dp-user-agent' to connect. Collection stays paused until the server confirms consent, administrator approval, and an active schedule.");
+    println!("==================================================");
+
+    Ok(())
+}
+
+fn run_status() -> Result<()> {
+    let db_path = get_database_path()?;
+    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    let credentials = load_stored_credentials(&mut storage, &device_id)?;
+    let backend_url = storage
+        .get_state("backend_url")
+        .unwrap_or(None)
+        .or_else(|| std::env::var("DP_BACKEND_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:3001".into());
+
+    let pending = storage.count_pending_sync().unwrap_or(0);
+    let total_stored = storage.count_sessions().unwrap_or(0);
+    let lifecycle = storage
+        .get_state("device_lifecycle_status")
+        .unwrap_or(None)
+        .unwrap_or_else(|| {
+            if credentials.is_some() {
+                "ACTIVE".into()
+            } else {
+                "PENDING".into()
+            }
+        });
+    let enrollment_recovery = storage.get_state(ENROLLMENT_RECOVERY_KEY)?.is_some();
+    println!("==================================================");
+    println!("   DIGITALPULSE ENDPOINT AGENT STATUS             ");
+    println!("==================================================");
+    println!("Version:         {}", AGENT_VERSION);
+    println!("Storage:         {}", db_path.display());
+    println!("Device ID:       {}", device_id);
+    println!(
+        "Enrollment:      {}",
+        if credentials.is_some() {
+            "ENROLLED"
+        } else {
+            "NOT ENROLLED (run 'dp-user-agent enroll --token <token>')"
+        }
+    );
+    println!("Backend URL:     {}", backend_url);
+    println!("Lifecycle:       {}", lifecycle);
+    println!(
+        "Recovery:        {}",
+        if enrollment_recovery {
+            "ADMIN ACTION REQUIRED (server enrollment completed; local secret unavailable)"
+        } else {
+            "NONE"
+        }
+    );
+    println!("Pending Queue:   {} sessions", pending);
+    println!("Total Recorded:  {} sessions", total_stored);
+    println!("Live activity:   Read only during authorized monitoring");
+    println!("==================================================");
+    Ok(())
+}
+
+fn run_sync_now() -> Result<()> {
+    let db_path = get_database_path()?;
+    let mut storage = Storage::open(&db_path).context("failed to open SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    if load_stored_credentials(&mut storage, &device_id)?.is_none() {
+        bail!("device is not enrolled; no activity will be synchronized");
+    }
+    let config = AgentConfig::from_env().context("invalid agent configuration")?;
+    let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into());
+
+    let device = DeviceInfo {
+        id: device_id,
+        kind: EventSource::DesktopAgent,
+        name: device_name,
+        platform: "windows_11".into(),
+        browser: None,
+        agent_version: Some(AGENT_VERSION.to_string()),
+    };
+
+    let gate = sync::send_startup_heartbeat(&config.backend_url, &device)?;
+    persist_device_lifecycle(&mut storage, &gate);
+    if !gate_is_active(&gate, Utc::now()) {
+        bail!(
+            "monitoring is paused by server authorization; local queue remains intact ({})",
+            gate.reason.as_deref().unwrap_or("policy unavailable")
+        );
+    }
+
+    let pending_before = storage.count_pending_sync().unwrap_or(0);
+    println!("Pending sync queue size before: {}", pending_before);
+
+    let outcome = sync_pending_events(&mut storage, &config.backend_url, &device, 100)?;
+    println!(
+        "Sync completed: attempted {}, acknowledged {}, rejected {}, quarantined {}",
+        outcome.attempted, outcome.synced, outcome.rejected, outcome.quarantined
+    );
+
+    let pending_after = storage.count_pending_sync().unwrap_or(0);
+    println!("Pending sync queue size after: {}", pending_after);
+    Ok(())
+}
+
+fn run_oneshot() -> Result<()> {
+    let mut storage =
+        Storage::open(get_database_path()?).context("failed to open SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    if load_stored_credentials(&mut storage, &device_id)?.is_none() {
+        bail!("device is not enrolled; no live activity data was read");
+    }
+    let config = AgentConfig::from_env().context("invalid agent configuration")?;
+    let device = DeviceInfo {
+        id: device_id,
+        kind: EventSource::DesktopAgent,
+        name: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into()),
+        platform: "windows_11".into(),
+        browser: None,
+        agent_version: Some(AGENT_VERSION.to_string()),
+    };
+    let gate = sync::send_startup_heartbeat(&config.backend_url, &device)
+        .context("server authorization could not be verified; no live activity data was read")?;
+    persist_device_lifecycle(&mut storage, &gate);
+    if !gate_is_active(&gate, Utc::now()) {
+        bail!("monitoring is paused by server authorization; no live activity data was read");
+    }
+
+    let idle = get_system_idle_duration();
+    let app = get_current_foreground_app();
+    let metrics = get_current_process_metrics();
+
+    println!("=== DigitalPulse Oneshot Query ===");
+    println!("System Idle Duration: {:.1}s", idle.as_secs_f64());
+    match app {
+        Ok(a) => {
+            println!("Foreground Executable: {}", a.executable_name);
+            println!("Foreground PID:        {}", a.process_id);
+        }
+        Err(err) => {
+            println!("Foreground App:        [Error: {err}]");
+        }
+    }
+    if let Some(m) = metrics {
+        println!("Agent Working Set RAM: {:.2} MB", m.working_set_mb);
+    }
+    Ok(())
+}
+
+fn run_monitor(max_duration_secs: Option<u64>) -> Result<()> {
+    let db_path = get_database_path()?;
+    let _instance_guard = acquire_monitor_lock(&db_path)?;
+    info!(path = %db_path.display(), "Opening SQLite local storage buffer");
+
+    let mut storage = Storage::open(&db_path).context("failed to initialize SQLite storage")?;
+    let device_id = get_or_create_device_id(&mut storage)?;
+    if load_stored_credentials(&mut storage, &device_id)?.is_none() {
+        warn!("Device is not enrolled; monitor will not collect activity");
+        return Ok(());
+    }
+    let config = AgentConfig::from_env().context("invalid agent configuration")?;
+    let storage_limits = RuntimeStorageLimits::from_env();
+
+    info!(
+        version = AGENT_VERSION,
+        device_id = %device_id,
+        idle_threshold_secs = config.idle_threshold.as_secs(),
+        sample_interval_ms = config.sample_interval.as_millis() as u64,
+        "Starting DigitalPulse user-session monitor"
+    );
+
+    let running = Arc::new(AtomicBool::new(true));
+    dp_platform_windows::register_console_ctrl_handler(running.clone());
+
+    let mut monitor = ActivityMonitor::new(config.idle_threshold);
+    let mut session_manager = SessionManager::new(device_id);
+    let mut screenshot_scheduler = match screenshot::ScreenshotScheduler::new(
+        db_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(".")),
+    ) {
+        Ok(scheduler) => Some(scheduler),
+        Err(error) => {
+            warn!(
+                error = %error,
+                "Screenshot subsystem unavailable; screenshot capture disabled"
+            );
+            None
+        }
+    };
+    let mut screen_monitoring_indicator =
+        dp_platform_windows::tray::ScreenMonitoringIndicator::new();
+
+    let device_name = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows Device".into());
+    let device_info = DeviceInfo {
+        id: device_id,
+        kind: EventSource::DesktopAgent,
+        name: device_name,
+        platform: "windows_11".into(),
+        browser: None,
+        agent_version: Some(AGENT_VERSION.to_string()),
+    };
+
+    let start_time = Instant::now();
+    let mut last_sync_time = Instant::now();
+    let mut total_ticks: u64 = 0;
+    let mut recorded_sessions: u64 = 0;
+
+    let mut gate = match sync::send_startup_heartbeat(&config.backend_url, &device_info) {
+        Ok(gate) => {
+            persist_device_lifecycle(&mut storage, &gate);
+            gate
+        }
+        Err(err) => {
+            warn!(
+                error = format!("{:#}", err),
+                "Startup heartbeat unavailable; monitoring is paused"
+            );
+            sync::MonitoringGate {
+                allowed: false,
+                allowed_from: None,
+                allowed_until: None,
+                reason: Some("HEARTBEAT_UNAVAILABLE".into()),
+            }
+        }
+    };
+    recover_session_checkpoint(&mut storage, &gate, device_id, storage_limits)?;
+    let mut screen_policy = sync::fetch_screen_monitoring_policy(&config.backend_url, &device_info)
+        .unwrap_or_else(|error| {
+            warn!(error = %error, "Screenshot policy unavailable; work-screen capture remains disabled");
+            sync::ScreenMonitoringPolicy { allowed: false, reason: Some("POLICY_UNAVAILABLE".into()), interval_seconds: 300, excluded_applications: Vec::new(), visible_indicator: true, allowed_until: None }
+        });
+    let mut last_sample_at = Utc::now();
+    if gate_is_active(&gate, Utc::now()) {
+        match sync_pending_events(&mut storage, &config.backend_url, &device_info, 50) {
+            Ok(outcome) if outcome.synced > 0 => info!(
+                synced = outcome.synced,
+                rejected = outcome.rejected,
+                "Flushed acknowledged offline events"
+            ),
+            Ok(_) => {}
+            Err(err) => warn!(error = %err, "Startup sync deferred; pending rows remain in SQLite"),
+        }
+    } else {
+        warn!(reason = gate.reason.as_deref().unwrap_or("MONITORING_CONFIGURATION_UNAVAILABLE"), "Monitoring paused until consent, authorization, organization time zone, and schedule checks pass");
+    }
+
+    let sample_interval = config.sample_interval;
+
+    while running.load(Ordering::SeqCst) {
+        if let Some(max_secs) = max_duration_secs {
+            if start_time.elapsed() >= Duration::from_secs(max_secs) {
+                info!("Max run duration of {max_secs}s reached, exiting monitoring loop");
+                break;
+            }
+        }
+
+        total_ticks += 1;
+        let now = Utc::now();
+        let gap = now - last_sample_at;
+        if gate_is_active(&gate, now)
+            && gap
+                > chrono::Duration::from_std(sample_interval.saturating_mul(3)).unwrap_or_default()
+        {
+            if let Some(event) = session_manager.close_active_session(last_sample_at) {
+                match save_completed_event(&mut storage, &event, storage_limits) {
+                    Ok(()) => recorded_sessions += 1,
+                    Err(error) => {
+                        error!(error = %error, "Completed activity could not be queued; collection is paused by storage backpressure")
+                    }
+                }
+            }
+            monitor.reset();
+            warn!(gap_seconds = gap.num_seconds(), "System sleep or agent suspension detected; activity interval closed before the gap");
+        }
+        last_sample_at = now;
+
+        let storage_available = storage
+            .disk_footprint_bytes()
+            .is_ok_and(|bytes| bytes < storage_limits.max_database_bytes)
+            && storage
+                .count_pending_sync()
+                .is_ok_and(|count| count < storage_limits.max_pending_events);
+        let monitoring_now = gate_is_active(&gate, now) && storage_available;
+        if gate_is_active(&gate, now) && !storage_available {
+            warn!("Activity collection paused by non-destructive storage backpressure; synchronize or increase the documented limits after capacity review");
+        }
+        if !monitoring_now {
+            if let Some(event) =
+                session_manager.close_active_session(gate.allowed_until.unwrap_or(now))
+            {
+                match save_completed_event(&mut storage, &event, storage_limits) {
+                    Ok(()) => recorded_sessions += 1,
+                    Err(error) => {
+                        error!(error = %error, "Completed activity could not be queued; collection is paused by storage backpressure")
+                    }
+                }
+            }
+            monitor.reset();
+        }
+
+        let events = if monitoring_now {
+            monitor.tick()
+        } else {
+            Vec::new()
+        };
+
+        for event in events {
+            let now = Utc::now();
+            let completed_session = match event {
+                PlatformEvent::AppFocused { current, .. } => session_manager.handle_app_focus(
+                    current.executable_name.clone(),
+                    current.executable_name,
+                    current.process_id,
+                    now,
+                ),
+                PlatformEvent::IdleStarted { idle_duration } => {
+                    let authorized_idle = gate
+                        .allowed_from
+                        .and_then(|since| (now - since).to_std().ok())
+                        .map(|elapsed| elapsed.min(idle_duration))
+                        .unwrap_or(Duration::ZERO);
+                    session_manager.handle_idle_start(authorized_idle, now)
+                }
+                PlatformEvent::UserResumed { total_idle } => {
+                    session_manager.handle_idle_return(total_idle, now)
+                }
+                PlatformEvent::SessionLocked => {
+                    info!("Windows session is locked; foreground collection paused");
+                    session_manager.close_active_session(now)
+                }
+                PlatformEvent::SessionUnlocked => {
+                    info!("Windows session unlocked; foreground collection resumed");
+                    None
+                }
+            };
+
+            if let Some(session_event) = completed_session {
+                match save_completed_event(&mut storage, &session_event, storage_limits) {
+                    Ok(()) => recorded_sessions += 1,
+                    Err(error) => {
+                        error!(error = %error, "Completed activity could not be queued; collection is paused by storage backpressure")
+                    }
+                }
+            }
+        }
+
+        if monitoring_now {
+            persist_session_checkpoint(&mut storage, &session_manager, now)?;
+        } else if gate.reason.as_deref() != Some("HEARTBEAT_UNAVAILABLE") {
+            storage.delete_state(SESSION_CHECKPOINT_KEY)?;
+        }
+
+        let mut effective_screen_policy = screen_policy.clone();
+        if !monitoring_now
+            || is_workstation_locked()
+            || effective_screen_policy
+                .allowed_until
+                .map_or(true, |until| Utc::now() >= until)
+        {
+            effective_screen_policy.allowed = false;
+        }
+        let indicator_visible = screen_monitoring_indicator.set_active(
+            effective_screen_policy.allowed && effective_screen_policy.visible_indicator,
+        );
+        // A server policy that requires a visible indicator is not sufficient by
+        // itself: capture must also stop if Windows could not actually add the
+        // notification-area icon in the interactive employee session.
+        effective_screen_policy.visible_indicator = indicator_visible;
+        let foreground_name = screenshot_foreground_name(
+            effective_screen_policy.allowed && indicator_visible,
+            || {
+                get_current_foreground_app()
+                    .ok()
+                    .map(|application| application.executable_name)
+            },
+        );
+        // An unknown foreground application cannot be checked against exclusions.
+        if foreground_name.is_none() {
+            effective_screen_policy.allowed = false;
+        }
+        if let Some(scheduler) = screenshot_scheduler.as_mut() {
+            scheduler.tick(
+                &effective_screen_policy,
+                &config.backend_url,
+                &device_info,
+                foreground_name.as_deref().unwrap_or_default(),
+            );
+        }
+
+        // Periodic background synchronization to backend
+        if last_sync_time.elapsed() >= config.sync_interval {
+            let previous_gate = gate.clone();
+            gate = match sync::send_startup_heartbeat(&config.backend_url, &device_info) {
+                Ok(value) => {
+                    persist_device_lifecycle(&mut storage, &value);
+                    value
+                }
+                Err(err) => {
+                    warn!(
+                        error = format!("{:#}", err),
+                        "Periodic heartbeat unavailable; monitoring paused"
+                    );
+                    sync::MonitoringGate {
+                        allowed: false,
+                        allowed_from: None,
+                        allowed_until: None,
+                        reason: Some("HEARTBEAT_UNAVAILABLE".into()),
+                    }
+                }
+            };
+            screen_policy = sync::fetch_screen_monitoring_policy(&config.backend_url, &device_info)
+                .unwrap_or_else(|error| {
+                    warn!(error = %error, "Screenshot policy refresh failed; capture paused until policy can be verified");
+                    sync::ScreenMonitoringPolicy { allowed: false, reason: Some("POLICY_UNAVAILABLE".into()), interval_seconds: 300, excluded_applications: Vec::new(), visible_indicator: true, allowed_until: None }
+                });
+            if !gate_is_active(&gate, Utc::now()) || !screen_policy.allowed {
+                if let Some(scheduler) = screenshot_scheduler.as_ref() { scheduler.cancel(); }
+            }
+            if !gate_is_active(&gate, Utc::now()) && previous_gate.allowed {
+                let end = if gate.reason.as_deref() == Some("OUTSIDE_SCHEDULE") {
+                    previous_gate.allowed_until.unwrap_or_else(Utc::now)
+                } else {
+                    Utc::now()
+                };
+                if let Some(event) = session_manager.close_active_session(end) {
+                    match save_completed_event(&mut storage, &event, storage_limits) {
+                        Ok(()) => recorded_sessions += 1,
+                        Err(error) => {
+                            error!(error = %error, "Completed activity could not be queued; collection is paused by storage backpressure")
+                        }
+                    }
+                }
+                monitor.reset();
+            }
+            if gate_is_active(&gate, Utc::now()) {
+                match sync_pending_events(&mut storage, &config.backend_url, &device_info, 50) {
+                    Ok(outcome) if outcome.synced > 0 => info!(
+                        synced = outcome.synced,
+                        rejected = outcome.rejected,
+                        "Background sync processed acknowledged events"
+                    ),
+                    Ok(_) => {}
+                    Err(err) => warn!(
+                        error = format!("{:#}", err),
+                        "Periodic sync deferred; pending records remain in SQLite"
+                    ),
+                }
+            } else {
+                warn!(
+                    reason = gate
+                        .reason
+                        .as_deref()
+                        .unwrap_or("MONITORING_CONFIGURATION_UNAVAILABLE"),
+                    "Sync paused; local queue preserved"
+                );
+            }
+            last_sync_time = Instant::now();
+        }
+
+        thread::sleep(sample_interval);
+    }
+
+    // Stop accepting screenshot work before any shutdown persistence/network work.
+    if let Some(scheduler) = screenshot_scheduler.as_ref() { scheduler.cancel(); }
+    let console_shutdown_requested = !running.load(Ordering::SeqCst);
+
+    // Flush any pending active session on shutdown
+    let shutdown_time = Utc::now();
+    let final_end = if gate_is_active(&gate, shutdown_time) {
+        shutdown_time
+    } else {
+        gate.allowed_until.unwrap_or(shutdown_time)
+    };
+    if let Some(final_event) = session_manager.close_active_session(final_end) {
+        match save_completed_event(&mut storage, &final_event, storage_limits) {
+            Ok(()) => recorded_sessions += 1,
+            Err(error) => {
+                error!(error = %error, "Shutdown interval remains unacknowledged because storage backpressure prevented queuing")
+            }
+        }
+    }
+
+    // Final synchronization attempt before shutdown
+    match if gate_is_active(&gate, shutdown_time) && !console_shutdown_requested {
+        sync_pending_events(&mut storage, &config.backend_url, &device_info, 100)
+    } else {
+        Ok(sync::SyncOutcome {
+            attempted: 0,
+            synced: 0,
+            rejected: 0,
+            quarantined: 0,
+        })
+    } {
+        Ok(outcome) if outcome.synced > 0 => {
+            info!(
+                synced = outcome.synced,
+                rejected = outcome.rejected,
+                "Final flush synchronized acknowledged events"
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            info!(error = %err, "Shutdown sync note: remaining events safely stored in SQLite for next start");
+        }
+    }
+
+    // Benchmark & summary report
+    let elapsed = start_time.elapsed();
+    let metrics = get_current_process_metrics();
+    let total_stored = storage.count_sessions().unwrap_or(0);
+    let pending_sync = storage.count_pending_sync().unwrap_or(0);
+    let quarantined_sync = storage.count_quarantined_sync().unwrap_or(0);
+
+    info!("=== Performance & Profile Summary ===");
+    info!(
+        elapsed_secs = elapsed.as_secs_f64(),
+        total_ticks = total_ticks,
+        sessions_recorded_this_run = recorded_sessions,
+        total_stored_sessions = total_stored,
+        pending_sync_queue = pending_sync,
+        quarantined_sync_queue = quarantined_sync,
+        "Session accounting & storage status"
+    );
+
+    if let Some(m) = metrics {
+        let cpu_secs = m.total_cpu_time.as_secs_f64();
+        let cpu_percentage = if elapsed.as_secs_f64() > 0.0 {
+            (cpu_secs / elapsed.as_secs_f64()) * 100.0
+        } else {
+            0.0
+        };
+
+        info!(
+            working_set_mb = m.working_set_mb,
+            peak_working_set_mb = m.peak_working_set_mb,
+            target_max_ram_mb = 15.0,
+            ram_pass = m.peak_working_set_mb <= 15.0,
+            cpu_time_secs = cpu_secs,
+            average_cpu_pct = cpu_percentage,
+            target_max_cpu_pct = 1.0,
+            cpu_pass = cpu_percentage <= 1.0,
+            "Resource usage verification"
+        );
+    }
+
+    Ok(())
+}
+
+fn persist_device_lifecycle(storage: &mut Storage, gate: &sync::MonitoringGate) {
+    let lifecycle = match gate.reason.as_deref() {
+        Some("DEVICE_REVOKED") => "REVOKED",
+        Some("DEVICE_ARCHIVED") => "ARCHIVED",
+        _ => "ACTIVE",
+    };
+    if let Err(error) = storage.set_state("device_lifecycle_status", lifecycle) {
+        warn!(error = %error, lifecycle, "Could not persist the latest device lifecycle status");
+    }
+}
+
+fn persist_enrollment_secret(
+    storage: &mut Storage,
+    device_id: Uuid,
+    backend_url: &str,
+    secret: &str,
+    store: impl FnOnce(&str, &str) -> std::result::Result<(), String>,
+) -> Result<()> {
+    let marker = serde_json::json!({
+        "deviceId": device_id,
+        "backendUrl": backend_url,
+        "recordedAt": Utc::now().to_rfc3339(),
+        "secretStored": false,
+    });
+    storage
+        .set_state(ENROLLMENT_RECOVERY_KEY, &marker.to_string())
+        .context("server enrollment succeeded but the local recovery marker could not be written; do not retry the consumed token")?;
+    store(&device_id.to_string(), secret).map_err(|_| {
+        anyhow::anyhow!("Server enrollment succeeded, but Windows Credential Manager rejected the device secret. The secret was not logged or written to SQLite. Monitoring remains disabled and this consumed token will not be retried. Ask an administrator to revoke device {device_id} and issue a new token after Credential Manager is repaired.")
+    })?;
+    storage.delete_state("device_secret")?;
+    storage.set_state("backend_url", backend_url)?;
+    storage.set_state("device_lifecycle_status", "ACTIVE")?;
+    storage.delete_state(ENROLLMENT_RECOVERY_KEY)?;
+    Ok(())
+}
+
+fn gate_is_active(gate: &sync::MonitoringGate, now: chrono::DateTime<Utc>) -> bool {
+    gate.allowed
+        && gate.allowed_from.is_some_and(|start| now >= start)
+        && gate.allowed_until.is_some_and(|end| now < end)
+}
+
+fn persist_session_checkpoint(
+    storage: &mut Storage,
+    manager: &SessionManager,
+    observed_at: chrono::DateTime<Utc>,
+) -> Result<()> {
+    match manager.checkpoint(observed_at) {
+        Some(checkpoint) => storage
+            .set_state(SESSION_CHECKPOINT_KEY, &serde_json::to_string(&checkpoint)?)
+            .context("failed to persist active-session checkpoint"),
+        None => storage
+            .delete_state(SESSION_CHECKPOINT_KEY)
+            .context("failed to clear inactive session checkpoint"),
+    }
+}
+
+fn recover_session_checkpoint(
+    storage: &mut Storage,
+    gate: &sync::MonitoringGate,
+    device_id: Uuid,
+    limits: RuntimeStorageLimits,
+) -> Result<()> {
+    let Some(raw) = storage.get_state(SESSION_CHECKPOINT_KEY)? else {
+        return Ok(());
+    };
+    if !gate_is_active(gate, Utc::now()) {
+        if gate.reason.as_deref() != Some("HEARTBEAT_UNAVAILABLE") {
+            storage.delete_state(SESSION_CHECKPOINT_KEY)?;
+        }
+        return Ok(());
+    }
+    let checkpoint: SessionCheckpoint = match serde_json::from_str(&raw) {
+        Ok(value) => value,
+        Err(_) => {
+            storage.delete_state(SESSION_CHECKPOINT_KEY)?;
+            warn!("Discarded malformed active-session checkpoint without creating activity");
+            return Ok(());
+        }
+    };
+    let within_authorization = checkpoint.device_id == device_id
+        && gate
+            .allowed_from
+            .is_some_and(|from| checkpoint.started_at >= from)
+        && gate
+            .allowed_until
+            .is_some_and(|until| checkpoint.last_observed_at <= until)
+        && checkpoint.last_observed_at <= Utc::now();
+    if !within_authorization {
+        storage.delete_state(SESSION_CHECKPOINT_KEY)?;
+        warn!("Discarded an active-session checkpoint outside current authorization; no downtime was reconstructed");
+        return Ok(());
+    }
+    let Some(event) = SessionManager::event_from_checkpoint(&checkpoint) else {
+        storage.delete_state(SESSION_CHECKPOINT_KEY)?;
+        return Ok(());
+    };
+    event.validate()?;
+    let payload = serde_json::to_string(&event)?;
+    let record = stored_session_from_event(&event);
+    let inserted = storage.recover_checkpoint_event(
+        SESSION_CHECKPOINT_KEY,
+        &record,
+        &payload,
+        limits.max_pending_events,
+    )?;
+    info!(event_id = %event.event_id, inserted, "Recovered only the last authorized pre-crash activity interval");
+    Ok(())
+}
+
+fn stored_session_from_event(event: &ActivityEvent) -> StoredActivitySession {
+    let (application_name, executable_name, process_id) =
+        event.app.as_ref().map_or((None, None, None), |app| {
+            (
+                Some(app.name.clone()),
+                Some(app.executable.clone()),
+                app.process_id,
+            )
+        });
+    StoredActivitySession {
+        id: event.event_id,
+        device_id: event.device_id,
+        application_name,
+        executable_name,
+        process_id,
+        started_at: event.started_at,
+        ended_at: event.ended_at,
+        duration_seconds: event.duration_seconds,
+        activity_state: match event.event_type {
+            EventType::AppSession => "active".into(),
+            EventType::IdleSession => "idle".into(),
+            EventType::WebSession => "active_web".into(),
+        },
+        created_at: Utc::now(),
+    }
+}
+
+fn save_completed_event(
+    storage: &mut Storage,
+    event: &ActivityEvent,
+    limits: RuntimeStorageLimits,
+) -> Result<()> {
+    if let Err(err) = event.validate() {
+        warn!(error = %err, "Discarding event that fails schema validation");
+        bail!("event failed schema validation");
+    }
+
+    let payload_json = match serde_json::to_string(event) {
+        Ok(j) => j,
+        Err(err) => {
+            error!(error = %err, "Failed to serialize event");
+            return Err(err.into());
+        }
+    };
+
+    let record = stored_session_from_event(event);
+
+    if storage.disk_footprint_bytes()? >= limits.max_database_bytes {
+        bail!("database size safety limit reached; completed interval was not deleted from an existing queue, but collection is paused");
+    }
+    storage
+        .record_session_with_event_bounded(&record, &payload_json, limits.max_pending_events)
+        .context(
+            "failed to persist session; collection will pause rather than delete pending activity",
+        )?;
+    info!(event_id = %event.event_id, duration_secs = event.duration_seconds, event_type = ?event.event_type, "Saved session to local SQLite buffer");
+    Ok(())
+}
+
+fn get_or_create_device_id(storage: &mut Storage) -> Result<Uuid> {
+    if let Some(existing) = storage
+        .get_state("device_id")
+        .context("failed to read stored device identity")?
+    {
+        return Uuid::parse_str(&existing).context("stored device identity is invalid; restore the original database before enrolling or monitoring");
+    }
+    let new_id = Uuid::new_v4();
+    storage
+        .set_state("device_id", &new_id.to_string())
+        .context("failed to persist device_id")?;
+    Ok(new_id)
+}
+
+fn screenshot_foreground_name(
+    authorized: bool,
+    read: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if authorized {
+        read()
+    } else {
+        None
+    }
+}
+
+fn acquire_monitor_lock(database: &std::path::Path) -> Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0);
+    }
+    // Keep the handle alive for the monitor lifetime. Windows releases the
+    // exclusive share lock even after a crash; a leftover file is harmless.
+    options
+        .open(database.with_extension("monitor.lock"))
+        .context("another monitor is running for this database, or its lock file is inaccessible")
+}
+
+fn get_database_path() -> Result<PathBuf> {
+    let custom = std::env::var_os("DP_DB_PATH").map(PathBuf::from);
+    #[cfg(windows)]
+    let path = dp_storage::paths::database_path(
+        custom.as_deref(),
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .as_deref(),
+    )
+    .context("could not resolve persistent agent storage")?;
+    #[cfg(not(windows))]
+    let path = custom
+        .clone()
+        .unwrap_or(std::env::current_dir()?.join("agent_storage.db"));
+
+    let mut legacy = Vec::new();
+    if custom.is_none() {
+        legacy.push(std::env::current_dir()?.join("agent_storage.db"));
+        if let Some(parent) = std::env::current_exe()?.parent() {
+            legacy.push(parent.join("agent_storage.db"));
+        }
+        legacy.retain(|candidate| candidate != &path);
+    }
+    dp_storage::paths::prepare_database_path(&path, &legacy)
+        .map_err(|error| anyhow::anyhow!("Persistent agent storage is unavailable: {error}"))?;
+    Ok(path)
+}
+
+fn parse_arg_value(flag: &str) -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == flag {
+            return args.next();
+        }
+    }
+    None
+}
+
+fn init_logging() {
+    let filter = EnvFilter::try_from_env("DP_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .init();
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn monitor_lock_excludes_duplicates_and_allows_restart() {
+        let path = std::env::temp_dir().join(format!("dp-lock-{}.db", Uuid::new_v4()));
+        let first = acquire_monitor_lock(&path).expect("test fixture operation must succeed");
+        assert!(acquire_monitor_lock(&path).is_err());
+        drop(first);
+        drop(acquire_monitor_lock(&path).expect("test fixture operation must succeed"));
+        std::fs::remove_file(path.with_extension("monitor.lock"))
+            .expect("test fixture operation must succeed");
+    }
+
+    #[test]
+    fn invalid_identity_is_preserved_for_recovery() {
+        let mut storage = Storage::open_in_memory().expect("test fixture operation must succeed");
+        storage
+            .set_state("device_id", "corrupt-identity")
+            .expect("test fixture operation must succeed");
+        assert!(get_or_create_device_id(&mut storage).is_err());
+        assert_eq!(
+            storage
+                .get_state("device_id")
+                .expect("test fixture operation must succeed")
+                .as_deref(),
+            Some("corrupt-identity")
+        );
+    }
+
+    #[test]
+    fn existing_identity_is_reused() {
+        let mut storage = Storage::open_in_memory().expect("test fixture operation must succeed");
+        let id =
+            get_or_create_device_id(&mut storage).expect("test fixture operation must succeed");
+        assert_eq!(
+            get_or_create_device_id(&mut storage).expect("test fixture operation must succeed"),
+            id
+        );
+    }
+
+    #[test]
+    fn paused_screenshot_policy_never_reads_foreground() {
+        assert_eq!(
+            screenshot_foreground_name(false, || panic!("unauthorized foreground read")),
+            None
+        );
+        assert_eq!(screenshot_foreground_name(true, || None), None);
+        assert_eq!(
+            screenshot_foreground_name(true, || Some("approved.exe".into())),
+            Some("approved.exe".into())
+        );
+    }
+
+    #[test]
+    fn credential_store_failure_leaves_safe_recovery_marker_without_secret() {
+        let mut storage = Storage::open_in_memory().expect("storage");
+        let device_id = Uuid::new_v4();
+        let error = persist_enrollment_secret(
+            &mut storage,
+            device_id,
+            "https://staging.example.test",
+            "dp_sec_must_never_be_persisted",
+            |_, _| Err("injected credential store failure".into()),
+        )
+        .expect_err("failure injection must fail");
+        assert!(!error.to_string().contains("dp_sec_"));
+        let marker = storage
+            .get_state(ENROLLMENT_RECOVERY_KEY)
+            .expect("read marker")
+            .expect("marker retained");
+        assert!(marker.contains(&device_id.to_string()));
+        assert!(!marker.contains("dp_sec_"));
+        assert!(storage
+            .get_state("device_secret")
+            .expect("read legacy secret")
+            .is_none());
+    }
+}
+
+

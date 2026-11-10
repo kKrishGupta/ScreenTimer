@@ -1,0 +1,20 @@
+﻿use std::sync::mpsc::{self, Receiver};
+use std::thread;
+
+use anyhow::{Context, Result};
+use monitoring_control::MonitoringCommand;
+
+pub fn start_listener() -> Result<Receiver<MonitoringCommand>> {
+    let (sender, receiver) = mpsc::channel();
+
+    thread::Builder::new()
+        .name("dp-local-control".into())
+        .spawn(move || {
+            // Secure Windows Named Pipe listener implementation follows.
+            // No commands accepted until authentication is implemented.
+            drop(sender);
+        })
+        .context("failed to start local control listener")?;
+
+    Ok(receiver)
+}

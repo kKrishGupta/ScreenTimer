@@ -1,5 +1,8 @@
 import { Roles, normalizeRole } from '../auth/auth.service.js';
 import { AppError } from '../../shared/errors.js';
+import { normalizeDomain } from '../activity/activity.routes.js';
+import { aggregateIntervals, clippedInterval, exclusiveUsage } from '../activity/activity-aggregation.js';
+import { reportingDayRange } from '../devices/monitoring-authorization.js';
 
 export default async function employeeRoutes(fastify) {
   const { prisma } = fastify;
@@ -454,42 +457,78 @@ export default async function employeeRoutes(fastify) {
       websiteUsage: [],
     };
 
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const now = new Date();
+    let organizationTimezone = emp.shiftTimezone || 'UTC';
+    if (prisma?.organization?.findUnique) {
+      const organization = await prisma.organization.findUnique({
+        where: { id: orgId || emp.organizationId },
+        select: { timezone: true },
+      });
+      organizationTimezone = organization?.timezone || organizationTimezone;
+    }
+    const reportingPeriod = reportingDayRange(now, organizationTimezone);
+    const periodEnd = now < reportingPeriod.end ? now : reportingPeriod.end;
+    const reportingPeriodPayload = {
+      date: reportingPeriod.date,
+      timezone: reportingPeriod.timezone,
+      start: reportingPeriod.start.toISOString(),
+      end: reportingPeriod.end.toISOString(),
+    };
+    analytics.reportingPeriod = reportingPeriodPayload;
 
-    if (activeDevices.length > 0 && prisma?.activitySession?.findMany && emp.id) {
+    if ((emp.devices || []).length > 0 && prisma?.activitySession?.findMany && emp.id) {
       const todaySessions = await prisma.activitySession.findMany({
-        where: { organizationId: orgId || emp.organizationId, startedAt: { lt: new Date() }, endedAt: { gt: startOfToday }, device: { userId: emp.id } },
+        where: {
+          organizationId: orgId || emp.organizationId,
+          startedAt: { lt: periodEnd },
+          endedAt: { gt: reportingPeriod.start },
+          device: { userId: emp.id },
+        },
         include: { application: true, website: true },
       });
       if (todaySessions.length > 0) {
-        const now = new Date();
-        const sessionSeconds = (session) => Math.max(0, Math.min(now.getTime(), new Date(session.endedAt).getTime()) - Math.max(startOfToday.getTime(), new Date(session.startedAt).getTime())) / 1000;
-        const aggregateUsage = (sessions, pick) => {
-          const totals = new Map();
-          for (const session of sessions) {
-            const label = pick(session);
-            if (!label) continue;
-            totals.set(label, (totals.get(label) || 0) + sessionSeconds(session));
-          }
-          return [...totals].map(([name, seconds]) => ({ name, seconds: Math.round(seconds) })).sort((a, b) => b.seconds - a.seconds);
-        };
-        const activeSessions = todaySessions.filter((session) => ['APP_SESSION', 'WEB_SESSION'].includes(session.type));
+        const intervalTotals = aggregateIntervals(todaySessions, reportingPeriod.start, periodEnd);
+        const appUsage = exclusiveUsage(todaySessions, {
+          type: 'APP_SESSION',
+          start: reportingPeriod.start,
+          end: periodEnd,
+          identity: (session) => String(session.application?.executableName || '').toLowerCase().trim(),
+          describe: (session, executable) => ({
+            name: session.application?.displayName || executable,
+            executable,
+          }),
+        });
+        const webUsage = exclusiveUsage(todaySessions, {
+          type: 'WEB_SESSION',
+          start: reportingPeriod.start,
+          end: periodEnd,
+          identity: (session) => normalizeDomain(session.website?.domain),
+          describe: (_session, domain) => ({ name: domain, domain }),
+        });
+        const activeIntervals = todaySessions
+          .filter((session) => ['APP_SESSION', 'WEB_SESSION'].includes(session.type))
+          .map((session) => clippedInterval(session, reportingPeriod.start, periodEnd))
+          .filter(Boolean);
+        const activeBounds = activeIntervals.reduce((bounds, [start, end]) => ({
+          first: bounds.first === null || start < bounds.first ? start : bounds.first,
+          last: bounds.last === null || end > bounds.last ? end : bounds.last,
+        }), { first: null, last: null });
         analytics = {
           hasData: true,
-          activeSeconds: unionSeconds(todaySessions, ['APP_SESSION', 'WEB_SESSION'], startOfToday, now),
-          idleSeconds: unionSeconds(todaySessions, ['IDLE_SESSION'], startOfToday, now),
-          totalMonitoredSeconds: unionSeconds(todaySessions, ['APP_SESSION', 'WEB_SESSION', 'IDLE_SESSION'], startOfToday, now),
+          reportingPeriod: reportingPeriodPayload,
+          activeSeconds: intervalTotals.activeSeconds,
+          idleSeconds: intervalTotals.idleSeconds,
+          totalMonitoredSeconds: intervalTotals.monitoredSeconds,
           policyViolationsCount: null,
-          firstActiveAt: activeSessions.length ? new Date(Math.min(...activeSessions.map((session) => new Date(session.startedAt).getTime()))).toISOString() : null,
-          lastActiveAt: activeSessions.length ? new Date(Math.max(...activeSessions.map((session) => new Date(session.endedAt).getTime()))).toISOString() : null,
-          applicationUsage: aggregateUsage(todaySessions.filter((session) => session.type === 'APP_SESSION'), (session) => session.application?.displayName || session.application?.executableName),
-          websiteUsage: aggregateUsage(todaySessions.filter((session) => session.type === 'WEB_SESSION'), (session) => session.website?.domain),
+          firstActiveAt: activeBounds.first === null ? null : new Date(activeBounds.first).toISOString(),
+          lastActiveAt: activeBounds.last === null ? null : new Date(activeBounds.last).toISOString(),
+          applicationUsage: appUsage.items.map((item) => ({ ...item, seconds: item.totalSeconds })),
+          websiteUsage: webUsage.items.map((item) => ({ ...item, seconds: item.totalSeconds })),
         };
       }
       if (prisma.policyViolation?.count) {
         analytics.policyViolationsCount = await prisma.policyViolation.count({
-          where: { organizationId: emp.organizationId, userId: emp.id, timestamp: { gte: startOfToday } },
+          where: { organizationId: emp.organizationId, userId: emp.id, timestamp: { gte: reportingPeriod.start, lt: periodEnd } },
         });
       }
     }

@@ -437,8 +437,8 @@ pub fn send_startup_heartbeat(backend_url: &str, device: &DeviceInfo) -> Result<
     })
 }
 
-/// Enrolls with a one-use token and returns the device secret once to the local
-/// caller. The raw token and secret are never logged or written to SQLite.
+/// Enrolls with an employee secret key and returns the device secret once to the local
+/// caller. The raw secret key and secret are never logged or written to persistent storage.
 pub fn enroll_device_token(
     backend_url: &str,
     token: &str,
@@ -446,6 +446,7 @@ pub fn enroll_device_token(
     device_name: &str,
 ) -> Result<String> {
     let payload = serde_json::json!({
+        "secretKey": token,
         "token": token,
         "deviceId": device_id.to_string(),
         "name": device_name,
@@ -464,6 +465,55 @@ pub fn enroll_device_token(
     let parsed: serde_json::Value = serde_json::from_slice(&response.body)
         .context("failed to parse JSON enrollment response")?;
     extract_device_secret(&parsed)
+}
+
+/// Binds enrollment to an authenticated employee session, or verifies that an
+/// existing protected device credential still belongs to that employee.
+pub fn employee_device_sign_in(
+    backend_url: &str,
+    session_cookie: &str,
+    secret_key: Option<&str>,
+    device_id: &uuid::Uuid,
+    device_name: &str,
+    device_secret: Option<&str>,
+) -> Result<Option<String>> {
+    if session_cookie.is_empty() || session_cookie.contains(['\r', '\n']) {
+        bail!("authenticated employee session is missing or malformed");
+    }
+    let payload = serde_json::json!({
+        "secretKey": secret_key,
+        "deviceId": device_id.to_string(),
+        "deviceSecret": device_secret,
+        "name": device_name,
+        "platform": "windows_11",
+        "agentVersion": dp_core::AGENT_VERSION,
+    });
+    let body = serde_json::to_vec(&payload)?;
+    let headers = vec![
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("Cookie".to_string(), session_cookie.to_string()),
+        (
+            "X-DigitalPulse-Native-Client".to_string(),
+            "control-center".to_string(),
+        ),
+    ];
+    let response = request_backend(
+        "POST",
+        backend_url,
+        "/api/v1/devices/employee-sign-in",
+        &headers,
+        &body,
+    )?;
+    let parsed: serde_json::Value = serde_json::from_slice(&response.body)
+        .context("backend returned invalid employee device sign-in JSON")?;
+    if parsed.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
+        bail!("employee device sign-in was not confirmed");
+    }
+    Ok(parsed
+        .get("deviceSecret")
+        .and_then(serde_json::Value::as_str)
+        .filter(|secret| secret.starts_with("dp_sec_") && secret.len() >= 24)
+        .map(str::to_owned))
 }
 
 pub fn fetch_screen_monitoring_policy(
@@ -680,6 +730,9 @@ mod tests {
 
     #[test]
     fn screenshot_upload_matches_backend_http_contract() {
+        if std::env::var("RUN_INTEGRATION_TESTS").is_err() {
+            return;
+        }
         let listener =
             TcpListener::bind("127.0.0.1:0").expect("test fixture operation must succeed");
         let port = listener

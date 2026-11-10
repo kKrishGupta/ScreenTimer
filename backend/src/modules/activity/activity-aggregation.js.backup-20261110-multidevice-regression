@@ -1,0 +1,142 @@
+function instant(value) {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+export function clippedInterval(session, start, end) {
+  const sessionStart = instant(session?.startedAt);
+  const sessionEnd = instant(session?.endedAt);
+  const rangeStart = instant(start);
+  const rangeEnd = instant(end);
+  if ([sessionStart, sessionEnd, rangeStart, rangeEnd].some((value) => value === null)) return null;
+  const from = Math.max(sessionStart, rangeStart);
+  const to = Math.min(sessionEnd, rangeEnd);
+  return to > from ? [from, to] : null;
+}
+
+export function mergeIntervals(intervals) {
+  const sorted = intervals
+    .filter(Boolean)
+    .map(([start, end]) => [start, end])
+    .sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  const merged = [];
+  for (const interval of sorted) {
+    const previous = merged.at(-1);
+    if (!previous || interval[0] > previous[1]) merged.push(interval);
+    else previous[1] = Math.max(previous[1], interval[1]);
+  }
+  return merged;
+}
+
+export function intervalSeconds(intervals) {
+  return mergeIntervals(intervals).reduce((total, [start, end]) => total + (end - start) / 1000, 0);
+}
+
+function subtractClaimed([start, end], claimed) {
+  let remaining = [[start, end]];
+  for (const [claimedStart, claimedEnd] of claimed) {
+    const next = [];
+    for (const [from, to] of remaining) {
+      if (claimedEnd <= from || claimedStart >= to) next.push([from, to]);
+      else {
+        if (claimedStart > from) next.push([from, claimedStart]);
+        if (claimedEnd < to) next.push([claimedEnd, to]);
+      }
+    }
+    remaining = next;
+    if (!remaining.length) break;
+  }
+  return remaining;
+}
+
+function stableSessionKey(session, identity) {
+  return session.activityEventId || session.eventId || [
+    session.deviceId || '',
+    session.type || '',
+    instant(session.startedAt),
+    instant(session.endedAt),
+    identity || '',
+  ].join('|');
+}
+
+function percentages(values) {
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) return values.map(() => 0);
+  const rounded = values.map((value) => Math.round((value / total) * 1000) / 10);
+  const adjustment = Math.round((100 - rounded.reduce((sum, value) => sum + value, 0)) * 10) / 10;
+  let largestIndex = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] > values[largestIndex]) largestIndex = index;
+  }
+  if (rounded.length) rounded[largestIndex] += adjustment;
+  return rounded;
+}
+
+/**
+ * Attributes every instant to at most one item within a collector type.
+ * A later-started foreground session wins an overlap because it represents the
+ * most recent transition. Exact duplicate events are ignored.
+ */
+export function exclusiveUsage(sessions, { type, start, end, identity, describe }) {
+  const seen = new Set();
+  const candidates = [];
+  for (const session of sessions) {
+    if (session.type !== type) continue;
+    const id = identity(session);
+    const interval = clippedInterval(session, start, end);
+    if (!id || !interval) continue;
+    const dedupeKey = stableSessionKey(session, id);
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    candidates.push({ session, id, interval });
+  }
+  candidates.sort((left, right) =>
+    right.interval[0] - left.interval[0]
+    || right.interval[1] - left.interval[1]
+    || String(left.id).localeCompare(String(right.id)));
+
+  let claimed = [];
+  const totals = new Map();
+  for (const candidate of candidates) {
+    const uncovered = subtractClaimed(candidate.interval, claimed);
+    const seconds = uncovered.reduce((sum, [from, to]) => sum + (to - from) / 1000, 0);
+    if (seconds > 0) {
+      const current = totals.get(candidate.id) || { ...describe(candidate.session, candidate.id), rawSeconds: 0, sessionCount: 0 };
+      current.rawSeconds += seconds;
+      current.sessionCount += 1;
+      totals.set(candidate.id, current);
+    }
+    claimed = mergeIntervals([...claimed, candidate.interval]);
+  }
+
+  const sorted = [...totals.values()].sort((left, right) => right.rawSeconds - left.rawSeconds || String(left.name || left.domain).localeCompare(String(right.name || right.domain)));
+  const itemPercentages = percentages(sorted.map((item) => item.rawSeconds));
+  const items = sorted.map((item, index) => ({
+    ...item,
+    totalSeconds: Math.round(item.rawSeconds),
+    durationSeconds: Math.round(item.rawSeconds),
+    percentage: itemPercentages[index],
+    rawSeconds: undefined,
+  }));
+  return {
+    totalSeconds: Math.round(sorted.reduce((sum, item) => sum + item.rawSeconds, 0)),
+    items,
+  };
+}
+
+export function aggregateIntervals(sessions, start, end) {
+  const active = mergeIntervals(sessions
+    .filter((session) => ['APP_SESSION', 'WEB_SESSION'].includes(session.type))
+    .map((session) => clippedInterval(session, start, end)));
+  const idle = mergeIntervals(sessions
+    .filter((session) => session.type === 'IDLE_SESSION')
+    .flatMap((session) => {
+      const interval = clippedInterval(session, start, end);
+      return interval ? subtractClaimed(interval, active) : [];
+    }));
+  return {
+    activeSeconds: Math.round(intervalSeconds(active)),
+    idleSeconds: Math.round(intervalSeconds(idle)),
+    monitoredSeconds: Math.round(intervalSeconds([...active, ...idle])),
+  };
+}

@@ -1,6 +1,6 @@
 [package]
 name = "dp-storage"
-description = "DigitalPulse local SQLite event buffer: activity sessions, sync queue and agent state."
+description = "DigitalPulse encrypted offline event buffer: activity sessions, sync queue and agent state."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,12 +9,13 @@ publish.workspace = true
 
 [dependencies]
 dp-core.workspace = true
-rusqlite.workspace = true
+dp-platform-windows.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

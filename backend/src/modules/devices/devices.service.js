@@ -8,6 +8,61 @@ const revokedDevicesSet = new Set();
 const deviceSecretsMap = new Map();
 const inMemoryDevices = new Map();
 
+// Rate limiting & brute-force protection against secret-key guessing
+const secretKeyAttempts = new Map();
+const SECRET_KEY_MAX_FAILED_ATTEMPTS = 5;
+const SECRET_KEY_LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * Checks rate limiting for an identifier (IP address or client identifier) on secret-key enrollment.
+ */
+export function checkSecretKeyThrottling(identifier) {
+  if (!identifier) return { allowed: true };
+  const record = secretKeyAttempts.get(identifier);
+  if (!record) return { allowed: true };
+
+  const now = Date.now();
+  if (record.lockedUntil && record.lockedUntil > now) {
+    const remainingSeconds = Math.ceil((record.lockedUntil - now) / 1000);
+    return {
+      allowed: false,
+      reason: `Too many failed enrollment attempts. Secret key enrollment temporarily locked for this client. Please try again in ${remainingSeconds} seconds.`,
+      remainingSeconds,
+    };
+  }
+
+  // Lockout expired
+  if (record.lockedUntil && record.lockedUntil <= now) {
+    secretKeyAttempts.delete(identifier);
+    return { allowed: true };
+  }
+
+  return { allowed: true, attempts: record.count };
+}
+
+/**
+ * Records a failed secret-key enrollment attempt and applies lockout if threshold is exceeded.
+ */
+export function recordFailedSecretKeyAttempt(identifier) {
+  if (!identifier) return null;
+  const now = Date.now();
+  const record = secretKeyAttempts.get(identifier) || { count: 0, firstAttemptAt: now };
+  record.count += 1;
+
+  if (record.count >= SECRET_KEY_MAX_FAILED_ATTEMPTS) {
+    record.lockedUntil = now + SECRET_KEY_LOCKOUT_DURATION_MS;
+  }
+  secretKeyAttempts.set(identifier, record);
+  return record;
+}
+
+/**
+ * Clears failed secret-key enrollment attempts upon successful enrollment.
+ */
+export function clearSecretKeyThrottling(identifier) {
+  if (identifier) secretKeyAttempts.delete(identifier);
+}
+
 const normalizeReason = (value) => {
   const reason = String(value || '').trim();
   return reason ? reason.slice(0, 500) : null;
@@ -194,28 +249,59 @@ export class DeviceService {
 
     return {
       tokenId: tokenRecord.id,
+      secretKey: token,
       token,
       expiresAt: expiresAt.toISOString(),
       deviceKind: kind,
-      instructions: 'Enter this token in the desktop agent or browser extension setup prompt.',
+      instructions: 'Enter this employee secret key in the desktop agent or browser extension setup prompt.',
     };
   }
 
   /**
-   * Consumes an enrollment token to register a device with cryptographically secure credentials.
+   * Issues an Employee Secret Key for an employee by organization/admin.
    */
-  async enrollDevice({ token, deviceId, name, platform = 'Windows 11', browser = null, agentVersion = '0.1.0' }) {
-    if (!token) {
-      const err = new Error('Enrollment token is required');
+  async issueEmployeeSecretKey({ organizationId, userId, deviceKind = 'DESKTOP_AGENT', expiresInHours = 24, createdByUserId = null }) {
+    if (!userId) {
+      const error = new Error('Employee ID (userId) is required to issue an employee secret key');
+      error.statusCode = 400;
+      throw error;
+    }
+    return this.createEnrollmentToken({ organizationId, userId, deviceKind, expiresInHours, createdByUserId });
+  }
+
+  /**
+   * Consumes an employee secret key / enrollment token to register a device with cryptographically secure credentials.
+   */
+  async enrollDevice({ secretKey, token, deviceId, name, platform = 'Windows 11', browser = null, agentVersion = '0.1.0', clientIp = null, authenticatedUserId = null, authenticatedOrganizationId = null }) {
+    const rawKey = typeof secretKey === 'string' && secretKey.trim()
+      ? secretKey.trim()
+      : typeof token === 'string' && token.trim()
+        ? token.trim()
+        : null;
+
+    if (!rawKey) {
+      const err = new Error('Employee Secret Key is required');
       err.statusCode = 400;
+      err.code = 'SECRET_KEY_REQUIRED';
       throw err;
     }
+
+    if (clientIp) {
+      const throttling = checkSecretKeyThrottling(clientIp);
+      if (!throttling.allowed) {
+        const err = new Error(throttling.reason);
+        err.statusCode = 429;
+        err.code = 'TOO_MANY_ATTEMPTS';
+        throw err;
+      }
+    }
+
     const cleanId = deviceId || crypto.randomUUID();
 
     // Persistent state is authoritative whenever it is available. This is
     // important in development too: a cached token must never mask a revoke,
     // expiry, or consumption recorded by another process.
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawKey).digest('hex');
     let tokenRecord = null;
     if (this.prisma?.deviceEnrollmentToken?.findUnique) {
       try {
@@ -239,24 +325,47 @@ export class DeviceService {
     }
 
     if (!tokenRecord) {
-      const err = new Error('Invalid or unknown enrollment token');
+      if (clientIp) recordFailedSecretKeyAttempt(clientIp);
+      const err = new Error('Invalid or unknown employee secret key');
       err.statusCode = 401;
+      err.code = 'INVALID_SECRET_KEY';
       throw err;
     }
 
+    // For employee sign-in enrollment, the authenticated principal is the
+    // authority. A key issued to any other employee or tenant is rejected
+    // before expiry checks, consumption, device mutation, or secret creation.
+    if (authenticatedUserId || authenticatedOrganizationId) {
+      const identityMatches = Boolean(authenticatedUserId && authenticatedOrganizationId)
+        && tokenRecord.userId === authenticatedUserId
+        && tokenRecord.organizationId === authenticatedOrganizationId;
+      if (!identityMatches) {
+        if (clientIp) recordFailedSecretKeyAttempt(clientIp);
+        const err = new Error('This employee secret key is not valid for the signed-in employee');
+        err.statusCode = 403;
+        err.code = 'SECRET_KEY_IDENTITY_MISMATCH';
+        throw err;
+      }
+    }
+
     if (tokenRecord.revokedAt) {
-      const err = new Error('This enrollment token has been revoked');
+      if (clientIp) recordFailedSecretKeyAttempt(clientIp);
+      const err = new Error('This employee secret key has been revoked');
       err.statusCode = 403;
+      err.code = 'SECRET_KEY_REVOKED';
       throw err;
     }
 
     if (tokenRecord.usedAt) {
-      const err = new Error('This one-time enrollment token has already been consumed');
+      if (clientIp) recordFailedSecretKeyAttempt(clientIp);
+      const err = new Error('This one-time employee secret key has already been consumed');
       err.statusCode = 409;
+      err.code = 'SECRET_KEY_CONSUMED';
       throw err;
     }
 
     if (new Date(tokenRecord.expiresAt) < new Date()) {
+      if (clientIp) recordFailedSecretKeyAttempt(clientIp);
       const expiredAt = new Date();
       try {
         const recordExpiry = async (tx) => {
@@ -278,8 +387,9 @@ export class DeviceService {
       } catch {
         // Expiry audit failure must not turn an expired credential into a valid one.
       }
-      const err = new Error('This enrollment token has expired');
+      const err = new Error('This employee secret key has expired');
       err.statusCode = 410;
+      err.code = 'SECRET_KEY_EXPIRED';
       throw err;
     }
 
@@ -420,6 +530,8 @@ export class DeviceService {
       revokedDevicesSet.delete(cleanId);
     }
 
+    if (clientIp) clearSecretKeyThrottling(clientIp);
+
     return {
       success: true,
       deviceId: cleanId,
@@ -428,6 +540,34 @@ export class DeviceService {
       assignedUserId: tokenRecord.userId,
       reconnected: Boolean(existingDevice),
       registeredAt: new Date().toISOString(),
+    };
+  }
+
+  /** Verifies that a live enrolled device belongs to the signed-in employee. */
+  async verifyEmployeeDevice({ deviceId, deviceSecret, userId, organizationId }) {
+    const check = await this.validateDeviceCredentials(deviceId, deviceSecret);
+    if (!check.valid) {
+      const err = new Error(check.message);
+      err.code = check.code;
+      err.statusCode = ['DEVICE_REVOKED', 'DEVICE_ARCHIVED'].includes(check.code)
+        ? 403
+        : check.code === 'STORAGE_UNAVAILABLE' ? 503 : 401;
+      throw err;
+    }
+    if (check.device.userId !== userId || check.device.organizationId !== organizationId) {
+      const err = new Error('This device is not assigned to the signed-in employee');
+      err.code = 'DEVICE_ASSIGNMENT_MISMATCH';
+      err.statusCode = 403;
+      throw err;
+    }
+    return {
+      success: true,
+      enrolled: true,
+      deviceId: check.device.id,
+      organizationId: check.device.organizationId,
+      assignedUserId: check.device.userId,
+      lifecycleStatus: 'ACTIVE',
+      monitoringStarted: false,
     };
   }
 

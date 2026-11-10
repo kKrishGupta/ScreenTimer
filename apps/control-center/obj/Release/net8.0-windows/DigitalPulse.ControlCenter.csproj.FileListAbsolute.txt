@@ -1,0 +1,15 @@
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\DigitalPulse.ControlCenter.exe
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\DigitalPulse.ControlCenter.deps.json
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\DigitalPulse.ControlCenter.runtimeconfig.json
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\DigitalPulse.ControlCenter.dll
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\DigitalPulse.ControlCenter.pdb
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\DigitalPulse.ControlCenter.GeneratedMSBuildEditorConfig.editorconfig
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\DigitalPulse.ControlCenter.AssemblyInfoInputs.cache
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\DigitalPulse.ControlCenter.AssemblyInfo.cs
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\DigitalPulse.ControlCenter.csproj.CoreCompileInputs.cache
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\DigitalPulse.ControlCenter.sourcelink.json
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\DigitalPulse.ControlCenter.dll
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\refint\DigitalPulse.ControlCenter.dll
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\DigitalPulse.ControlCenter.pdb
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\DigitalPulse.ControlCenter.genruntimeconfig.cache
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\ref\DigitalPulse.ControlCenter.dll

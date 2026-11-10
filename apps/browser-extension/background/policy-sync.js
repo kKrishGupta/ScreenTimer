@@ -608,3 +608,14 @@ export async function syncBlockingRulesWithStatus(chromeApi = globalThis.chrome,
   await chromeApi.storage.local.set({ dp_policy_sync: { ...result, checkedAt: new Date().toISOString() } });
   return result;
 }
+
+
+
+
+
+
+
+
+
+
+

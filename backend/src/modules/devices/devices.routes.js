@@ -399,17 +399,20 @@ export default async function devicesRoutes(app) {
     }
   });
 
-  // POST /api/v1/devices/enroll (Public: Device consumes one-time enrollment token)
+  // POST /api/v1/devices/enroll (Public: Device consumes one-time enrollment token / employee secret key)
   app.post('/devices/enroll', { preHandler: [tokenConsumptionLimiter] }, async (request, reply) => {
-    const { token, deviceId, name, platform, browser, agentVersion } = request.body || {};
+    const { secretKey, token, deviceId, name, platform, browser, agentVersion } = request.body || {};
+    const clientIp = request.ip || request.headers['x-forwarded-for'] || request.socket?.remoteAddress;
     try {
       const result = await deviceService.enrollDevice({
+        secretKey,
         token,
         deviceId,
         name,
         platform,
         browser,
         agentVersion,
+        clientIp,
       });
       return reply.status(201).send(result);
     } catch (err) {
@@ -418,6 +421,118 @@ export default async function devicesRoutes(app) {
       });
     }
   });
+
+  // Authenticated employee enrollment/sign-in. The session principal, key,
+  // and stable device identity are checked by one server-side operation.
+  app.post('/devices/employee-sign-in', {
+    preHandler: [tokenConsumptionLimiter, authMiddleware.requireRole(Roles.EMPLOYEE)],
+  }, async (request, reply) => {
+    const { secretKey, deviceId, deviceSecret, name, platform, agentVersion } = request.body || {};
+    const clientIp = request.ip || request.headers['x-forwarded-for'] || request.socket?.remoteAddress;
+    const distributedThrottleId = `employee-enrollment:${clientIp || 'unknown'}`;
+    try {
+      if (secretKey && app.authService?._checkLoginThrottling) {
+        const throttle = await app.authService._checkLoginThrottling(distributedThrottleId);
+        if (!throttle.allowed) {
+          return reply.status(429).send({
+            error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed enrollment attempts. Please wait and try again.' },
+          });
+        }
+      }
+      const result = secretKey
+        ? await deviceService.enrollDevice({
+          secretKey,
+          deviceId,
+          name,
+          platform,
+          agentVersion,
+          clientIp,
+          authenticatedUserId: request.user.id,
+          authenticatedOrganizationId: request.user.organizationId,
+        })
+        : await deviceService.verifyEmployeeDevice({
+          deviceId,
+          deviceSecret,
+          userId: request.user.id,
+          organizationId: request.user.organizationId,
+        });
+      if (secretKey && app.authService?._clearLoginThrottling) {
+        await app.authService._clearLoginThrottling(distributedThrottleId);
+      }
+      return reply.status(secretKey ? 201 : 200).send({ ...result, monitoringStarted: false });
+    } catch (err) {
+      if (secretKey && app.authService?._recordFailedLogin && [
+        'INVALID_SECRET_KEY', 'SECRET_KEY_REVOKED', 'SECRET_KEY_CONSUMED',
+        'SECRET_KEY_EXPIRED', 'SECRET_KEY_IDENTITY_MISMATCH',
+      ].includes(err.code)) {
+        await app.authService._recordFailedLogin(distributedThrottleId);
+      }
+      return reply.status(err.statusCode || 400).send({
+        error: {
+          code: err.code || 'EMPLOYEE_DEVICE_SIGN_IN_FAILED',
+          message: ['SECRET_KEY_IDENTITY_MISMATCH', 'DEVICE_ASSIGNMENT_MISMATCH'].includes(err.code)
+            ? 'The enrollment key or device is not valid for this employee account'
+            : err.message,
+        },
+      });
+    }
+  });
+
+  // POST /api/v1/devices/issue-secret-key (Protected: Admin or Super Admin only)
+  app.post(
+    '/devices/issue-secret-key',
+    {
+      preHandler: [
+        tokenCreationLimiter,
+        authMiddleware.requireRole(Roles.ADMIN, Roles.SUPER_ADMIN),
+      ],
+    },
+    async (request, reply) => {
+      const user = request.user;
+      if (!user) {
+        return reply.status(401).send({
+          error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+        });
+      }
+
+      const userRole = normalizeRole(user.role);
+      const { userId, deviceKind, expiresInHours } = request.body || {};
+      if (!userId) {
+        return reply.code(400).send({
+          error: { code: 'EMPLOYEE_REQUIRED', message: 'Employee user ID is required to issue an employee secret key' },
+        });
+      }
+      if (deviceKind !== undefined && !['DESKTOP_AGENT', 'BROWSER_EXTENSION'].includes(deviceKind)) {
+        return reply.code(400).send({ error: { code: 'INVALID_DEVICE_KIND', message: 'Choose DESKTOP_AGENT or BROWSER_EXTENSION' } });
+      }
+      const orgId =
+        userRole === Roles.SUPER_ADMIN
+          ? request.body?.organizationId
+          : user.organizationId;
+
+      if (!orgId) {
+        return reply.code(400).send({
+          error: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Organization ID is required',
+        });
+      }
+
+      try {
+        const keyInfo = await deviceService.issueEmployeeSecretKey({
+          organizationId: orgId,
+          userId,
+          deviceKind,
+          expiresInHours,
+          createdByUserId: user.id,
+        });
+        return reply.status(201).send({ success: true, ...keyInfo });
+      } catch (err) {
+        return reply.status(err.statusCode || 400).send({
+          error: { code: err.code || 'SECRET_KEY_ISSUANCE_FAILED', message: err.message },
+        });
+      }
+    },
+  );
 
   // POST /api/v1/devices/:id/heartbeat (Protected: Authenticated Device credentials)
   app.post('/devices/:id/heartbeat', async (request, reply) => {

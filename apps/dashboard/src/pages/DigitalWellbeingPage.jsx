@@ -42,10 +42,11 @@ export function DonutChart({ items, totalSeconds, label, onSelect, selectedItem 
 
   // Compute slice offsets
   const slices = useMemo(() => {
-    if (!items || items.length === 0 || totalSeconds === 0) return [];
+    if (!items || items.length === 0 || totalSeconds <= 0) return [];
     let currentOffset = 0;
     return items.map((item, index) => {
-      const pct = (item.totalSeconds || item.durationSeconds) / totalSeconds;
+      const seconds = Number(item.totalSeconds ?? item.durationSeconds ?? 0);
+      const pct = seconds / totalSeconds;
       const strokeLength = pct * circumference;
       const strokeDasharray = `${strokeLength} ${circumference - strokeLength}`;
       const strokeDashoffset = -currentOffset;
@@ -53,7 +54,7 @@ export function DonutChart({ items, totalSeconds, label, onSelect, selectedItem 
       const color = item.color || COLOR_PALETTE[index % COLOR_PALETTE.length];
       return {
         ...item,
-        pct: Math.round(pct * 100),
+        pct: Math.round(pct * 1000) / 10,
         color,
         strokeDasharray,
         strokeDashoffset,
@@ -61,7 +62,7 @@ export function DonutChart({ items, totalSeconds, label, onSelect, selectedItem 
     });
   }, [items, totalSeconds, circumference]);
 
-  if (!items || items.length === 0) {
+  if (!items || items.length === 0 || totalSeconds <= 0) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-center text-slate-500">
         <div className="w-40 h-40 rounded-full border-4 border-dashed border-white/10 flex items-center justify-center">
@@ -108,10 +109,10 @@ export function DonutChart({ items, totalSeconds, label, onSelect, selectedItem 
             {activeItem?.name || activeItem?.domain ? 'Selected' : label}
           </span>
           <span className="text-xl font-mono font-bold text-white mt-0.5">
-            {formatDuration(activeItem ? (activeItem.totalSeconds || activeItem.durationSeconds) : totalSeconds)}
+            {formatDuration(activeItem ? Number(activeItem.totalSeconds ?? activeItem.durationSeconds ?? 0) : totalSeconds)}
           </span>
           <span className="text-[10px] font-mono text-sky-400">
-            {activeItem ? `${activeItem.pct || Math.round(((activeItem.totalSeconds || activeItem.durationSeconds) / (totalSeconds || 1)) * 100)}% of total` : 'Total Active'}
+            {activeItem ? `${activeItem.pct ?? Math.round((Number(activeItem.totalSeconds ?? activeItem.durationSeconds ?? 0) / totalSeconds) * 1000) / 10}% of total` : 'Total Active'}
           </span>
         </div>
       </div>
@@ -123,9 +124,11 @@ export function DonutChart({ items, totalSeconds, label, onSelect, selectedItem 
             {activeItem.name || activeItem.domain}
           </p>
           <div className="flex items-center justify-center gap-2 text-[10px] text-slate-400 mt-0.5">
-            <span className="px-1.5 py-0.2 rounded bg-white/5 text-slate-300 font-mono">
-              {activeItem.category || 'Other'}
-            </span>
+            {activeItem.category && (
+              <span className="px-1.5 py-0.2 rounded bg-white/5 text-slate-300 font-mono">
+                Category: {activeItem.category}
+              </span>
+            )}
             {activeItem.sessionCount !== undefined && (
               <span>&bull; {activeItem.sessionCount} sessions</span>
             )}

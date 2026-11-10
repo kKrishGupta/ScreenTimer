@@ -1,0 +1,725 @@
+use crate::sync::{self, ScreenCaptureUpload, ScreenMonitoringPolicy};
+use anyhow::{bail, Context, Result};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use dp_core::DeviceInfo;
+use serde_json::{json, Value};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+use tracing::{info, warn};
+
+const DEFAULT_CAPTURE_TIMEOUT_SECS: u64 = 15;
+const DEFAULT_MAX_PENDING_CAPTURES: usize = 50;
+const DEFAULT_RETENTION_HOURS: i64 = 24;
+
+#[cfg(windows)]
+const RESTRICT_QUEUE_ACL_SCRIPT: &str = r#"$ErrorActionPreference='Stop'
+$path=$args[0]
+$acl=New-Object System.Security.AccessControl.DirectorySecurity
+$acl.SetAccessRuleProtection($true,$false)
+$inherit=[System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+$propagate=[System.Security.AccessControl.PropagationFlags]::None
+$allow=[System.Security.AccessControl.AccessControlType]::Allow
+$current=[System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$system=New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-18'
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($current,'FullControl',$inherit,$propagate,$allow)))
+$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system,'FullControl',$inherit,$propagate,$allow)))
+Set-Acl -LiteralPath $path -AclObject $acl
+"#;
+
+// JPEG encoding and DPAPI protection both happen in memory. The helper's only
+// filesystem write contains user-scoped DPAPI ciphertext.
+const CAPTURE_SCRIPT: &str = r#"param([Parameter(Mandatory=$true)][string]$ProtectedOutputPath)
+$ErrorActionPreference='Stop'
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Security
+$bounds=[System.Windows.Forms.SystemInformation]::VirtualScreen
+if($bounds.Width -lt 1 -or $bounds.Height -lt 1){throw 'No interactive display'}
+$bitmap=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+$graphics=[System.Drawing.Graphics]::FromImage($bitmap)
+$stream=New-Object System.IO.MemoryStream
+try{
+  $graphics.CopyFromScreen($bounds.Left,$bounds.Top,0,0,$bitmap.Size,[System.Drawing.CopyPixelOperation]::SourceCopy)
+  $codec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object{$_.MimeType -eq 'image/jpeg'}|Select-Object -First 1
+  $parameters=New-Object System.Drawing.Imaging.EncoderParameters 1
+  $parameters.Param[0]=New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality),75L
+  $bitmap.Save($stream,$codec,$parameters)
+  $plain=$stream.ToArray()
+  if($plain.Length -lt 32 -or $plain.Length -gt 5242880){throw 'Invalid screenshot size'}
+  $protected=[Security.Cryptography.ProtectedData]::Protect($plain,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+  [IO.File]::WriteAllBytes($ProtectedOutputPath,$protected)
+  Write-Output ("OK:{0}x{1}" -f $bounds.Width,$bounds.Height)
+}finally{
+  if($plain){[Array]::Clear($plain,0,$plain.Length)}
+  $stream.Dispose();$graphics.Dispose();$bitmap.Dispose()
+}
+"#;
+
+#[derive(Debug, Clone)]
+struct WorkerConfig {
+    timeout: Duration,
+    max_pending: usize,
+    max_queue_bytes: u64,
+    retention_hours: i64,
+}
+
+impl WorkerConfig {
+    fn from_env() -> Self {
+        Self {
+            timeout: Duration::from_secs(env_bounded(
+                "DP_SCREENSHOT_TIMEOUT_SECS",
+                DEFAULT_CAPTURE_TIMEOUT_SECS,
+                5,
+                60,
+            )),
+            max_pending: env_bounded(
+                "DP_SCREENSHOT_QUEUE_MAX",
+                DEFAULT_MAX_PENDING_CAPTURES as u64,
+                1,
+                100,
+            ) as usize,
+            max_queue_bytes: env_bounded("DP_SCREENSHOT_QUEUE_MAX_MIB", 100, 5, 500) * 1024 * 1024,
+            retention_hours: env_bounded(
+                "DP_SCREENSHOT_RETENTION_HOURS",
+                DEFAULT_RETENTION_HOURS as u64,
+                1,
+                168,
+            ) as i64,
+        }
+    }
+}
+
+fn env_bounded(name: &str, default: u64, min: u64, max: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+        .filter(|value| (min..=max).contains(value))
+        .unwrap_or(default)
+}
+
+#[derive(Debug, Clone)]
+struct CaptureJob {
+    policy: ScreenMonitoringPolicy,
+    backend_url: String,
+    device: DeviceInfo,
+    application_name: String,
+}
+
+enum Work {
+    Capture(Box<CaptureJob>),
+    Clear,
+}
+
+#[derive(Debug)]
+pub struct ScreenshotScheduler {
+    next_capture: Instant,
+    sender: SyncSender<Work>,
+    authorized: Arc<AtomicBool>,
+    stopping: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+    worker_done: mpsc::Receiver<()>,
+}
+
+impl ScreenshotScheduler {
+    pub fn new(base_dir: &Path) -> Result<Self> {
+        let queue_dir = base_dir.join("screen-capture-queue");
+        fs::create_dir_all(&queue_dir).context("failed to create screenshot retry queue")?;
+        restrict_queue_acl(&queue_dir)?;
+        fs::write(queue_dir.join("capture.ps1"), CAPTURE_SCRIPT)
+            .context("failed to install screenshot capture helper")?;
+        cleanup_abandoned_temps(&queue_dir)?;
+        let authorized = Arc::new(AtomicBool::new(false));
+        let stopping = Arc::new(AtomicBool::new(false));
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let (done_sender, worker_done) = mpsc::sync_channel(1);
+        let worker_authorized = authorized.clone();
+        let worker_stopping = stopping.clone();
+        let worker_dir = queue_dir.clone();
+        let config = WorkerConfig::from_env();
+        let worker = thread::Builder::new()
+            .name("dp-screenshot-worker".into())
+            .spawn(move || {
+                while let Ok(work) = receiver.recv() {
+                    match work {
+                        Work::Capture(job) => {
+                            process_job(&worker_dir, &config, &worker_authorized, &job)
+                        }
+                        Work::Clear => {
+                            if let Err(error) = clear_pending(&worker_dir) {
+                                warn!(error = %error, "SCREEN_QUEUE_CLEANUP_FAILED");
+                            }
+                        }
+                    }
+                    if worker_stopping.load(Ordering::Acquire) {
+                        break;
+                    }
+                    if !worker_authorized.load(Ordering::Acquire) {
+                        if let Err(error) = clear_pending(&worker_dir) {
+                            warn!(error = %error, "SCREEN_QUEUE_CLEANUP_FAILED");
+                        }
+                    }
+                }
+                let _ = done_sender.send(());
+            })
+            .context("failed to start bounded screenshot worker")?;
+        Ok(Self {
+            next_capture: Instant::now(),
+            sender,
+            authorized,
+            stopping,
+            worker: Some(worker),
+            worker_done,
+        })
+    }
+
+    pub fn tick(
+        &mut self,
+        policy: &ScreenMonitoringPolicy,
+        backend_url: &str,
+        device: &DeviceInfo,
+        application_name: &str,
+    ) {
+        let allowed = policy.allowed
+            && policy.visible_indicator
+            && policy.allowed_until.is_some_and(|until| Utc::now() < until);
+        self.authorized.store(allowed, Ordering::Release);
+        if !allowed {
+            let _ = self.sender.try_send(Work::Clear);
+            self.next_capture = Instant::now() + Duration::from_secs(30);
+            return;
+        }
+        if Instant::now() < self.next_capture {
+            return;
+        }
+        self.next_capture =
+            Instant::now() + Duration::from_secs(policy.interval_seconds.clamp(60, 3600));
+        let application_lower = application_name.to_lowercase();
+        if policy
+            .excluded_applications
+            .iter()
+            .any(|excluded| application_lower.contains(excluded))
+        {
+            info!(
+                application = application_name,
+                "Screenshot skipped because the foreground application is excluded by policy"
+            );
+            return;
+        }
+        let job = CaptureJob {
+            policy: policy.clone(),
+            backend_url: backend_url.to_owned(),
+            device: device.clone(),
+            application_name: application_name.to_owned(),
+        };
+        match self.sender.try_send(Work::Capture(Box::new(job))) {
+            Ok(()) => info!("Authorized screenshot work queued on the bounded worker"),
+            Err(TrySendError::Full(_)) => {
+                warn!("Screenshot worker is busy; capture skipped without blocking heartbeats")
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                warn!("Screenshot worker is unavailable; capture skipped")
+            }
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.authorized.store(false, Ordering::Release);
+        let _ = self.sender.try_send(Work::Clear);
+    }
+}
+
+#[cfg(windows)]
+fn restrict_queue_acl(queue_dir: &Path) -> Result<()> {
+    let mut child = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            RESTRICT_QUEUE_ACL_SCRIPT,
+        ])
+        .arg(queue_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to start screenshot queue ACL helper")?;
+    let output = wait_for_child(&mut child, Duration::from_secs(10), || true)?;
+    if !output.status.success() {
+        bail!("failed to restrict screenshot queue access; capture remains disabled");
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn restrict_queue_acl(_queue_dir: &Path) -> Result<()> {
+    Ok(())
+}
+
+impl Drop for ScreenshotScheduler {
+    fn drop(&mut self) {
+        self.authorized.store(false, Ordering::Release);
+        self.stopping.store(true, Ordering::Release);
+        let _ = self.sender.try_send(Work::Clear);
+        if self
+            .worker_done
+            .recv_timeout(Duration::from_secs(2))
+            .is_ok()
+        {
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        } else {
+            warn!("Screenshot worker exceeded the shutdown budget and was detached; process exit will reclaim it");
+        }
+    }
+}
+
+fn policy_active(policy: &ScreenMonitoringPolicy, authorized: &AtomicBool) -> bool {
+    authorized.load(Ordering::Acquire)
+        && policy.allowed
+        && policy.visible_indicator
+        && policy.allowed_until.is_some_and(|until| Utc::now() < until)
+}
+
+fn process_job(queue_dir: &Path, config: &WorkerConfig, authorized: &AtomicBool, job: &CaptureJob) {
+    if !policy_active(&job.policy, authorized) {
+        return;
+    }
+    flush_pending(queue_dir, config, authorized, job);
+    if !policy_active(&job.policy, authorized) {
+        return;
+    }
+    match capture(queue_dir, config, authorized, job) {
+        Ok(()) => flush_pending(queue_dir, config, authorized, job),
+        Err(error) => {
+            warn!(error = %error, "Authorized screenshot capture failed");
+            if policy_active(&job.policy, authorized) {
+                if let Err(error) = sync::report_screen_capture_failure(
+                    &job.backend_url,
+                    &job.device,
+                    "DISPLAY_CAPTURE_FAILED",
+                ) {
+                    warn!(error = %error, "SCREEN_FAILURE_REPORT_FAILED");
+                }
+            }
+        }
+    }
+}
+
+fn capture(
+    queue_dir: &Path,
+    config: &WorkerConfig,
+    authorized: &AtomicBool,
+    job: &CaptureJob,
+) -> Result<()> {
+    if count_metadata(queue_dir)? >= config.max_pending {
+        bail!("screenshot queue is full; capture paused without deleting pending images");
+    }
+    if queue_size_bytes(queue_dir)? >= config.max_queue_bytes {
+        bail!(
+            "screenshot queue byte limit reached; capture paused without deleting pending images"
+        );
+    }
+    if !policy_active(&job.policy, authorized) {
+        bail!("screenshot authorization ended before capture");
+    }
+    let capture_key = uuid::Uuid::new_v4().simple().to_string();
+    let protected_path = queue_dir.join(format!("{capture_key}.dpapi"));
+    let protected_temp = queue_dir.join(format!("{capture_key}.dpapi.tmp"));
+    let metadata_path = queue_dir.join(format!("{capture_key}.json"));
+    let metadata_temp = queue_dir.join(format!("{capture_key}.json.tmp"));
+    let result = (|| -> Result<()> {
+        let mut child = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(queue_dir.join("capture.ps1"))
+            .arg("-ProtectedOutputPath")
+            .arg(&protected_temp)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("failed to start the Windows screen capture helper")?;
+        let output = wait_for_child(&mut child, config.timeout, || {
+            policy_active(&job.policy, authorized)
+        })?;
+        if !output.status.success() || !protected_temp.is_file() {
+            bail!("screen capture helper failed without retaining plaintext screen data");
+        }
+        let dimensions = String::from_utf8_lossy(&output.stdout);
+        let dimensions = dimensions
+            .trim()
+            .strip_prefix("OK:")
+            .context("capture helper returned invalid dimensions")?;
+        let (width, height) = dimensions
+            .split_once('x')
+            .context("capture helper returned malformed dimensions")?;
+        let protected_len = fs::metadata(&protected_temp)?.len();
+        if !(32..=6 * 1024 * 1024).contains(&protected_len) {
+            bail!("capture helper returned invalid protected data");
+        }
+        if !policy_active(&job.policy, authorized) {
+            bail!("screenshot authorization ended after capture");
+        }
+        fs::rename(&protected_temp, &protected_path)?;
+        let captured_at = Utc::now();
+        let metadata = json!({
+            "captureKey": capture_key,
+            "capturedAt": captured_at.to_rfc3339(),
+            "width": width.parse::<u32>().unwrap_or(0),
+            "height": height.parse::<u32>().unwrap_or(0),
+            "applicationName": job.application_name,
+            "attempts": 0,
+            "nextAttemptAt": captured_at.to_rfc3339(),
+        });
+        fs::write(&metadata_temp, serde_json::to_vec(&metadata)?)?;
+        fs::rename(&metadata_temp, &metadata_path)?;
+        Ok(())
+    })();
+    let _ = fs::remove_file(&protected_temp);
+    let _ = fs::remove_file(&metadata_temp);
+    if result.is_err() {
+        let _ = fs::remove_file(&protected_path);
+        let _ = fs::remove_file(&metadata_path);
+    }
+    result
+}
+
+fn wait_for_child(
+    child: &mut Child,
+    timeout: Duration,
+    keep_running: impl Fn() -> bool,
+) -> Result<Output> {
+    let started = Instant::now();
+    loop {
+        if !keep_running() {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("screenshot helper cancelled because authorization ended");
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!(
+                "screenshot helper timed out after {} seconds",
+                timeout.as_secs()
+            );
+        }
+        if child.try_wait()?.is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let stdout = child
+        .stdout
+        .take()
+        .map(|mut stream| {
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut stream, &mut bytes).map(|_| bytes)
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let stderr = child
+        .stderr
+        .take()
+        .map(|mut stream| {
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut stream, &mut bytes).map(|_| bytes)
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok(Output {
+        status: child.wait()?,
+        stdout,
+        stderr,
+    })
+}
+
+fn flush_pending(
+    queue_dir: &Path,
+    config: &WorkerConfig,
+    authorized: &AtomicBool,
+    job: &CaptureJob,
+) {
+    let mut files = match metadata_files(queue_dir) {
+        Ok(value) => value,
+        Err(error) => {
+            warn!(error = %error, "Could not inspect screenshot retry queue");
+            return;
+        }
+    };
+    files.sort();
+    for path in files {
+        if !policy_active(&job.policy, authorized) {
+            return;
+        }
+        if let Err(error) = try_upload(queue_dir, config, authorized, job, &path) {
+            warn!(error = %error, path = %path.display(), "Screenshot upload retained for retry");
+        }
+    }
+}
+
+fn try_upload(
+    queue_dir: &Path,
+    config: &WorkerConfig,
+    authorized: &AtomicBool,
+    job: &CaptureJob,
+    metadata_path: &Path,
+) -> Result<()> {
+    if !policy_active(&job.policy, authorized) {
+        bail!("screenshot upload cancelled because authorization ended");
+    }
+    let mut metadata: Value = serde_json::from_slice(&fs::read(metadata_path)?)?;
+    let captured_at = metadata
+        .get("capturedAt")
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .context("queued screenshot has invalid timestamp")?;
+    if Utc::now().signed_duration_since(captured_at).num_hours() >= config.retention_hours {
+        fs::remove_file(metadata_path.with_extension("dpapi"))?;
+        fs::remove_file(metadata_path)?;
+        info!("SCREEN_QUEUE_EXPIRED");
+        return Ok(());
+    }
+    let next_attempt = metadata
+        .get("nextAttemptAt")
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc))
+        .unwrap_or_else(Utc::now);
+    if next_attempt > Utc::now() {
+        return Ok(());
+    }
+    let capture_key = metadata
+        .get("captureKey")
+        .and_then(Value::as_str)
+        .context("queued screenshot has no capture key")?;
+    if !valid_capture_key(capture_key) {
+        bail!("queued screenshot has invalid capture key");
+    }
+    let image_path = queue_dir.join(format!("{capture_key}.dpapi"));
+    let protected = fs::read(&image_path).context("queued screenshot image is missing")?;
+    let jpeg = dp_platform_windows::data_protection::unprotect(&protected)
+        .map_err(|error| anyhow::anyhow!("failed to unprotect queued screenshot: {error}"))?;
+    if !policy_active(&job.policy, authorized) {
+        bail!("screenshot upload cancelled before request");
+    }
+    let upload = ScreenCaptureUpload {
+        capture_key,
+        captured_at: metadata
+            .get("capturedAt")
+            .and_then(Value::as_str)
+            .context("queued screenshot has no timestamp")?,
+        width: metadata.get("width").and_then(Value::as_u64).unwrap_or(0) as u32,
+        height: metadata.get("height").and_then(Value::as_u64).unwrap_or(0) as u32,
+        application_name: metadata
+            .get("applicationName")
+            .and_then(Value::as_str)
+            .unwrap_or("Active Windows desktop"),
+        jpeg: &jpeg,
+    };
+    match sync::upload_screen_capture(&job.backend_url, &job.device, upload) {
+        Ok(()) => {
+            fs::remove_file(image_path)?;
+            fs::remove_file(metadata_path)?;
+            info!(
+                capture_key,
+                "Screenshot uploaded and removed from protected retry queue"
+            );
+            Ok(())
+        }
+        Err(error) => {
+            let attempts = metadata
+                .get("attempts")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .saturating_add(1);
+            let delay = 30u64
+                .saturating_mul(2u64.saturating_pow(attempts.min(6) as u32))
+                .min(3600);
+            metadata["attempts"] = json!(attempts);
+            metadata["nextAttemptAt"] =
+                json!((Utc::now() + ChronoDuration::seconds(delay as i64)).to_rfc3339());
+            fs::write(metadata_path, serde_json::to_vec(&metadata)?)?;
+            Err(error)
+        }
+    }
+}
+
+fn valid_capture_key(value: &str) -> bool {
+    value.len() == 32 && value.bytes().all(|c| c.is_ascii_hexdigit())
+}
+
+fn metadata_files(queue_dir: &Path) -> Result<Vec<PathBuf>> {
+    Ok(fs::read_dir(queue_dir)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().and_then(|value| value.to_str()) == Some("json")
+                && path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(valid_capture_key)
+        })
+        .collect())
+}
+
+fn count_metadata(queue_dir: &Path) -> Result<usize> {
+    Ok(metadata_files(queue_dir)?.len())
+}
+
+fn queue_size_bytes(queue_dir: &Path) -> Result<u64> {
+    let mut total = 0u64;
+    for entry in fs::read_dir(queue_dir)? {
+        let path = entry?.path();
+        if path.is_file()
+            && matches!(
+                path.extension().and_then(|value| value.to_str()),
+                Some("json" | "dpapi" | "tmp")
+            )
+        {
+            total = total.saturating_add(fs::metadata(path)?.len());
+        }
+    }
+    Ok(total)
+}
+
+fn cleanup_abandoned_temps(queue_dir: &Path) -> Result<()> {
+    for entry in fs::read_dir(queue_dir)? {
+        let path = entry?.path();
+        let valid = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .is_some_and(|stem| {
+                stem.strip_suffix(".dpapi").is_some_and(valid_capture_key)
+                    || stem.strip_suffix(".json").is_some_and(valid_capture_key)
+            });
+        if path.is_file()
+            && path.extension().and_then(|value| value.to_str()) == Some("tmp")
+            && valid
+        {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+fn clear_pending(queue_dir: &Path) -> Result<()> {
+    for entry in fs::read_dir(queue_dir)? {
+        let path = entry?.path();
+        if path.is_file()
+            && matches!(
+                path.extension().and_then(|value| value.to_str()),
+                Some("json" | "dpapi")
+            )
+            && path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .is_some_and(valid_capture_key)
+        {
+            fs::remove_file(path)?;
+        }
+    }
+    cleanup_abandoned_temps(queue_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn helper_never_writes_plaintext_image() {
+        assert!(!CAPTURE_SCRIPT.contains("$bitmap.Save($OutputPath"));
+        assert!(CAPTURE_SCRIPT.contains("ProtectedData]::Protect"));
+        assert!(!CAPTURE_SCRIPT.contains(".jpg"));
+    }
+
+    #[test]
+    fn bounded_settings_have_safe_defaults() {
+        assert_eq!(DEFAULT_CAPTURE_TIMEOUT_SECS, 15);
+        assert!((5..=60).contains(&WorkerConfig::from_env().timeout.as_secs()));
+    }
+
+    #[test]
+    fn cleanup_never_removes_unrelated_files() {
+        let root = std::env::temp_dir().join(format!("dp-screen-clean-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("test directory");
+        fs::write(root.join("notes.json"), b"keep").expect("write unrelated file");
+        fs::write(
+            root.join("0123456789abcdef0123456789abcdef.dpapi"),
+            b"remove",
+        )
+        .expect("write queue file");
+        clear_pending(&root).expect("clear queue");
+        assert!(root.join("notes.json").exists());
+        assert!(!root.join("0123456789abcdef0123456789abcdef.dpapi").exists());
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn authorization_expiry_stops_work() {
+        let flag = AtomicBool::new(true);
+        let policy = ScreenMonitoringPolicy {
+            allowed: true,
+            reason: None,
+            interval_seconds: 300,
+            excluded_applications: vec![],
+            visible_indicator: true,
+            allowed_until: Some(Utc::now() - ChronoDuration::seconds(1)),
+        };
+        assert!(!policy_active(&policy, &flag));
+        flag.store(false, Ordering::Release);
+        assert!(!policy_active(&policy, &flag));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hung_child_is_terminated_and_reaped() {
+        let mut child = Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn timeout fixture");
+        let started = Instant::now();
+        let error = wait_for_child(&mut child, Duration::from_millis(100), || true)
+            .expect_err("fixture must time out");
+        assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(child.try_wait().expect("query child").is_some());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn screenshot_queue_acl_disables_inheritance() {
+        let root = std::env::temp_dir().join(format!("dp-screen-acl-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("test directory");
+        restrict_queue_acl(&root).expect("restrict queue ACL");
+        let output = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-Acl -LiteralPath $args[0]).AreAccessRulesProtected",
+            ])
+            .arg(&root)
+            .output()
+            .expect("inspect queue ACL");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "True");
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+}

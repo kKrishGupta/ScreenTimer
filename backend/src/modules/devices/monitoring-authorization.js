@@ -71,6 +71,24 @@ function localTimeToUtc(date, minuteOfDay, timezone, edge = 'earlier') {
   throw new RangeError('Could not resolve scheduled local time in organization time zone');
 }
 
+export function reportingDayRange(now = new Date(), timezone = 'UTC') {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+  } catch {
+    const error = new RangeError('Invalid reporting time zone');
+    error.code = 'INVALID_TIMEZONE';
+    throw error;
+  }
+  const localDate = localParts(now, timezone);
+  const nextDate = addLocalDays(localDate, 1);
+  return {
+    date: dateKey(localDate),
+    timezone,
+    start: localTimeToUtc(localDate, 0, timezone, 'earlier'),
+    end: localTimeToUtc(nextDate, 0, timezone, 'later'),
+  };
+}
+
 function scheduleWindow(date, shiftStart, shiftEnd, timezone) {
   const startMinute = Number(shiftStart.slice(0, 2)) * 60 + Number(shiftStart.slice(3));
   const endMinute = Number(shiftEnd.slice(0, 2)) * 60 + Number(shiftEnd.slice(3));
