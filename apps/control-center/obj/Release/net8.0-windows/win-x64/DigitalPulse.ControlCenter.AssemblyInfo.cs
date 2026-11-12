@@ -10,13 +10,13 @@
 using System;
 using System.Reflection;
 
-[assembly: System.Reflection.AssemblyCompanyAttribute("DigitalPulse.ControlCenter")]
+[assembly: System.Reflection.AssemblyCompanyAttribute("DigitalPulse")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a535da1b4e77c757efc3a58c37dcbcae78a4c67f")]
-[assembly: System.Reflection.AssemblyProductAttribute("DigitalPulse.ControlCenter")]
-[assembly: System.Reflection.AssemblyTitleAttribute("DigitalPulse.ControlCenter")]
-[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("0.1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+522699d970671991987f2172c7b54fb61bcc1389")]
+[assembly: System.Reflection.AssemblyProductAttribute("DigitalPulse Control Center")]
+[assembly: System.Reflection.AssemblyTitleAttribute("DigitalPulse")]
+[assembly: System.Reflection.AssemblyVersionAttribute("0.1.0.0")]
 [assembly: System.Runtime.Versioning.TargetPlatformAttribute("Windows7.0")]
 [assembly: System.Runtime.Versioning.SupportedOSPlatformAttribute("Windows7.0")]
 

@@ -1,8 +1,3 @@
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.exe
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.deps.json
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.runtimeconfig.json
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.dll
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.pdb
 D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\Microsoft.CSharp.dll
 D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\Microsoft.VisualBasic.Core.dll
 D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\Microsoft.Win32.Primitives.dll
@@ -466,10 +461,12 @@ D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-win
 D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.AssemblyInfoInputs.cache
 D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.AssemblyInfo.cs
 D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.csproj.CoreCompileInputs.cache
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.sourcelink.json
 D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalP.9741B94B.Up2Date
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.dll
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\refint\DigitalPulse.ControlCenter.dll
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.pdb
 D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalPulse.ControlCenter.genruntimeconfig.cache
-D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\ref\DigitalPulse.ControlCenter.dll
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.exe
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.deps.json
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.runtimeconfig.json
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\bin\Release\net8.0-windows\win-x64\DigitalPulse.dll
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\DigitalPulse.dll
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\refint\DigitalPulse.dll
+D:\desktop\task2_updated\DigitalPulse\apps\control-center\obj\Release\net8.0-windows\win-x64\ref\DigitalPulse.dll
