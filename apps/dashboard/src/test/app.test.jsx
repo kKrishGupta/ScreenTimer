@@ -432,6 +432,26 @@ describe('dashboard shell and navigation', () => {
     expect(resendCalls).toBe(1);
   });
 
+  it('keeps the employee directory visible when a background refresh fails', async () => {
+    let employeeRequests = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options = {}) => {
+      const requestUrl = typeof url === 'string' ? url : url?.url ?? '';
+      if (requestUrl.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'admin-001', email: 'admin@example.com', role: 'ADMIN' } }), { status: 200 });
+      if (requestUrl.includes('/employees?')) {
+        employeeRequests += 1;
+        if (employeeRequests > 1) throw new TypeError('temporary network failure');
+      }
+      return defaultRouterFetch(url, options);
+    });
+
+    renderAt('/employees');
+    expect(await screen.findByText('Alex Mercer')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Search by name, ID, email, or department...'), { target: { value: 'Alex' } });
+    expect(await screen.findByText(/Showing the last successful data/)).toBeInTheDocument();
+    expect(screen.getByText('Alex Mercer')).toBeInTheDocument();
+    expect(screen.queryByText('Unable to load data')).not.toBeInTheDocument();
+  });
+
   it('validates a fragment invitation token and redirects an accepted employee to device setup', async () => {
     setAuthToken(null);
     let authenticated = false;

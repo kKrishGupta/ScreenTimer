@@ -37,6 +37,10 @@ export function createEmailService(config = {}) {
     : (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.GMAIL_APP_PASSWORD || process.env.google_password);
   const from = config.smtpFrom || process.env.EMAIL_FROM || process.env.SMTP_FROM || user;
   const configured = Boolean(user && pass);
+  const configuredDeliveryTimeout = Number(config.smtpDeliveryTimeoutMs);
+  const deliveryTimeoutMs = Number.isFinite(configuredDeliveryTimeout)
+    ? Math.min(7000, Math.max(25, configuredDeliveryTimeout))
+    : 5000;
 
   if (!configured) {
     return {
@@ -65,14 +69,33 @@ export function createEmailService(config = {}) {
     port: Number(config.smtpPort || process.env.SMTP_PORT || 465),
     secure: String(config.smtpSecure ?? process.env.SMTP_SECURE ?? 'true').toLowerCase() === 'true',
     auth: { user, pass: String(pass).replace(/\s+/g, '') },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    dnsTimeout: 10000,
+    connectionTimeout: Math.min(3000, deliveryTimeoutMs),
+    greetingTimeout: Math.min(3000, deliveryTimeoutMs),
+    socketTimeout: deliveryTimeoutMs,
+    dnsTimeout: Math.min(3000, deliveryTimeoutMs),
   });
 
   const sendMessage = async ({ to, subject, text, html, requireRecipientAcceptance = false }) => {
-    const delivery = await transporter.sendMail({ from, to, subject, text, html });
+    let timeout;
+    const deadline = new Promise((_, reject) => {
+      timeout = setTimeout(() => {
+        const error = new Error('Gmail SMTP delivery attempt timed out');
+        error.code = 'ETIMEDOUT';
+        reject(error);
+      }, deliveryTimeoutMs);
+    });
+    let delivery;
+    try {
+      delivery = await Promise.race([
+        transporter.sendMail({ from, to, subject, text, html }),
+        deadline,
+      ]);
+    } catch (error) {
+      if (error?.code === 'ETIMEDOUT') transporter.close?.();
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     if (requireRecipientAcceptance && !delivery?.accepted?.some((recipient) => String(recipient.address || recipient).toLowerCase() === String(to).toLowerCase())) {
       const error = new Error('Email provider did not accept the recipient');
       error.code = 'EMAIL_RECIPIENT_REJECTED';

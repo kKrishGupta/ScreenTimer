@@ -289,11 +289,11 @@ export const api = {
   setEmployeeMonitoringAuthorization: (id, authorized, opts = {}) => patchJson(`/employees/${id}/monitoring-authorization`, { authorized }, opts),
   deleteEmployee: (id, opts = {}) => deleteJson(`/employees/${id}`, opts),
   assignEmployeeDevice: (id, deviceId, opts = {}) => postJson(`/employees/${id}/devices`, { deviceId }, opts),
-  inviteEmployee: (payload, opts = {}) => postJson('/invitations', { ...payload, ...(superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}) }, opts),
+  inviteEmployee: (payload, opts = {}) => postJson('/invitations', { ...payload, ...(superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}) }, { timeoutMs: AUTH_WRITE_TIMEOUT_MS, ...opts }),
   invitations: (opts = {}) => getJson('/invitations', opts),
   validateInvitation: (token, opts = {}) => postJson('/invitations/validate', { token }, opts),
   revokeInvitation: (id, opts = {}) => deleteJson(`/invitations/${id}`, opts),
-  resendInvitation: (id, opts = {}) => postJson(`/invitations/${id}/resend`, {}, opts),
+  resendInvitation: (id, opts = {}) => postJson(`/invitations/${id}/resend`, {}, { timeoutMs: AUTH_WRITE_TIMEOUT_MS, ...opts }),
 
   // Department Governance
   departments: (opts = {}) => getJson('/departments', opts),

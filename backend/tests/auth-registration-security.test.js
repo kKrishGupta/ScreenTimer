@@ -486,4 +486,34 @@ describe('registration privilege-escalation protection', () => {
     await assert.rejects(() => app.authService.getInvitationDetails(oldToken), { statusCode: 404 });
     assert.equal((await app.authService.getInvitationDetails(newToken)).invitation.email, 'resend@example.com');
   });
+
+  it('returns one fresh link after an SMTP timeout without repeating token rotation', async (t) => {
+    const prisma = createPrisma();
+    const app = await buildApp({ config: testConfig(), prisma, logger: false });
+    t.after(() => app.close());
+    const pending = await app.authService.createInvitation({ organizationId: 'trusted-org', email: 'timeout@example.com' });
+    const previousHash = prisma.__state.invitations[0].tokenHash;
+    const originalUpdateMany = prisma.invitation.updateMany;
+    let rotations = 0;
+    prisma.invitation.updateMany = async (args) => {
+      rotations += 1;
+      return originalUpdateMany(args);
+    };
+    app.authService.emailService = {
+      configured: true,
+      async sendInvitationEmail() {
+        const error = new Error('simulated timeout');
+        error.code = 'ETIMEDOUT';
+        throw error;
+      },
+    };
+
+    const result = await app.authService.resendInvitation({ organizationId: 'trusted-org', invitationId: pending.invitation.id });
+    assert.equal(result.success, true);
+    assert.equal(result.deliveryStatus, 'failed');
+    assert.equal(result.emailError.code, 'ETIMEDOUT');
+    assert.equal(rotations, 1);
+    assert.notEqual(prisma.__state.invitations[0].tokenHash, previousHash);
+    assert.match(result.invitationUrl, /#token=/);
+  });
 });

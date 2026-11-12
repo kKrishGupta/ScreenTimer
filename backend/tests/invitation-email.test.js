@@ -62,3 +62,27 @@ test('missing Gmail SMTP credentials fail closed without creating a transport', 
   await assert.rejects(service.sendInvitationEmail({}), { code: 'EMAIL_NOT_CONFIGURED' });
   assert.equal(createTransport.mock.callCount(), 0);
 });
+
+test('Gmail SMTP attempts have a hard deadline and close the stalled transport', async (t) => {
+  let closed = false;
+  t.mock.method(nodemailer, 'createTransport', () => ({
+    sendMail: async () => new Promise(() => {}),
+    close: () => { closed = true; },
+  }));
+  const service = createEmailService({
+    smtpUser: 'sender@gmail.com',
+    smtpPassword: 'test-app-password',
+    smtpFrom: 'sender@gmail.com',
+    smtpDeliveryTimeoutMs: 25,
+  });
+
+  const startedAt = Date.now();
+  await assert.rejects(service.sendInvitationEmail({
+    to: 'employee@example.test',
+    token: 'test-token',
+    invitationUrl: 'https://app.example.test/accept-invitation',
+  }), { code: 'ETIMEDOUT' });
+
+  assert.equal(closed, true);
+  assert.ok(Date.now() - startedAt < 1000);
+});

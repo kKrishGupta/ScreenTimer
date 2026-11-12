@@ -53,10 +53,10 @@ export default function EmployeesPage() {
 
   const fetchDevices = useCallback((opts) => api.devices(opts), []);
 
-  const { data, error, loading, reload } = useApi(fetchEmployees, { intervalMs: 5000 });
-  const { data: devicesData } = useApi(fetchDevices, { intervalMs: 5000 });
+  const { data, error, loading, reload } = useApi(fetchEmployees, { intervalMs: 15000 });
+  const { data: devicesData } = useApi(fetchDevices, { intervalMs: 15000 });
   const fetchInvitations = useCallback((opts) => api.invitations(opts), []);
-  const { data: invitationsData, reload: reloadInvitations } = useApi(fetchInvitations, { intervalMs: 10000 });
+  const { data: invitationsData, reload: reloadInvitations } = useApi(fetchInvitations, { intervalMs: 30000 });
   const invitations = invitationsData?.invitations ?? [];
 
   useEffect(() => {
@@ -69,11 +69,6 @@ export default function EmployeesPage() {
     });
     return () => { cancelled = true; };
   }, [selectedEmployee?.id]);
-
-  // Immediately reload when search or filter changes
-  useEffect(() => {
-    reload();
-  }, [search, deptFilter, statusFilter, reload]);
 
   const employees = data?.employees ?? [];
   const allDevices = devicesData?.devices ?? [];
@@ -302,7 +297,7 @@ export default function EmployeesPage() {
   };
 
   if (loading && !data) return <LoadingState label="Loading employee directory…" />;
-  if (error) return <ErrorState error={error} onRetry={reload} />;
+  if (error && !data) return <ErrorState error={error} onRetry={reload} />;
 
   return (
     <>
@@ -320,6 +315,8 @@ export default function EmployeesPage() {
           </Button>
         </div>
       </div>
+
+      {error && data && <div role="status" className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">The employee directory could not refresh. Showing the last successful data while DigitalPulse retries automatically. <button type="button" onClick={reload} className="ml-2 underline">Retry now</button></div>}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
@@ -506,7 +503,7 @@ export default function EmployeesPage() {
                 </p>
               )}
               <div className="space-y-2 rounded-lg border border-white/10 bg-slate-950 p-3"><p className="text-xs font-semibold text-slate-300">Secure invitation link</p><code className="block break-all text-xs text-slate-200">{inviteSuccess.invitationUrl}</code><button type="button" onClick={() => handleCopyInvitationLink(inviteSuccess.invitationUrl)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Copy Invitation Link</button></div>
-              <div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={busy} onClick={() => retryInvitationEmail(inviteSuccess.invitation.id)} className="rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-200 disabled:opacity-50">{busy ? 'Retrying…' : inviteSuccess.emailSent ? 'Resend Email (new link)' : 'Retry Email (refresh link)'}</button><button type="button" onClick={() => setShowInviteModal(false)} className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-white">Done</button></div>
+              <div className="flex flex-wrap justify-end gap-2">{inviteSuccess.emailSent && <button type="button" disabled={busy} onClick={() => { if (window.confirm('Generate another fresh link and resend it? The current link will stop working.')) retryInvitationEmail(inviteSuccess.invitation.id); }} className="rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-200 disabled:opacity-50">{busy ? 'Retrying…' : 'Generate New Link & Resend'}</button>}<button type="button" onClick={() => setShowInviteModal(false)} className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-white">Done</button></div>
             </div>
           )}
         </div>
