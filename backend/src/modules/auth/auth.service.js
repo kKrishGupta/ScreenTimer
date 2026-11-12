@@ -1194,6 +1194,7 @@ export class AuthService {
       success: true,
       invitation: { id: invitation.id, email: cleanEmail, role: roleValue, displayName: displayName?.trim() || null },
       emailSent,
+      deliveryStatus: emailSent ? 'accepted_by_smtp' : (this.emailService?.configured ? 'failed' : 'not_configured'),
       emailError,
       organizationId,
       expiresAt: expiresAt.toISOString(),
@@ -1330,6 +1331,7 @@ export class AuthService {
       organizationId: invitation.organizationId,
       expiresAt: expiresAt.toISOString(),
       emailSent,
+      deliveryStatus: emailSent ? 'accepted_by_smtp' : (this.emailService?.configured ? 'failed' : 'not_configured'),
       emailError,
       invitationUrl: link.toString(),
     };

@@ -99,7 +99,7 @@ export default function EmployeesPage() {
       });
       setNewEmployeeLink(result.invitationUrl || '');
       setNewEmployeeCreated(true);
-      setInviteError(result.emailSent ? 'Invitation email sent. The account is created after acceptance.' : 'Email delivery is unavailable. The invitation is active; copy the link below to complete onboarding.');
+      setInviteError(result.emailSent ? 'Gmail SMTP accepted the invitation message. Inbox delivery is not guaranteed; the account is created after acceptance.' : 'Email delivery is unavailable. The invitation is active; copy the link below to complete onboarding.');
       reload();
       reloadInvitations();
     } catch (err) {
@@ -195,7 +195,7 @@ export default function EmployeesPage() {
       });
       setInvitationLinks((current) => ({ ...current, [result.invitation.id]: result.invitationUrl }));
       setInviteError('');
-      setCopyToast(result.emailSent ? 'A fresh invitation email was sent.' : 'Email is still unavailable. The active invitation link has been refreshed.');
+      setCopyToast(result.emailSent ? 'Gmail SMTP accepted the fresh invitation message; inbox delivery is not guaranteed.' : 'Email is still unavailable. The active invitation link has been refreshed.');
       reloadInvitations();
     } catch (err) {
       setInviteError(err.message || 'Could not retry invitation email.');
@@ -224,6 +224,11 @@ export default function EmployeesPage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleGenerateFreshLink = (invitationId) => {
+    const approved = window.confirm('Generate a fresh invitation link? The previous link will stop working.');
+    if (approved) handleInvitationAction('resend', invitationId);
   };
 
   const handleAssignDevice = async (empId, deviceId) => {
@@ -467,7 +472,7 @@ export default function EmployeesPage() {
               <div><p className="text-slate-200">{invite.displayName || invite.email}</p><p className="text-xs text-slate-500">{invite.email} · expires {new Date(invite.expiresAt).toLocaleString()}</p></div>
               <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-white/5 px-2.5 py-1 text-xs capitalize text-slate-300">{invite.status === 'pending' ? 'Pending Acceptance' : invite.status}</span>
                 {['pending', 'expired'].includes(invite.status) && <button disabled={busy} onClick={() => handleInvitationAction('resend', invite.id)} className="text-xs text-sky-300 disabled:opacity-50">Resend Invitation</button>}
-                {invite.status === 'pending' && <><button disabled={busy} onClick={() => handleCopyInvitationLink(invitationLinks[invite.id])} className="text-xs text-emerald-300 disabled:opacity-50">Copy Invitation Link</button><button disabled={busy} onClick={() => handleInvitationAction('revoke', invite.id)} className="text-xs text-rose-300 disabled:opacity-50">Revoke Invitation</button></>}
+                {invite.status === 'pending' && <>{invitationLinks[invite.id] ? <button disabled={busy} onClick={() => handleCopyInvitationLink(invitationLinks[invite.id])} className="text-xs text-emerald-300 disabled:opacity-50">Copy Invitation Link</button> : <button disabled={busy} onClick={() => handleGenerateFreshLink(invite.id)} className="text-xs text-emerald-300 disabled:opacity-50">Generate Fresh Link</button>}<button disabled={busy} onClick={() => handleInvitationAction('revoke', invite.id)} className="text-xs text-rose-300 disabled:opacity-50">Revoke Invitation</button></>}
               </div>
             </div>
           ))}</div>
@@ -493,11 +498,11 @@ export default function EmployeesPage() {
               <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-100"><p className="font-semibold">{inviteSuccess.invitation.displayName || inviteName}</p><p>{inviteSuccess.invitation.email || inviteEmail}</p><p className="mt-3 text-xs">Expires {new Date(inviteSuccess.expiresAt).toLocaleString()} · Pending Acceptance</p></div>
               {inviteSuccess.emailSent ? (
                 <p role="status" className="text-sm text-emerald-200">
-                  The invitation was accepted by the email provider. Ask the employee to check their inbox and spam folder.
+                  Gmail SMTP accepted the invitation message. This does not guarantee inbox delivery; ask the employee to check their inbox and spam folder.
                 </p>
               ) : (
                 <p role="alert" className="text-sm text-amber-200">
-                  The invitation is saved and remains active, but email delivery is unavailable. Copy and send this link to the employee.
+                  The invitation is saved and remains active, but Gmail SMTP did not accept it. Copy and send this link to the employee.{inviteSuccess.emailError?.message ? ` ${inviteSuccess.emailError.message}` : ''}
                 </p>
               )}
               <div className="space-y-2 rounded-lg border border-white/10 bg-slate-950 p-3"><p className="text-xs font-semibold text-slate-300">Secure invitation link</p><code className="block break-all text-xs text-slate-200">{inviteSuccess.invitationUrl}</code><button type="button" onClick={() => handleCopyInvitationLink(inviteSuccess.invitationUrl)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">Copy Invitation Link</button></div>

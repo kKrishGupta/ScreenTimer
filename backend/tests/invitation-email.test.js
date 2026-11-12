@@ -21,3 +21,44 @@ test('delivery diagnostics never expose provider messages or credentials', () =>
   assert.equal(result.code, 'EAUTH');
   assert.doesNotMatch(JSON.stringify(result), /secret-password|private SMTP/);
 });
+
+test('Gmail SMTP uses the documented secure transport and authorized sender', async (t) => {
+  let transportConfig;
+  let mail;
+  t.mock.method(nodemailer, 'createTransport', (value) => {
+    transportConfig = value;
+    return { sendMail: async (message) => { mail = message; return { accepted: ['employee@example.test'] }; } };
+  });
+  const service = createEmailService({
+    smtpHost: 'smtp.gmail.com',
+    smtpPort: '465',
+    smtpSecure: 'true',
+    smtpUser: 'sender@gmail.com',
+    smtpPassword: 'test app password',
+    smtpFrom: 'sender@gmail.com',
+  });
+
+  await service.sendInvitationEmail({
+    to: 'employee@example.test',
+    token: 'test-token',
+    invitationUrl: 'https://app.example.test/accept-invitation',
+  });
+
+  assert.equal(service.provider, 'gmail-smtp');
+  assert.equal(transportConfig.host, 'smtp.gmail.com');
+  assert.equal(transportConfig.port, 465);
+  assert.equal(transportConfig.secure, true);
+  assert.equal(transportConfig.auth.user, 'sender@gmail.com');
+  assert.equal(transportConfig.auth.pass, 'testapppassword');
+  assert.equal(mail.from, 'sender@gmail.com');
+  assert.match(mail.text, /accept-invitation#token=test-token/);
+});
+
+test('missing Gmail SMTP credentials fail closed without creating a transport', async (t) => {
+  const createTransport = t.mock.method(nodemailer, 'createTransport', () => { throw new Error('must not be called'); });
+  const service = createEmailService({ smtpUser: '', smtpPassword: '', smtpFrom: '' });
+  assert.equal(service.configured, false);
+  assert.equal(service.provider, 'none');
+  await assert.rejects(service.sendInvitationEmail({}), { code: 'EMAIL_NOT_CONFIGURED' });
+  assert.equal(createTransport.mock.callCount(), 0);
+});

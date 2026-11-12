@@ -3,11 +3,11 @@ import nodemailer from 'nodemailer';
 export function invitationDeliveryError(error) {
   const code = ['EMAIL_NOT_CONFIGURED', 'EAUTH', 'ETIMEDOUT', 'ECONNECTION', 'ECONNREFUSED', 'EDNS', 'EMAIL_RECIPIENT_REJECTED'].includes(error?.code) ? error.code : 'EMAIL_DELIVERY_FAILED';
   const messages = {
-    EMAIL_NOT_CONFIGURED: 'SMTP credentials are missing. Configure SMTP_USER and SMTP_PASS, then restart the backend.',
-    EAUTH: 'The email provider rejected SMTP authentication. Check the sender credentials or app password.',
-    EMAIL_RECIPIENT_REJECTED: 'The email provider rejected the recipient address. Check the employee email.',
+    EMAIL_NOT_CONFIGURED: 'Gmail SMTP delivery is not configured. Configure SMTP_USER and SMTP_PASS, then restart the backend.',
+    EAUTH: 'Gmail rejected SMTP authentication. Check the Gmail address and Google App Password.',
+    EMAIL_RECIPIENT_REJECTED: 'Gmail SMTP rejected the recipient address. Check the employee email.',
   };
-  return { code, message: messages[code] || 'The backend could not send the invitation. Check SMTP host, port, network access and provider status, then resend.' };
+  return { code, message: messages[code] || 'The backend could not submit the invitation to Gmail SMTP. Check the SMTP configuration and Gmail status, then resend.' };
 }
 
 function escapeHtml(value) {
@@ -35,10 +35,13 @@ export function createEmailService(config = {}) {
   const pass = hasExplicitConfig
     ? config.smtpPassword
     : (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.GMAIL_APP_PASSWORD || process.env.google_password);
+  const from = config.smtpFrom || process.env.EMAIL_FROM || process.env.SMTP_FROM || user;
+  const configured = Boolean(user && pass);
 
-  if (!user || !pass) {
+  if (!configured) {
     return {
       configured: false,
+      provider: 'none',
       async sendPasswordResetEmail() {
         const error = new Error('Email delivery is not configured');
         error.code = 'EMAIL_NOT_CONFIGURED';
@@ -68,8 +71,18 @@ export function createEmailService(config = {}) {
     dnsTimeout: 10000,
   });
 
+  const sendMessage = async ({ to, subject, text, html, requireRecipientAcceptance = false }) => {
+    const delivery = await transporter.sendMail({ from, to, subject, text, html });
+    if (requireRecipientAcceptance && !delivery?.accepted?.some((recipient) => String(recipient.address || recipient).toLowerCase() === String(to).toLowerCase())) {
+      const error = new Error('Email provider did not accept the recipient');
+      error.code = 'EMAIL_RECIPIENT_REJECTED';
+      throw error;
+    }
+  };
+
   return {
     configured: true,
+    provider: 'gmail-smtp',
     
 async sendPasswordResetEmail({
   to,
@@ -349,49 +362,28 @@ DigitalPulse Security Team
   `.trim();
 
   // 6. Send email
-  const delivery = await transporter.sendMail({
-    from: config.smtpFrom || process.env.SMTP_FROM || user,
+  await sendMessage({
     to,
     subject,
     text,
     html,
   });
 
-  // 7. Verify SMTP recipient acceptance
-  if (
-    delivery?.accepted &&
-    !delivery.accepted.some(
-      (recipient) =>
-        String(recipient).toLowerCase() === String(to).toLowerCase()
-    )
-  ) {
-    const error = new Error(
-      'SMTP did not accept the password reset recipient'
-    );
-    error.code = 'EMAIL_RECIPIENT_REJECTED';
-    throw error;
-  }
 },
     async sendInvitationEmail({ to, token, invitationUrl }) {
       const url = new URL(invitationUrl);
       url.hash = new URLSearchParams({ token }).toString();
       const link = url.toString();
-      const delivery = await transporter.sendMail({
-        from: config.smtpFrom || process.env.SMTP_FROM || user,
+      await sendMessage({
         to,
+        requireRecipientAcceptance: true,
         subject: 'You are invited to DigitalPulse',
         text: `You have been invited to DigitalPulse. Accept your invitation here:\n\n${link}`,
         html: `<p>You have been invited to DigitalPulse.</p><p><a href="${escapeHtml(link)}">Accept invitation</a></p><p>This invitation expires in seven days.</p>`,
       });
-      if (!delivery?.accepted?.some((recipient) => String(recipient.address || recipient).toLowerCase() === to.toLowerCase())) {
-        const error = new Error('SMTP did not accept the invitation recipient');
-        error.code = 'EMAIL_RECIPIENT_REJECTED';
-        throw error;
-      }
     },
     async sendDeviceSetupReminder({ to, setupUrl }) {
-      await transporter.sendMail({
-        from: config.smtpFrom || process.env.SMTP_FROM || user,
+      await sendMessage({
         to,
         subject: 'Complete your DigitalPulse device setup',
         text: `Your DigitalPulse account is ready. Sign in and follow the device setup steps here:\n\n${setupUrl}\n\nDigitalPulse collects foreground application names, activity and idle intervals, and foreground website domains when the agent or browser extension is running. It does not collect keystrokes, page contents, passwords, messages, or clipboard data.`,

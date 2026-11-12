@@ -51,6 +51,19 @@ test('maps documented SMTP_PASS and EMAIL_FROM settings to the mail service conf
   assert.equal(cfg.smtpFrom, 'DigitalPulse <mailer@example.test>');
 });
 
+test('defaults to Gmail SMTP and maps the documented Gmail settings', () => {
+  const cfg = loadConfig({ ...base, SMTP_USER: 'mailer@gmail.com', SMTP_PASS: 'test-app-password', EMAIL_FROM: 'mailer@gmail.com' });
+  assert.equal(cfg.smtpHost, 'smtp.gmail.com');
+  assert.equal(cfg.smtpPort, '465');
+  assert.equal(cfg.smtpSecure, 'true');
+  assert.equal(cfg.smtpUser, 'mailer@gmail.com');
+  assert.equal(cfg.smtpPassword, 'test-app-password');
+  assert.equal(cfg.smtpFrom, 'mailer@gmail.com');
+  assert.throws(() => loadConfig({ ...base, SMTP_HOST: 'smtp.example.test' }), /Gmail SMTP/);
+  assert.throws(() => loadConfig({ ...base, SMTP_PORT: '587' }), /Gmail SMTP/);
+  assert.throws(() => loadConfig({ ...base, SMTP_SECURE: 'false' }), /Gmail SMTP/);
+});
+
 test('requires secure, explicit HTTPS origins and reset URLs in production', () => {
   const production = {
     NODE_ENV: 'production',

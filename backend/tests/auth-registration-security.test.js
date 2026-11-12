@@ -429,6 +429,7 @@ describe('registration privilege-escalation protection', () => {
     const token = new URLSearchParams(new URL(result.invitationUrl).hash.slice(1)).get('token');
     const saved = prisma.__state.invitations[0];
     assert.equal(result.emailSent, false);
+    assert.equal(result.deliveryStatus, 'failed');
     assert.equal(result.invitationUrl.includes('?token='), false);
     assert.equal(saved.token, null);
     assert.equal(saved.tokenHash.length, 64);
@@ -453,6 +454,7 @@ describe('registration privilege-escalation protection', () => {
     };
     const result = await app.authService.createInvitation({ organizationId: 'trusted-org', email: 'delivered@example.com' });
     assert.equal(result.emailSent, true);
+    assert.equal(result.deliveryStatus, 'accepted_by_smtp');
     assert.equal(result.invitationUrl, deliveredUrl);
     assert.equal(prisma.__state.invitations[0].token, null);
     assert.equal(new URLSearchParams(new URL(result.invitationUrl).hash.slice(1)).has('token'), true);

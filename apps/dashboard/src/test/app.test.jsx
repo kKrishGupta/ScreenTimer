@@ -388,7 +388,7 @@ describe('dashboard shell and navigation', () => {
 
     expect(await screen.findByText('Invitation created successfully')).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Resend Invitation' })).toBeInTheDocument();
-    expect(screen.getByText('The invitation is saved and remains active, but email delivery is unavailable. Copy and send this link to the employee.')).toBeInTheDocument();
+    expect(screen.getByText('The invitation is saved and remains active, but Gmail SMTP did not accept it. Copy and send this link to the employee.')).toBeInTheDocument();
     expect(screen.getByText(invitationUrl)).toBeInTheDocument();
     expect(screen.getByText('Pending Acceptance', { exact: true })).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: 'Copy Invitation Link' })[0]);
@@ -397,6 +397,39 @@ describe('dashboard shell and navigation', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Copy Invitation Link' })[1]);
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(2));
     expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringMatching(/\/invitations$/), expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('requires confirmation before rotating an uncached pending invitation link', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    let resendCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options = {}) => {
+      const requestUrl = typeof url === 'string' ? url : url?.url ?? '';
+      if (requestUrl.includes('/auth/me')) return new Response(JSON.stringify({ user: { id: 'admin-001', email: 'admin@example.com', role: 'ADMIN' } }), { status: 200 });
+      if (requestUrl.endsWith('/invitations/invite-existing/resend') && options.method === 'POST') {
+        resendCalls += 1;
+        return new Response(JSON.stringify({
+          success: true,
+          invitation: { id: 'invite-existing', displayName: 'Pending Employee', email: 'pending@example.com', role: 'EMPLOYEE' },
+          invitationUrl: 'https://app.example.test/accept-invitation#token=fresh-test-token',
+          expiresAt: '2026-11-19T12:00:00.000Z',
+          emailSent: false,
+        }), { status: 200 });
+      }
+      if (requestUrl.endsWith('/invitations')) return new Response(JSON.stringify({ invitations: [{ id: 'invite-existing', displayName: 'Pending Employee', email: 'pending@example.com', status: 'pending', expiresAt: '2026-11-19T12:00:00.000Z' }], count: 1 }), { status: 200 });
+      return defaultRouterFetch(url, options);
+    });
+
+    renderAt('/employees');
+    const generate = await screen.findByRole('button', { name: 'Generate Fresh Link' });
+    expect(screen.queryByRole('button', { name: 'Copy Invitation Link' })).not.toBeInTheDocument();
+    fireEvent.click(generate);
+    expect(confirm).toHaveBeenCalledWith('Generate a fresh invitation link? The previous link will stop working.');
+    expect(resendCalls).toBe(0);
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(generate);
+    expect(await screen.findByText('https://app.example.test/accept-invitation#token=fresh-test-token')).toBeInTheDocument();
+    expect(resendCalls).toBe(1);
   });
 
   it('validates a fragment invitation token and redirects an accepted employee to device setup', async () => {

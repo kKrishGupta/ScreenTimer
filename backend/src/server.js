@@ -14,7 +14,9 @@ async function main() {
   }
   const app = await buildApp({ config, prisma });
   if (!app.authService.emailService.configured) {
-    app.log.warn('Password-reset email is unavailable. Configure SMTP_USER and SMTP_PASSWORD (or supported aliases) in the runtime environment.');
+    app.log.warn('Gmail SMTP email is unavailable. Configure SMTP_USER, SMTP_PASS and EMAIL_FROM in the runtime environment.');
+  } else {
+    app.log.info({ provider: app.authService.emailService.provider }, 'Transactional email provider configured');
   }
 
   let shuttingDown = false;

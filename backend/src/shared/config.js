@@ -100,6 +100,12 @@ export function loadConfig(env = process.env) {
   if (!Number.isInteger(passwordResetTtlMinutes) || passwordResetTtlMinutes < 1 || passwordResetTtlMinutes > 60) {
     throw new ConfigError('PASSWORD_RESET_TTL_MINUTES must be an integer between 1 and 60');
   }
+  const smtpHost = env.SMTP_HOST ?? 'smtp.gmail.com';
+  const smtpPort = env.SMTP_PORT ?? '465';
+  const smtpSecure = env.SMTP_SECURE ?? 'true';
+  if (smtpHost.toLowerCase() !== 'smtp.gmail.com' || smtpPort !== '465' || smtpSecure.toLowerCase() !== 'true') {
+    throw new ConfigError('Gmail SMTP requires SMTP_HOST=smtp.gmail.com, SMTP_PORT=465 and SMTP_SECURE=true');
+  }
 
   if (nodeEnv === 'production') {
     if (!publicAppUrl) throw new ConfigError('PUBLIC_APP_URL is required in production');
@@ -142,9 +148,9 @@ export function loadConfig(env = process.env) {
       ? nodeEnv !== 'production' : env.ALLOW_PUBLIC_REGISTRATION === 'true',
     secureSessionCookies: nodeEnv === 'production',
     trustProxy: trustedProxies.length ? trustedProxies : false,
-    smtpHost: env.SMTP_HOST ?? 'smtp.gmail.com',
-    smtpPort: env.SMTP_PORT ?? '465',
-    smtpSecure: env.SMTP_SECURE ?? 'true',
+    smtpHost,
+    smtpPort,
+    smtpSecure,
     smtpUser: env.SMTP_USER ?? env.GMAIL_USER ?? env.google_email,
     smtpPassword: env.SMTP_PASS ?? env.SMTP_PASSWORD ?? env.GMAIL_APP_PASSWORD ?? env.google_password,
     smtpFrom: env.EMAIL_FROM ?? env.SMTP_FROM ?? env.SMTP_USER ?? env.GMAIL_USER ?? env.google_email,
