@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$ExtensionsOnly)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -7,7 +7,9 @@ Add-Type -AssemblyName System.IO.Compression
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $downloads = Join-Path $repoRoot 'apps\dashboard\public\downloads'
 $names = @('digitalpulse-windows-agent','digitalpulse-chrome-extension','digitalpulse-edge-extension')
+if ($ExtensionsOnly) { $names = @('digitalpulse-chrome-extension','digitalpulse-edge-extension') }
 $runtimeHashes = @{}
+$sourceManifest = Get-Content -LiteralPath (Join-Path $repoRoot 'apps\browser-extension\manifest.json') -Raw | ConvertFrom-Json
 foreach ($name in $names) {
     $path = Join-Path $downloads "$name.zip"
     $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -18,24 +20,37 @@ foreach ($name in $names) {
         $files = @($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
         if ($name -eq 'digitalpulse-windows-agent' -and $files.Count -ne 2) { throw 'Windows ZIP contains unexpected files.' }
         foreach ($entry in $files) {
-            if ($entry.FullName.Contains('\') -or $entry.FullName.Contains('..') -or -not $entry.FullName.StartsWith("$name/")) { throw 'Unsafe archive entry.' }
+            $expectedPrefix = if ($name -eq 'digitalpulse-windows-agent') { "$name/" } else { '' }
+            if ($entry.FullName.Contains('\') -or $entry.FullName.Contains('..') -or ($expectedPrefix -and -not $entry.FullName.StartsWith($expectedPrefix))) { throw 'Unsafe archive entry.' }
             if ($entry.FullName -match '(^|/)(\.env[^/]*|node_modules|tests|target|\.git)(/|$)|\.(db|sqlite|log|pdb|map)$') { throw 'Forbidden package entry.' }
             $stream = $entry.Open()
             try {
                 if ($entry.FullName.EndsWith('README.txt')) {
                     $reader = [IO.StreamReader]::new($stream)
                     $text = $reader.ReadToEnd()
-                    if ($text -notmatch 'LOCAL DEVELOPMENT / INTERNAL TEST BUILD') { throw 'Local-build notice is missing.' }
+                    if ($text -notmatch 'INTERNAL TEST BUILD') { throw 'Internal-build notice is missing.' }
                     if ($name -like '*chrome*' -and $text -notmatch 'chrome://extensions') { throw 'Chrome instructions are missing.' }
                     if ($name -like '*edge*' -and $text -notmatch 'edge://extensions') { throw 'Edge instructions are missing.' }
                 } else {
                     $sha = [Security.Cryptography.SHA256]::Create()
                     try { $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
-                    $relative = $entry.FullName.Substring($name.Length + 1)
+                    $relative = if ($name -eq 'digitalpulse-windows-agent') { $entry.FullName.Substring($name.Length + 1) } else { $entry.FullName }
                     if ($name -eq 'digitalpulse-windows-agent') {
                         if ($relative -ne 'dp-user-agent.exe') { throw 'Unexpected Windows runtime file.' }
                         if ($hash -ne (Get-FileHash -LiteralPath (Join-Path $repoRoot 'desktop-agent\target\release\dp-user-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Packaged executable differs from release build.' }
                     } else {
+                        if ($relative -eq 'manifest.json') {
+                            $manifestReader = [IO.StreamReader]::new($entry.Open())
+                            try { $packedManifest = $manifestReader.ReadToEnd() | ConvertFrom-Json } finally { $manifestReader.Dispose() }
+                            if ($packedManifest.version -ne $sourceManifest.version) { throw "Stale extension package: $name has $($packedManifest.version), source has $($sourceManifest.version)." }
+                            continue
+                        }
+                        if ($relative -eq 'shared/deployment.js') {
+                            $deploymentReader = [IO.StreamReader]::new($entry.Open())
+                            try { $deployment = $deploymentReader.ReadToEnd() } finally { $deploymentReader.Dispose() }
+                            if ($deployment -notmatch 'DEPLOYMENT = "production"' -or $deployment -notmatch 'BACKEND_URL = "https://') { throw "Invalid production deployment configuration: $name" }
+                            continue
+                        }
                         if ($relative -eq 'background/service-worker.js') {
                             $sourceText = [IO.StreamReader]::new($entry.Open())
                             try { $workerSource = $sourceText.ReadToEnd() } finally { $sourceText.Dispose() }
@@ -52,6 +67,8 @@ foreach ($name in $names) {
         Write-Output "Verified $name.zip: $($files.Count) files, $((Get-Item -LiteralPath $path).Length) bytes, SHA256 $actual"
     } finally { $archive.Dispose() }
 }
+
+if ($ExtensionsOnly) { return }
 
 $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
 $stageName = 'digitalpulse-package-smoke-' + [guid]::NewGuid().ToString('N')

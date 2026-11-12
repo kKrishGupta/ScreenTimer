@@ -103,7 +103,7 @@ try {
         $writer = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
         try {
             foreach ($file in Get-ChildItem -LiteralPath $parent -Recurse -File) {
-                $entryName = $file.FullName.Substring($parent.Length + 1).Replace('\','/')
+                $entryName = if ($name -eq 'digitalpulse-windows-agent') { $file.FullName.Substring($parent.Length + 1).Replace('\','/') } else { $file.FullName.Substring($folder.Length + 1).Replace('\','/') }
                 [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($writer, $file.FullName, $entryName, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
             }
         } finally { $writer.Dispose() }
@@ -112,18 +112,19 @@ try {
             $files = @($zip.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
             $required = if ($name -eq 'digitalpulse-windows-agent') { @('dp-user-agent.exe','README.txt') } else { @('manifest.json','README.txt',$manifest.background.service_worker,'background/screenshot-capture.js','background/sync-client.js',$manifest.action.default_popup,'icons/icon-16.png','icons/icon-48.png','icons/icon-128.png','shared/constants.js','shared/backend-settings.js') }
             foreach ($relative in $required) {
-                $entry = $zip.GetEntry("$name/$relative")
+                $entry = $zip.GetEntry($(if ($name -eq 'digitalpulse-windows-agent') { "$name/$relative" } else { $relative }))
                 if ($null -eq $entry -or $entry.Length -eq 0) { throw "Archive $name is missing $relative" }
             }
             if ($name -ne 'digitalpulse-windows-agent') {
-                $manifestReader = [IO.StreamReader]::new($zip.GetEntry("$name/manifest.json").Open())
+                $manifestReader = [IO.StreamReader]::new($zip.GetEntry('manifest.json').Open())
                 try { $packedManifest = $manifestReader.ReadToEnd() | ConvertFrom-Json } finally { $manifestReader.Dispose() }
                 if ($packedManifest.manifest_version -ne 3 -or $packedManifest.background.service_worker -ne 'background/service-worker.js' -or $packedManifest.background.type -ne 'module') { throw 'Incorrect packaged worker manifest.' }
+                if ($packedManifest.version -ne $manifest.version) { throw "Packaged extension version $($packedManifest.version) differs from source $($manifest.version)." }
                 if (@($packedManifest.optional_host_permissions).Count -ne 1 -or $packedManifest.optional_host_permissions[0] -ne '<all_urls>' -or $packedManifest.permissions -contains 'activeTab' -or $packedManifest.host_permissions -contains '<all_urls>') { throw 'Incorrect screenshot permission model.' }
-                $deploymentReader = [IO.StreamReader]::new($zip.GetEntry("$name/shared/deployment.js").Open())
+                $deploymentReader = [IO.StreamReader]::new($zip.GetEntry('shared/deployment.js').Open())
                 try { $deploymentSource = $deploymentReader.ReadToEnd() } finally { $deploymentReader.Dispose() }
                 if ($Deployment -eq 'Production' -and ($deploymentSource -notmatch 'DEPLOYMENT = "production"' -or $packedManifest.host_permissions[0] -notmatch '^https://')) { throw 'Incorrect production backend configuration.' }
-                $workerEntry = $zip.GetEntry("$name/$($manifest.background.service_worker)")
+                $workerEntry = $zip.GetEntry($manifest.background.service_worker)
                 $workerReader = [IO.StreamReader]::new($workerEntry.Open())
                 try { $workerSource = $workerReader.ReadToEnd() } finally { $workerReader.Dispose() }
                 if ($workerSource -notmatch "screenshot-capture\.js" -or $workerSource -notmatch "captureAuthorizedActiveTab") { throw "Archive $name service worker does not initialize screenshot capture." }
@@ -131,7 +132,7 @@ try {
             if ($name -eq 'digitalpulse-windows-agent' -and $files.Count -ne 2) { throw 'Windows ZIP must contain only the executable and README.' }
             foreach ($entry in $files) {
                 if ($entry.FullName -match '(^|/)(\.env[^/]*|node_modules|tests|target|\.git)(/|$)' -or $entry.FullName -match '\.(db|sqlite|pdb|log|map)$') { throw "Forbidden package file: $($entry.FullName)" }
-                if ($name -ne 'digitalpulse-windows-agent' -and $entry.FullName -notmatch '^[^/]+/(manifest\.json|README\.txt|(background|popup|shared|icons)/[^.][^/]*\.(js|html|css|png))$') { throw "Unexpected extension package file: $($entry.FullName)" }
+                if ($name -ne 'digitalpulse-windows-agent' -and $entry.FullName -notmatch '^(manifest\.json|README\.txt|(background|popup|shared|icons)/[^.][^/]*\.(js|html|css|png))$') { throw "Unexpected extension package file: $($entry.FullName)" }
                 $stream = $entry.Open()
                 try { $buffer = New-Object byte[] 65536; while ($stream.Read($buffer,0,$buffer.Length) -gt 0) {} } finally { $stream.Dispose() }
             }
