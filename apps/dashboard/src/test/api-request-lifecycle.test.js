@@ -82,4 +82,17 @@ describe('API request lifecycle', () => {
     await expect(getJson('/health', { timeoutMs: 1_000 })).resolves.toEqual({ status: 'ok' });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it('allows an invitation resend to survive the normal eight-second cold-start window without retrying', async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn(() => new Promise((resolve) => {
+      setTimeout(() => resolve(response({ success: true, invitationUrl: 'https://app.example.test/accept-invitation#token=test' })), 9_000);
+    }));
+    vi.stubGlobal('fetch', fetch);
+
+    const pending = api.resendInvitation('invite-1');
+    await vi.advanceTimersByTimeAsync(9_000);
+    await expect(pending).resolves.toMatchObject({ success: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });

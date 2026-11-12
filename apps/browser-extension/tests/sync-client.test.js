@@ -224,7 +224,7 @@ test('records archive state and resumes only after a healthy heartbeat confirms 
   assert.equal(storage.dp_enrollment_status, 'enrolled');
 });
 
-test('retains malformed and conflicting queued rows during sync', async () => {
+test('quarantines malformed queued rows while independently valid events sync', async () => {
   const queue = [...makeQueue(1), { eventId: 'bad', deviceId: DEVICE_ID, type: 'web_session' }];
   let requestIds = [];
   const { client, storage } = setup({ queue, fetchImpl: async (_url, options) => {
@@ -235,8 +235,59 @@ test('retains malformed and conflicting queued rows during sync', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.audit.malformed, 1);
   assert.equal(requestIds.length, 1);
-  assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY].length, 1);
-  assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY][0].eventId, 'bad');
+  assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY].length, 0);
+  assert.equal(storage[CONFIG.QUARANTINE_STORAGE_KEY].length, 1);
+  assert.equal(storage[CONFIG.QUARANTINE_STORAGE_KEY][0].reason, 'MALFORMED_EVENT');
+});
+
+test('repairs an oversized legacy duration only when timestamps prove the interval', async () => {
+  const queue = makeQueue(2);
+  const stableId = queue[0].eventId;
+  queue[0].durationSeconds = 90001;
+  let submitted;
+  const { client, storage } = setup({ queue, fetchImpl: async (_url, options) => {
+    submitted = JSON.parse(options.body).events;
+    return new Response(JSON.stringify({ accepted: 2, deduplicated: 0, acceptedEventIds: submitted.map((event) => event.eventId), deduplicatedEventIds: [], rejectedEventIds: [] }), { status: 200 });
+  } });
+  const result = await client.syncQueue();
+  assert.equal(result.ok, true);
+  assert.equal(submitted[0].eventId, stableId);
+  assert.equal(submitted[0].durationSeconds, 10);
+  assert.equal(storage[CONFIG.QUEUE_REPAIR_LOG_STORAGE_KEY][0].eventId, stableId);
+  assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY].length, 0);
+});
+
+test('quarantines an unverifiable over-24-hour event and syncs its valid sibling', async () => {
+  const queue = makeQueue(2);
+  queue[0].endedAt = '2026-11-04T10:00:01.000Z';
+  queue[0].durationSeconds = 86401;
+  let submittedIds = [];
+  const { client, storage } = setup({ queue, fetchImpl: async (_url, options) => {
+    submittedIds = JSON.parse(options.body).events.map((event) => event.eventId);
+    return new Response(JSON.stringify({ accepted: 1, deduplicated: 0, acceptedEventIds: submittedIds, deduplicatedEventIds: [], rejectedEventIds: [] }), { status: 200 });
+  } });
+  const result = await client.syncQueue();
+  assert.equal(result.ok, true);
+  assert.deepEqual(submittedIds, [queue[1].eventId]);
+  assert.equal(storage[CONFIG.QUARANTINE_STORAGE_KEY][0].reason, 'TIMESTAMP_INTERVAL_EXCEEDS_24_HOURS');
+  assert.equal(storage[CONFIG.QUARANTINE_STORAGE_KEY][0].event.eventId, queue[0].eventId);
+});
+
+test('a timestamp-based repair preserves its stable ID across a failed retry', async () => {
+  const queue = makeQueue(1);
+  queue[0].durationSeconds = 90000;
+  let calls = 0;
+  const { client, storage } = setup({ queue, fetchImpl: async (_url, options) => {
+    calls += 1;
+    if (calls === 1) throw new TypeError('temporary network failure');
+    const events = JSON.parse(options.body).events;
+    return new Response(JSON.stringify({ accepted: 1, deduplicated: 0, acceptedEventIds: [events[0].eventId], deduplicatedEventIds: [], rejectedEventIds: [] }), { status: 200 });
+  } });
+  assert.equal((await client.syncQueue()).ok, false);
+  assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY][0].eventId, queue[0].eventId);
+  assert.equal(storage[CONFIG.SYNC_QUEUE_STORAGE_KEY][0].durationSeconds, 10);
+  assert.equal((await client.syncQueue()).ok, true);
+  assert.equal(storage[CONFIG.QUEUE_REPAIR_LOG_STORAGE_KEY].length, 1);
 });
 
 test('backend-rejected events remain queued and are excluded from automatic retries', async () => {

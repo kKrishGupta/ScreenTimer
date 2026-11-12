@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const queueCountEl = document.getElementById('queue-count');
   const queueAuditEl = document.getElementById('queue-audit');
   const retrySkippedBtn = document.getElementById('retry-skipped');
+  const exportQuarantineBtn = document.getElementById('export-quarantine');
   const activeDomainEl = document.getElementById('active-domain');
   const syncBtn = document.getElementById('sync-btn');
   const enrollBtn = document.getElementById('enroll-btn');
@@ -133,8 +134,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (audit.duplicates) flags.push(`${audit.duplicates} duplicate`);
     if (audit.conflicting) flags.push(`${audit.conflicting} conflicting IDs`);
     if (audit.rejected) flags.push(`${audit.rejected} skipped by authorization`);
+    if (audit.repaired) flags.push(`${audit.repaired} timestamp-verified repair`);
+    const quarantineCount = (audit.quarantined || 0) + (audit.pendingQuarantine || 0);
+    if (quarantineCount) flags.push(`${quarantineCount} quarantined`);
     queueAuditEl.textContent = flags.length ? flags.join(' · ') : `${audit.eligible ?? queue.length} ready; no local issues found`;
     retrySkippedBtn.hidden = !audit.rejected;
+    exportQuarantineBtn.hidden = !quarantineCount;
   };
   renderAudit((await chrome.runtime.sendMessage({ action: 'audit_queue' }).catch(() => null)) || {});
   let backendUrl;
@@ -196,6 +201,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     queueCountEl.textContent = `${(latest[CONFIG.SYNC_QUEUE_STORAGE_KEY] || []).length} events`;
     renderConnection(latest);
     retrySkippedBtn.disabled = false;
+  });
+
+  exportQuarantineBtn.addEventListener('click', async () => {
+    const result = await chrome.runtime.sendMessage({ action: 'export_activity_quarantine' }).catch(() => ({ records: [] }));
+    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), records: result?.records || [] }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `digitalpulse-activity-quarantine-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
   });
 });
 

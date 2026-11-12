@@ -19,14 +19,34 @@ export function errorHandler(error, request, reply) {
     });
   }
   if (error.validation) {
+    const details = error.validation.map((v) => ({
+      path: v.instancePath || v.params?.missingProperty || '',
+      message: v.message,
+    }));
+    const eventErrorsByIndex = new Map();
+    if (request.url.split('?')[0] === '/api/v1/activity/events/batch') {
+      for (const issue of details) {
+        const match = issue.path.match(/^\/events\/(\d+)(?:\/.*)?$/);
+        if (!match) continue;
+        const index = Number(match[1]);
+        if (!eventErrorsByIndex.has(index)) {
+          const eventId = request.body?.events?.[index]?.eventId;
+          const safeEventId = typeof eventId === 'string' && /^[0-9a-f-]{36}$/i.test(eventId) ? eventId : null;
+          eventErrorsByIndex.set(index, {
+            index,
+            ...(safeEventId ? { eventId: safeEventId } : {}),
+            issues: [],
+          });
+        }
+        eventErrorsByIndex.get(index).issues.push(issue);
+      }
+    }
     return reply.status(400).send({
       error: {
         code: 'VALIDATION_ERROR',
         message: 'Request validation failed',
-        details: error.validation.map((v) => ({
-          path: v.instancePath || v.params?.missingProperty || '',
-          message: v.message,
-        })),
+        details,
+        ...(eventErrorsByIndex.size ? { eventErrors: [...eventErrorsByIndex.values()] } : {}),
         requestId: request.id,
       },
     });

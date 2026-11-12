@@ -10,14 +10,34 @@ export class ActivityManager {
    * @param {'chrome' | 'edge'} options.browser
    * @param {(event: object) => Promise<void>} options.onSessionCompleted
    */
-  constructor({ deviceId, browser, onSessionCompleted, initialSession = null, onSessionChanged = null }) {
+  constructor({ deviceId, browser, onSessionCompleted, initialSession = null, onSessionChanged = null, onSessionAnomaly = null }) {
     this.deviceId = deviceId;
     this.browser = browser;
     this.onSessionCompleted = onSessionCompleted;
     this.activeSession = this._validSession(initialSession) ? { ...initialSession } : null;
     this.onSessionChanged = onSessionChanged;
+    this.onSessionAnomaly = onSessionAnomaly;
     this.monitoringAllowed = false;
     this.allowedUntil = null;
+  }
+
+  async _observedInterval(domain, startedAt, endedAt) {
+    const elapsedMs = endedAt - startedAt;
+    const maxMs = CONFIG.MAX_OBSERVED_INTERVAL_SECS * 1000;
+    if (!Number.isFinite(elapsedMs) || elapsedMs <= 0 || elapsedMs > maxMs) {
+      if (this.onSessionAnomaly) {
+        await this.onSessionAnomaly({
+          reason: elapsedMs <= 0 ? 'NON_POSITIVE_SESSION_INTERVAL' : 'UNOBSERVED_SESSION_GAP',
+          domain,
+          startedAt: Number.isFinite(startedAt) ? new Date(startedAt).toISOString() : null,
+          endedAt: Number.isFinite(endedAt) ? new Date(endedAt).toISOString() : null,
+          observedLimitSeconds: CONFIG.MAX_OBSERVED_INTERVAL_SECS,
+        });
+      }
+      return null;
+    }
+    const durationSeconds = Math.round(elapsedMs) / 1000;
+    return durationSeconds >= 1 ? durationSeconds : null;
   }
 
   _validSession(session) {
@@ -136,11 +156,10 @@ export class ActivityManager {
     }
     if (!this.activeSession) return;
     const { domain, startedAt } = this.activeSession;
-    const durationSeconds = Math.max(0, Math.round((nowMs - startedAt) / 1000));
-    if (durationSeconds < 1) return;
-
     this.activeSession.startedAt = nowMs;
     this._notifySessionChanged();
+    const durationSeconds = await this._observedInterval(domain, startedAt, nowMs);
+    if (durationSeconds === null) return;
     const eventId = crypto.randomUUID();
     const event = {
       schemaVersion: CONFIG.SCHEMA_VERSION,
@@ -172,9 +191,9 @@ export class ActivityManager {
     this.activeSession = null;
     this._notifySessionChanged();
 
-    const durationSeconds = Math.max(0, Math.round((nowMs - startedAt) / 1000));
-    // Filter out momentary clicks / 0-second transients
-    if (durationSeconds < 1) return;
+    const durationSeconds = await this._observedInterval(domain, startedAt, nowMs);
+    // Filter out momentary clicks and unobserved worker/sleep gaps.
+    if (durationSeconds === null) return;
 
     const eventId = crypto.randomUUID();
     const event = {

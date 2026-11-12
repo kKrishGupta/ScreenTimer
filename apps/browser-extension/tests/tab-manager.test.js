@@ -210,3 +210,38 @@ test('ActivityManager persists an open session and restores the selected domain 
   await restarted.setMonitoringState({ allowed: true, allowedUntil: new Date(Date.now() + 600000).toISOString() });
   assert.equal(restarted.activeSession.domain, 'example.com');
 });
+
+test('ActivityManager does not fabricate activity across a sleep/wake or stale-session gap', async () => {
+  const events = [];
+  const anomalies = [];
+  const start = 1700000000000;
+  const manager = new ActivityManager({
+    deviceId: '11111111-2222-3333-4444-555555555555',
+    browser: 'chrome',
+    initialSession: { domain: 'example.com', startedAt: start },
+    onSessionCompleted: async (event) => events.push(event),
+    onSessionAnomaly: async (anomaly) => anomalies.push(anomaly),
+  });
+  await manager.setMonitoringState({ allowed: true, allowedUntil: new Date(start + 172800000).toISOString() }, start);
+  await manager.checkpoint(start + 86400000 + 1000);
+  assert.equal(events.length, 0);
+  assert.equal(anomalies[0].reason, 'UNOBSERVED_SESSION_GAP');
+  assert.equal(manager.activeSession.startedAt, start + 86400000 + 1000, 'the next observed interval starts at wake time');
+  await manager.checkpoint(start + 86400000 + 11000);
+  assert.equal(events[0].durationSeconds, 10);
+});
+
+test('ActivityManager records a real short interval that crosses midnight', async () => {
+  const events = [];
+  const start = Date.parse('2026-11-11T23:59:50.000Z');
+  const manager = new ActivityManager({
+    deviceId: '11111111-2222-3333-4444-555555555555', browser: 'chrome',
+    onSessionCompleted: async (event) => events.push(event),
+  });
+  await manager.setMonitoringState({ allowed: true, allowedUntil: new Date(start + 600000).toISOString() }, start);
+  await manager.switchDomain('example.com', start);
+  await manager.checkpoint(start + 20000);
+  assert.equal(events[0].startedAt, '2026-11-11T23:59:50.000Z');
+  assert.equal(events[0].endedAt, '2026-11-12T00:00:10.000Z');
+  assert.equal(events[0].durationSeconds, 20);
+});

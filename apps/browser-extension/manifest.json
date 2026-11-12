@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DigitalPulse Activity Tracker",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Privacy-conscious local website domain activity tracking for Chrome and Edge.",
   "permissions": [
     "tabs",

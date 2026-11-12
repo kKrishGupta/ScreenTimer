@@ -4,10 +4,16 @@ export const CONFIG = {
   DEFAULT_BACKEND_URL: BACKEND_URL,
   DEFAULT_SYNC_INTERVAL_SECS: 30,
   IDLE_THRESHOLD_SECS: 60,
+  // A longer gap means the worker/browser was suspended. That wall-clock gap
+  // is not an observed activity interval and must never be emitted as one.
+  MAX_OBSERVED_INTERVAL_SECS: 120,
+  MAX_EVENT_DURATION_SECS: 86400,
   ENROLLMENT_UI_ENABLED: true,
   SCHEMA_VERSION: 1,
   DEVICE_STORAGE_KEY: 'dp_device_id',
   SYNC_QUEUE_STORAGE_KEY: 'dp_sync_queue',
+  QUARANTINE_STORAGE_KEY: 'dp_activity_quarantine',
+  QUEUE_REPAIR_LOG_STORAGE_KEY: 'dp_activity_queue_repairs',
   ACTIVE_SESSION_STORAGE_KEY: 'dp_active_session',
   SETTINGS_STORAGE_KEY: 'dp_settings'
 };

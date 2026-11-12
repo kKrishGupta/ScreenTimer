@@ -225,6 +225,32 @@ test('POST /api/v1/activity/events/batch rejects schema-violating payload', asyn
   assert.equal(res.json().error.code, 'VALIDATION_ERROR');
 });
 
+test('activity batch validation identifies an invalid event without accepting the batch', async (t) => {
+  const mockPrisma = createMockPrisma();
+  const app = await buildApp({ config, prisma: mockPrisma, logger: false });
+  t.after(() => app.close());
+  const eventId = '6f1c1a52-6b1e-4f7e-9a39-2a8f0f6f2b11';
+  const deviceId = '0b7d3b0e-2a52-4d8c-8f3e-6a3f8f3d9c21';
+  const res = await app.inject({
+    method: 'POST',
+    url: '/api/v1/activity/events/batch',
+    payload: {
+      device: { id: deviceId, kind: 'browser_extension', name: 'Chrome Extension', platform: 'windows', browser: 'chrome' },
+      events: [{
+        schemaVersion: 1, eventId, deviceId, source: 'browser_extension', type: 'web_session',
+        startedAt: '2026-11-01T00:00:00.000Z', endedAt: '2026-11-02T00:00:01.000Z', durationSeconds: 86401,
+        web: { domain: 'example.com', browser: 'chrome' },
+      }],
+    },
+  });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error.code, 'VALIDATION_ERROR');
+  assert.equal(res.json().error.eventErrors[0].index, 0);
+  assert.equal(res.json().error.eventErrors[0].eventId, eventId);
+  assert.match(res.json().error.eventErrors[0].issues[0].path, /^\/events\/0\/durationSeconds$/);
+  assert.equal((await mockPrisma.activitySession.findMany()).length, 0);
+});
+
 test('GET /api/v1/activity/timeline, /apps, /websites, and /devices return structured data', async (t) => {
   const mockPrisma = createMockPrisma();
   mockPrisma.$transaction = async (fn) => fn(mockPrisma);

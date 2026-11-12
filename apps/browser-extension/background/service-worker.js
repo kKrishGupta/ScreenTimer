@@ -17,7 +17,7 @@ import { ensureSyncAlarm, singleFlight, serializeTasks, SYNC_ALARM_NAME } from '
 
 const isEdge = navigator.userAgent.includes('Edg/');
 const browserName = isEdge ? 'edge' : 'chrome';
-const { enrollBrowserDevice, sendHeartbeat, syncQueue, auditQueueState } = createSyncClient({ chromeApi: chrome, fetchImpl: fetch, config: CONFIG, browserName });
+const { enrollBrowserDevice, sendHeartbeat, syncQueue, auditQueueState, getActivityQuarantine } = createSyncClient({ chromeApi: chrome, fetchImpl: fetch, config: CONFIG, browserName });
 const { captureAuthorizedActiveTab, stop: stopScreenshotCapture, handleHeartbeatMonitoring } = createScreenshotCapture({ chromeApi: chrome, fetchImpl: fetch, config: CONFIG, browserName });
 const ENROLLMENT_DEFERRED_MESSAGE = 'Device enrollment is not configured yet. Please contact your administrator.';
 const MAX_QUEUE_EVENTS = 1000;
@@ -53,6 +53,13 @@ async function enqueueEvent(event) {
   return true;
 }
 
+async function quarantineSessionAnomaly(anomaly) {
+  const stored = await chrome.storage.local.get([CONFIG.QUARANTINE_STORAGE_KEY]);
+  const records = stored[CONFIG.QUARANTINE_STORAGE_KEY] || [];
+  records.push({ ...anomaly, quarantinedAt: new Date().toISOString(), source: 'activity_session_boundary' });
+  await chrome.storage.local.set({ [CONFIG.QUARANTINE_STORAGE_KEY]: records });
+}
+
 async function initializeWorker() {
   const deviceId = await deviceIdPromise;
   const stored = await chrome.storage.local.get([CONFIG.ACTIVE_SESSION_STORAGE_KEY]);
@@ -60,6 +67,7 @@ async function initializeWorker() {
     deviceId, browser: browserName, initialSession: stored[CONFIG.ACTIVE_SESSION_STORAGE_KEY],
     onSessionCompleted: enqueueEvent,
     onSessionChanged: (session) => chrome.storage.local.set({ [CONFIG.ACTIVE_SESSION_STORAGE_KEY]: session }),
+    onSessionAnomaly: quarantineSessionAnomaly,
   });
   applyMonitoringState = async (monitoring) => {
     // Heartbeat authorizes domain activity, not screenshots. Only the screenshot
@@ -188,6 +196,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.storage.local.get(['dp_monitoring_allowed', 'dp_monitoring_allowed_until', 'dp_monitoring_reason']).then((stored) => sendResponse({ allowed: stored.dp_monitoring_allowed === true && Date.now() < Date.parse(stored.dp_monitoring_allowed_until || ''), reason: stored.dp_monitoring_reason || null })); return true;
   }
   if (message.action === 'audit_queue') { auditQueueState().then(sendResponse).catch(() => sendResponse({ total: 0, malformed: 0, duplicates: 0 })); return true; }
+  if (message.action === 'export_activity_quarantine') { getActivityQuarantine().then(sendResponse).catch(() => sendResponse({ records: [] })); return true; }
   if (message.action === 'retry_skipped_events') { chrome.storage.local.set({ dp_rejected_event_ids: [] }).then(() => sendResponse({ success: true })); return true; }
   if (message.action === 'enroll_browser') {
     if (!CONFIG.ENROLLMENT_UI_ENABLED) { sendResponse({ success: false, deferred: true, error: ENROLLMENT_DEFERRED_MESSAGE }); return false; }
