@@ -186,7 +186,7 @@ export default async function activityRoutes(app) {
       }
       const check = await app.deviceService.validateDeviceCredentials(devInfo.id, secret);
       if (!check.valid) {
-        if (['DEVICE_REVOKED', 'DEVICE_ARCHIVED'].includes(check.code)) {
+        if (['DEVICE_REVOKED', 'DEVICE_ARCHIVED', 'DEVICE_DELETED'].includes(check.code)) {
           return reply.status(403).send({
             error: {
               code: check.code,

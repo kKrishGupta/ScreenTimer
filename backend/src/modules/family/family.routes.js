@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { Roles, normalizeRole } from '../auth/auth.service.js';
 
 // In-memory family members state for local Stage 1 operation
 const familyState = {
@@ -32,12 +33,28 @@ export default async function familyRoutes(fastify) {
   const { prisma } = fastify;
 
   // GET /api/v1/family/members
-  fastify.get('/family/members', async () => {
+  fastify.get('/family/members', async (req, reply) => {
+    const role = normalizeRole(req.user?.role);
+    const organizationId = role === Roles.SUPER_ADMIN
+      ? req.query?.organizationId
+      : req.user?.organizationId;
+    if (!organizationId) {
+      return reply.code(400).send({
+        error: {
+          code: 'ORGANIZATION_SCOPE_REQUIRED',
+          message: 'Select an organization before viewing members',
+        },
+      });
+    }
+
     // Attempt to enrich with device names from Prisma if available
     let devices = [];
     try {
       if (prisma?.device?.findMany) {
-        devices = await prisma.device.findMany({ select: { id: true, name: true, kind: true, platform: true, lastSeenAt: true } });
+        devices = await prisma.device.findMany({
+          where: { organizationId, deletedAt: null },
+          select: { id: true, name: true, kind: true, platform: true, lastSeenAt: true },
+        });
       }
     } catch {
       devices = [];

@@ -167,24 +167,18 @@ fn load_stored_credentials(storage: &mut Storage, device_id: &Uuid) -> Result<Op
 }
 
 fn run_enroll() -> Result<()> {
-    let token = if std::env::args().any(|arg| arg == "--secret-key-stdin" || arg == "--token-stdin") {
-        use std::io::BufRead;
-        let mut token = String::new();
-        std::io::stdin()
-            .lock()
-            .read_line(&mut token)
-            .context("failed to read employee secret key from stdin")?;
-        let token = token.trim().to_string();
-        if token.is_empty() {
-            bail!("Employee secret key cannot be empty");
-        }
-        token
-    } else {
-        parse_arg_value("--secret-key")
-            .or_else(|| parse_arg_value("--token"))
-            .or_else(|| parse_arg_value("-t"))
-            .context("Missing employee secret key; use --secret-key-stdin, --token-stdin, or --secret-key")?
-    };
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    require_enrollment_key_stdin(&args)?;
+    use std::io::BufRead;
+    let mut token = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut token)
+        .context("failed to read employee secret key from stdin")?;
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        bail!("Employee secret key cannot be empty");
+    }
 
     let backend_url = parse_arg_value("--server")
         .or_else(|| parse_arg_value("--backend-url"))
@@ -336,7 +330,7 @@ fn run_status() -> Result<()> {
         if credentials.is_some() {
             "ENROLLED"
         } else {
-            "NOT ENROLLED (run 'dp-user-agent enroll --token <token>')"
+            "NOT ENROLLED (pipe the key to 'dp-user-agent enroll --secret-key-stdin')"
         }
     );
     println!("Backend URL:     {}", backend_url);
@@ -1162,6 +1156,22 @@ fn parse_arg_value(flag: &str) -> Option<String> {
     None
 }
 
+fn require_enrollment_key_stdin(args: &[String]) -> Result<()> {
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--secret-key" | "--token" | "-t"))
+    {
+        bail!("Plaintext employee secret key arguments are not supported; use --secret-key-stdin or --token-stdin");
+    }
+    if !args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--secret-key-stdin" | "--token-stdin"))
+    {
+        bail!("Missing employee secret key; use --secret-key-stdin or --token-stdin");
+    }
+    Ok(())
+}
+
 fn init_logging() {
     let filter = EnvFilter::try_from_env("DP_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt()
@@ -1249,5 +1259,23 @@ mod audit_tests {
             .get_state("device_secret")
             .expect("read legacy secret")
             .is_none());
+    }
+
+    #[test]
+    fn enrollment_key_must_use_stdin() {
+        assert!(
+            require_enrollment_key_stdin(&["enroll".into(), "--secret-key-stdin".into()]).is_ok()
+        );
+        assert!(require_enrollment_key_stdin(&["enroll".into(), "--token-stdin".into()]).is_ok());
+        for flag in ["--secret-key", "--token", "-t"] {
+            let error = require_enrollment_key_stdin(&[
+                "enroll".into(),
+                flag.into(),
+                "must-not-appear-in-process-list".into(),
+            ])
+            .expect_err("plaintext credential arguments must be rejected");
+            assert!(error.to_string().contains("Plaintext"));
+        }
+        assert!(require_enrollment_key_stdin(&["enroll".into()]).is_err());
     }
 }

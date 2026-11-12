@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, getJson, setSuperAdminOrganizationScope } from '../lib/api.js';
+import { api, setSuperAdminOrganizationScope } from '../lib/api.js';
 
 function jsonResponse(body = {}) {
   return new Response(JSON.stringify(body), { status: 200 });

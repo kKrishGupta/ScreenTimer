@@ -46,13 +46,14 @@ function withSuperAdminOrganizationScope(path, method) {
     || (['PATCH', 'DELETE'].includes(method) && /^\/employees\/[^/]+$/.test(pathname));
   const isDepartmentDelete =
     method === 'DELETE' && /^\/departments\/[^/]+$/.test(pathname);
+  const isDeviceDelete = method === 'DELETE' && /^\/devices\/[^/]+$/.test(pathname);
   const isEmployeeDeviceAssignment =
     method === 'POST' && /^\/employees\/[^/]+\/devices$/.test(pathname);
   const isInvitationWrite =
     (method === 'DELETE' && /^\/invitations\/[^/]+$/.test(pathname))
     || (method === 'POST' && /^\/invitations\/[^/]+\/resend$/.test(pathname));
 
-  if (!isScopedGet && !isScreenWrite && !isEmployeeWrite && !isDepartmentDelete && !isEmployeeDeviceAssignment && !isInvitationWrite) return path;
+  if (!isScopedGet && !isScreenWrite && !isEmployeeWrite && !isDepartmentDelete && !isDeviceDelete && !isEmployeeDeviceAssignment && !isInvitationWrite) return path;
 
   const [, query = ''] = path.split('?');
   if (isScopedGet && !SCOPED_GET_PREFIXES.some((prefix) =>
@@ -243,7 +244,8 @@ export const api = {
   revokeDevice: (deviceId, reason, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/revoke`, { reason }, opts),
   archiveDevice: (deviceId, reason, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/archive`, { reason }, opts),
   restoreDevice: (deviceId, opts = {}) => postJson(`/devices/${encodeURIComponent(deviceId)}/restore`, {}, opts),
-  bulkDeviceAction: (action, deviceIds, reason, opts = {}) => postJson('/devices/bulk-actions', { action, deviceIds, reason, ...(superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}) }, opts),
+  deleteDevice: (deviceId, confirmation, opts = {}) => deleteJson(`/devices/${encodeURIComponent(deviceId)}`, { ...opts, body: { confirmation } }),
+  bulkDeviceAction: (action, deviceIds, reason, confirmation, opts = {}) => postJson('/devices/bulk-actions', { action, deviceIds, reason, ...(confirmation ? { confirmation } : {}), ...(superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}) }, opts),
   revokeEnrollmentToken: (tokenId, opts = {}) => postJson(`/devices/enrollment-tokens/${encodeURIComponent(tokenId)}/revoke`, superAdminOrganizationId ? { organizationId: superAdminOrganizationId } : {}, opts),
   myMonitoringStatus: (opts = {}) => getJson('/devices/my-monitoring-status', opts),
   setMyMonitoringConsent: (consent, opts = {}) => postJson('/devices/my-monitoring-consent', { consent }, opts),

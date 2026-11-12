@@ -10,6 +10,7 @@ export default async function employeeRoutes(fastify) {
   // Convert Prisma User to Employee shape
   function userToEmployee(u, devices = []) {
     const assigned = devices
+      .filter((d) => !d.deletedAt)
       .filter((d) => d.userId === u.id || (u.assignedDeviceIds && u.assignedDeviceIds.includes(d.id)))
       .sort((a, b) => new Date(b.lastSeenAt || b.createdAt || 0) - new Date(a.lastSeenAt || a.createdAt || 0));
     const activeDevices = assigned.filter((d) => !d.isRevoked);
@@ -105,7 +106,13 @@ export default async function employeeRoutes(fastify) {
     try {
       const where = { role: Roles.EMPLOYEE };
       if (organizationId) where.organizationId = organizationId;
-      const users = await prisma.user.findMany({ where, include: { department: true, devices: true } });
+      const users = await prisma.user.findMany({
+        where,
+        include: {
+          department: true,
+          devices: { where: { deletedAt: null } },
+        },
+      });
       return users.map((u) => userToEmployee(u, u.devices || []));
     } catch {
       throw new AppError(503, 'STORAGE_UNAVAILABLE', 'Employee data could not be loaded from the database');
@@ -987,6 +994,7 @@ export default async function employeeRoutes(fastify) {
         id: deviceId,
         organizationId: orgId,
         isRevoked: false,
+        deletedAt: null,
         OR: [{ userId: null }, { userId: emp.id }],
       },
       data: { userId: emp.id },
@@ -1238,6 +1246,7 @@ export default async function employeeRoutes(fastify) {
         id: deviceId,
         organizationId: orgId,
         isRevoked: false,
+        deletedAt: null,
         OR: [{ userId: null }, { userId: emp.id }],
       },
       data: { userId: emp.id },

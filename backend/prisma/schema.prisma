@@ -263,6 +263,8 @@ model Device {
   archivedAt                 DateTime?     @map("archived_at") @db.Timestamptz(3)
   archivedByUserId           String?       @map("archived_by_user_id") @db.Uuid
   archiveReason              String?       @map("archive_reason") @db.VarChar(500)
+  deletedAt                  DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  deletedByUserId            String?       @map("deleted_by_user_id") @db.Uuid
   lastSeenAt                 DateTime?     @map("last_seen_at") @db.Timestamptz(3)
   lastSyncAt                 DateTime?     @map("last_sync_at") @db.Timestamptz(3)
   screenCaptureEnabled       Boolean       @default(false) @map("screen_capture_enabled")
@@ -285,6 +287,7 @@ model Device {
   @@index([userId])
   @@index([organizationId, archivedAt])
   @@index([organizationId, isRevoked])
+  @@index([organizationId, deletedAt])
   @@map("devices")
 }
 

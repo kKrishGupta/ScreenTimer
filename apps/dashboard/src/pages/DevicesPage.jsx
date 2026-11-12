@@ -59,6 +59,8 @@ export default function DevicesPage() {
   const [message, setMessage] = useState('');
   const [issuedToken, setIssuedToken] = useState(null);
   const [copyMessage, setCopyMessage] = useState('');
+  const [deleteDialog, setDeleteDialog] = useState(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
 
   const devices = data?.devices ?? [];
   const status = monitoringData?.monitoring;
@@ -159,6 +161,21 @@ export default function DevicesPage() {
     window.setTimeout(() => setCopyMessage(''), 3000);
   };
 
+  const deleteOwnRevokedDevice = async () => {
+    if (!deleteDialog || deleteConfirmation !== 'DELETE') return;
+    setWorking('delete-device'); setMessage('');
+    try {
+      await api.deleteDevice(deleteDialog.id, deleteConfirmation);
+      setDeleteDialog(null); setDeleteConfirmation('');
+      await reload();
+      setMessage('Device permanently removed successfully. Historical activity and audit records were preserved.');
+    } catch (err) {
+      setMessage(err.message || 'The device could not be permanently removed.');
+    } finally {
+      setWorking('');
+    }
+  };
+
   if (loading && !data) return <LoadingState label="Loading device status…" />;
   if (error) return <ErrorState error={error} onRetry={refresh} />;
 
@@ -253,10 +270,13 @@ export default function DevicesPage() {
               <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-100">{device.name}</h3><p className="mt-0.5 font-mono text-xs text-slate-400">{device.platform}</p></div><span className={`rounded-md px-2.5 py-1 text-xs font-medium ${device.status === 'online' ? 'bg-emerald-500/10 text-emerald-300' : device.status === 'revoked' ? 'bg-rose-500/10 text-rose-300' : 'bg-slate-500/10 text-slate-300'}`}>{device.status === 'online' ? 'Connected' : device.status === 'revoked' ? 'Revoked' : 'Offline'}</span></div>
               <p className="text-xs text-slate-400">{String(device.kind).toUpperCase() === 'DESKTOP_AGENT' ? 'Windows Desktop Agent' : `Browser Extension (${device.browser || 'Web'})`}{device.assignedUser?.displayName ? ` · ${device.assignedUser.displayName}` : ''}</p>
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-t border-white/5 pt-3 text-xs"><dt className="text-slate-500">Last heartbeat</dt><dd className="text-slate-300">{formatDate(device.lastSeenAt)}</dd><dt className="text-slate-500">Last sync</dt><dd className="text-slate-300">{formatDate(device.lastSyncAt)}</dd><dt className="text-slate-500">Monitoring</dt><dd className={device.monitoring?.allowed ? 'text-emerald-300' : 'text-amber-200'}>{device.monitoring?.allowed ? 'Authorized now' : reasonText(device.monitoring?.reason)}</dd></dl>
+              {device.lifecycleStatus === 'REVOKED' && <Button className="text-rose-200" onClick={() => { setDeleteDialog(device); setDeleteConfirmation(''); }}>Delete Permanently</Button>}
             </div>)}
           </div>
         )}
       </Card>
+
+      {deleteDialog && <div role="dialog" aria-modal="true" aria-labelledby="own-device-delete-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"><div className="w-full max-w-lg rounded-xl border border-white/10 bg-slate-900 p-5"><h3 id="own-device-delete-title" className="font-semibold text-white">Delete revoked device permanently</h3><p className="mt-2 text-sm text-rose-200">This device will be permanently removed from your device list.</p><dl className="mt-4 space-y-2 rounded-lg border border-white/10 p-3 text-xs"><div><dt className="text-slate-500">Device name</dt><dd className="text-slate-200">{deleteDialog.name}</dd></div><div><dt className="text-slate-500">Type</dt><dd className="text-slate-200">{String(deleteDialog.kind).toUpperCase() === 'DESKTOP_AGENT' ? 'Windows Desktop Agent' : `Browser Extension (${deleteDialog.browser || 'Web'})`}</dd></div><div><dt className="text-slate-500">Device ID</dt><dd className="break-all font-mono text-slate-200">{deleteDialog.id}</dd></div></dl><label className="mt-4 block text-xs text-slate-300">Type DELETE to confirm<input aria-label="Type DELETE to confirm" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} autoComplete="off" className="mt-1 block w-full rounded-lg border border-rose-400/30 bg-slate-950 px-3 py-2 font-mono text-sm text-white" /></label><div className="mt-4 flex justify-end gap-2"><Button disabled={working === 'delete-device'} onClick={() => { setDeleteDialog(null); setDeleteConfirmation(''); }}>Cancel</Button><Button className="text-rose-200" disabled={working === 'delete-device' || deleteConfirmation !== 'DELETE'} onClick={deleteOwnRevokedDevice}>{working === 'delete-device' ? 'Deleting…' : 'Delete Permanently'}</Button></div></div></div>}
 
       {isOrgAdmin && <DeviceLifecycleManager devices={devices} pendingEnrollments={data?.pendingEnrollments || []} reload={reload} announce={setMessage} />}
     </div>

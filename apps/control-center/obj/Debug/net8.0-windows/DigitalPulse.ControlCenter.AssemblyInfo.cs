@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DigitalPulse.ControlCenter")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a535da1b4e77c757efc3a58c37dcbcae78a4c67f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+cb4431da7de70b73b40fc1fae6187973d69649e4")]
 [assembly: System.Reflection.AssemblyProductAttribute("DigitalPulse.ControlCenter")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DigitalPulse.ControlCenter")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

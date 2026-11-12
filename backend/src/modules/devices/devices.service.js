@@ -424,6 +424,12 @@ export class DeviceService {
         err.code = 'DEVICE_ID_CONFLICT';
         throw err;
       }
+      if (existingDevice.deletedAt) {
+        const err = new Error('A permanently removed device ID cannot be enrolled again');
+        err.statusCode = 410;
+        err.code = 'DEVICE_DELETED';
+        throw err;
+      }
       if (existingDevice.isRevoked || existingDevice.revokedAt) {
         const err = new Error('A revoked device cannot be reactivated through ordinary enrollment');
         err.statusCode = 403;
@@ -549,7 +555,7 @@ export class DeviceService {
     if (!check.valid) {
       const err = new Error(check.message);
       err.code = check.code;
-      err.statusCode = ['DEVICE_REVOKED', 'DEVICE_ARCHIVED'].includes(check.code)
+      err.statusCode = ['DEVICE_REVOKED', 'DEVICE_ARCHIVED', 'DEVICE_DELETED'].includes(check.code)
         ? 403
         : check.code === 'STORAGE_UNAVAILABLE' ? 503 : 401;
       throw err;
@@ -647,6 +653,9 @@ export class DeviceService {
 
     // Lifecycle state is enforced before secret verification. Ordinary
     // heartbeat, event and screenshot requests can never reactivate a device.
+    if (device.deletedAt) {
+      return { valid: false, code: 'DEVICE_DELETED', message: 'This device has been permanently removed' };
+    }
     if (device.isRevoked || device.revokedAt || revokedDevicesSet.has(deviceId)) {
       return { valid: false, code: 'DEVICE_REVOKED', message: 'This device has been revoked by an administrator' };
     }
@@ -689,7 +698,7 @@ export class DeviceService {
     const check = await this.validateDeviceCredentials(deviceId, secret);
     if (!check.valid) {
       const err = new Error(check.message);
-      err.statusCode = ['DEVICE_REVOKED', 'DEVICE_ARCHIVED'].includes(check.code) ? 403 : check.code === 'STORAGE_UNAVAILABLE' ? 503 : 401;
+      err.statusCode = ['DEVICE_REVOKED', 'DEVICE_ARCHIVED', 'DEVICE_DELETED'].includes(check.code) ? 403 : check.code === 'STORAGE_UNAVAILABLE' ? 503 : 401;
       err.code = check.code;
       throw err;
     }
@@ -848,6 +857,83 @@ export class DeviceService {
     }
     deviceSecretsMap.delete(deviceId);
     return { success: true, deviceId, status: 'revoked', lifecycleStatus: 'REVOKED', revokedAt, reason: cleanReason };
+  }
+
+  /**
+   * Tombstones a revoked device without deleting historical foreign-key rows.
+   * Scope is checked before an idempotent deleted response is returned.
+   */
+  async deleteRevokedDevice(deviceId, { organizationId, userId = null, actor = 'User', actorUserId = null } = {}) {
+    if (!deviceId) throw new AppError(400, 'DEVICE_ID_REQUIRED', 'Device ID is required');
+    const device = await this.#findScopedDevice(deviceId, organizationId);
+    if (userId && device.userId !== userId) {
+      throw new AppError(403, 'DEVICE_OWNERSHIP_MISMATCH', 'Employees may only delete their own assigned devices');
+    }
+    if (device.deletedAt) {
+      return { success: true, idempotent: true, deviceId, status: 'deleted', lifecycleStatus: 'DELETED', deletedAt: device.deletedAt };
+    }
+    if (!device.isRevoked && !device.revokedAt) {
+      throw new AppError(409, 'DEVICE_NOT_REVOKED', 'Only revoked devices can be permanently removed');
+    }
+
+    let deletedAt = new Date();
+    if (this.prisma?.device?.updateMany) {
+      const persist = async (tx) => {
+        const changed = await tx.device.updateMany({
+          where: {
+            id: deviceId,
+            organizationId: device.organizationId,
+            ...(userId ? { userId } : {}),
+            isRevoked: true,
+            deletedAt: null,
+          },
+          data: {
+            deletedAt,
+            deletedByUserId: actorUserId,
+            secretHash: null,
+            secretSalt: null,
+            screenCaptureEnabled: false,
+          },
+        });
+        if (changed.count !== 1) {
+          const current = await tx.device.findUnique({ where: { id: deviceId } });
+          if (current?.deletedAt && current.organizationId === device.organizationId && (!userId || current.userId === userId)) {
+            return current.deletedAt;
+          }
+          throw new AppError(409, 'DEVICE_DELETE_CONFLICT', 'Device state changed before it could be removed');
+        }
+        if (tx.auditLog?.create) await tx.auditLog.create({ data: {
+          organizationId: device.organizationId,
+          action: 'DEVICE_DELETED',
+          actor,
+          details: {
+            deviceId,
+            employeeId: device.userId || null,
+            deletedByUserId: actorUserId,
+            name: device.name,
+            kind: device.kind,
+            deletionMode: 'tombstone',
+          },
+        } });
+        return deletedAt;
+      };
+      deletedAt = this.prisma.$transaction
+        ? await this.prisma.$transaction(persist)
+        : await persist(this.prisma);
+    } else if (process.env.NODE_ENV === 'production') {
+      throw new AppError(503, 'DEVICE_STORAGE_UNAVAILABLE', 'Persistent device deletion is unavailable');
+    }
+
+    revokedDevicesSet.add(deviceId);
+    deviceSecretsMap.delete(deviceId);
+    if (inMemoryDevices.has(deviceId)) Object.assign(inMemoryDevices.get(deviceId), {
+      deletedAt,
+      deletedByUserId: actorUserId,
+      secretHash: null,
+      secretSalt: null,
+      screenCaptureEnabled: false,
+    });
+    return { success: true, idempotent: false, deviceId, status: 'deleted', lifecycleStatus: 'DELETED', deletedAt };
   }
 
   async archiveDevice(deviceId, organizationId, actor = 'Administrator', reason = null, actorUserId = null) {
@@ -1067,6 +1153,7 @@ export class DeviceService {
         const whereClause = {};
         if (organizationId) whereClause.organizationId = organizationId;
         if (userId) whereClause.userId = userId;
+        whereClause.deletedAt = null;
         if (!includeArchived) whereClause.archivedAt = null;
 
         rows = await this.prisma.device.findMany({
@@ -1088,6 +1175,7 @@ export class DeviceService {
     if (userId && rows.length > 0) {
       rows = rows.filter((d) => d.userId === userId);
     }
+    rows = rows.filter((d) => !d.deletedAt);
     if (!includeArchived && rows.length > 0) rows = rows.filter((d) => !d.archivedAt);
 
     let latestCaptureByDevice = new Map();

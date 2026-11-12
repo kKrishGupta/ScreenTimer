@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DeviceLifecycleManager from '../components/devices/DeviceLifecycleManager.jsx';
 
 const mocks = vi.hoisted(() => ({
-  revoke: vi.fn(), archive: vi.fn(), restore: vi.fn(), authorize: vi.fn(),
+  revoke: vi.fn(), archive: vi.fn(), restore: vi.fn(), deleteDevice: vi.fn(), authorize: vi.fn(),
   details: vi.fn(), audit: vi.fn(), bulk: vi.fn(), duplicates: vi.fn(),
   revokeToken: vi.fn(),
 }));
@@ -11,6 +11,7 @@ vi.mock('../lib/api.js', () => ({ api: {
   revokeDevice: mocks.revoke,
   archiveDevice: mocks.archive,
   restoreDevice: mocks.restore,
+  deleteDevice: mocks.deleteDevice,
   updateScreenDevice: mocks.authorize,
   deviceDetails: mocks.details,
   deviceAudit: mocks.audit,
@@ -25,12 +26,14 @@ const active = {
   assignedUser: { displayName: 'Alice', email: 'alice@example.test' }, createdAt: '2026-11-01T10:00:00Z', lastSeenAt: '2026-11-08T10:00:00Z',
 };
 const archived = { ...active, id: 'device-archived', name: 'Old PC', lifecycleStatus: 'ARCHIVED', connectionStatus: 'OFFLINE', authorizationStatus: 'UNAUTHORIZED', screenCaptureEnabled: false };
+const revoked = { ...active, id: 'device-revoked', name: 'Revoked Chrome', lifecycleStatus: 'REVOKED', connectionStatus: 'OFFLINE', authorizationStatus: 'UNAUTHORIZED', screenCaptureEnabled: false };
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.revoke.mockResolvedValue({ success: true });
   mocks.archive.mockResolvedValue({ success: true });
   mocks.restore.mockResolvedValue({ success: true });
+  mocks.deleteDevice.mockResolvedValue({ success: true });
   mocks.authorize.mockResolvedValue({ success: true });
 });
 
@@ -69,7 +72,24 @@ it('reports partial bulk results and keeps failed devices selected for recovery'
   fireEvent.click(screen.getByLabelText('Select Old PC'));
   fireEvent.click(screen.getByRole('button', { name: 'Archive selected' }));
   fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
-  await waitFor(() => expect(mocks.bulk).toHaveBeenCalledWith('archive', ['device-active', 'device-archived'], ''));
-  expect(announce).toHaveBeenCalledWith('1 of 2 devices archived.');
+  await waitFor(() => expect(mocks.bulk).toHaveBeenCalledWith('archive', ['device-active', 'device-archived'], '', undefined));
+  expect(announce).toHaveBeenCalledWith('1 of 2 devices archived. 1 failed: Already archived');
   expect(screen.getByText('1 selected')).toBeInTheDocument();
+});
+
+it('offers permanent deletion only for revoked devices and requires typing DELETE', async () => {
+  const reload = vi.fn().mockResolvedValue();
+  const announce = vi.fn();
+  render(<DeviceLifecycleManager devices={[active, revoked]} reload={reload} announce={announce} />);
+  expect(screen.getAllByRole('button', { name: 'Delete Permanently' })).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Delete Permanently' }));
+  expect(screen.getByText('This device will be permanently removed from your device list.')).toBeInTheDocument();
+  expect(screen.getByText('device-revoked')).toBeInTheDocument();
+  const confirm = screen.getAllByRole('button', { name: 'Delete Permanently' }).find((button) => button.disabled);
+  expect(confirm).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Type DELETE to confirm'), { target: { value: 'DELETE' } });
+  fireEvent.click(confirm);
+  await waitFor(() => expect(mocks.deleteDevice).toHaveBeenCalledWith('device-revoked', 'DELETE'));
+  expect(reload).toHaveBeenCalled();
+  expect(announce).toHaveBeenCalledWith('Device permanently removed successfully.');
 });

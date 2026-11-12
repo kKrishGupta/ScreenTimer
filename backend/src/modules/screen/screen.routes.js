@@ -264,6 +264,7 @@ export default async function screenRoutes(fastify) {
       where: {
         organizationId,
         archivedAt: null,
+        deletedAt: null,
         OR: [
           { kind: 'DESKTOP_AGENT' },
           {
@@ -304,6 +305,7 @@ export default async function screenRoutes(fastify) {
         organizationId,
         isRevoked: false,
         archivedAt: null,
+        deletedAt: null,
         userId: { not: null },
         OR: [
           { kind: 'DESKTOP_AGENT' },
@@ -325,7 +327,7 @@ export default async function screenRoutes(fastify) {
   fastify.get('/screen-monitoring/me', async (request) => {
     const owner = await prisma.user.findUnique({ where: { id: request.user.id }, include: { organization: { select: { timezone: true } } } });
     const setting = await readSetting(prisma, request.user.organizationId);
-    const devices = await prisma.device.findMany({ where: { organizationId: request.user.organizationId, userId: request.user.id, archivedAt: null }, select: { id: true, name: true, kind: true, platform: true, browser: true, isRevoked: true, archivedAt: true, screenCaptureEnabled: true, lastSeenAt: true, lastScreenCaptureAt: true, lastScreenCaptureFailureAt: true, lastScreenCaptureError: true } });
+    const devices = await prisma.device.findMany({ where: { organizationId: request.user.organizationId, userId: request.user.id, archivedAt: null, deletedAt: null }, select: { id: true, name: true, kind: true, platform: true, browser: true, isRevoked: true, archivedAt: true, screenCaptureEnabled: true, lastSeenAt: true, lastScreenCaptureAt: true, lastScreenCaptureFailureAt: true, lastScreenCaptureError: true } });
     const deviceStatuses = await Promise.all(devices.filter((device) => isScreenCaptureDevice(device)).map(async (device) => {
       const latest = await prisma.screenCaptureMetadata.findFirst({ where: { organizationId: request.user.organizationId, deviceId: device.id, captureStatus: 'stored', expiresAt: { gt: new Date() } }, select: { capturedAt: true }, orderBy: { capturedAt: 'desc' } });
       const policy = await evaluateDevicePolicy(prisma, { ...device, organizationId: request.user.organizationId, userId: request.user.id }, new Date(), { owner, setting });

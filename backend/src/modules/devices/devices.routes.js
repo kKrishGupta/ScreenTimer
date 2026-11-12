@@ -606,6 +606,34 @@ export default async function devicesRoutes(app) {
     },
   );
 
+  // Authenticated tombstone removal. Employees are additionally restricted to
+  // the device owner stored on the server; request payload ownership is ignored.
+  app.delete('/devices/:id', async (request, reply) => {
+    const role = normalizeRole(request.user?.role);
+    if (![Roles.ADMIN, Roles.SUPER_ADMIN, Roles.EMPLOYEE].includes(role)) {
+      return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'This account cannot delete devices' } });
+    }
+    if (request.body?.confirmation !== 'DELETE') {
+      return reply.code(400).send({ error: { code: 'DELETE_CONFIRMATION_REQUIRED', message: 'Type DELETE to confirm permanent removal' } });
+    }
+    const organizationId = role === Roles.SUPER_ADMIN
+      ? request.query?.organizationId
+      : request.user.organizationId;
+    if (!organizationId) {
+      return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
+    }
+    try {
+      return reply.send(await deviceService.deleteRevokedDevice(request.params.id, {
+        organizationId,
+        userId: role === Roles.EMPLOYEE ? request.user.id : null,
+        actor: request.user.email || request.user.id,
+        actorUserId: request.user.id,
+      }));
+    } catch (error) {
+      return reply.code(error.statusCode || 400).send({ error: { code: error.code || 'DEVICE_DELETE_FAILED', message: error.message } });
+    }
+  });
+
   app.post('/devices/:id/archive', async (request, reply) => {
     const role = normalizeRole(request.user?.role);
     if (![Roles.ADMIN, Roles.SUPER_ADMIN].includes(role)) return reply.code(403).send({ error: { code: 'FORBIDDEN', message: 'Only administrators can archive devices' } });
@@ -670,16 +698,20 @@ export default async function devicesRoutes(app) {
     const action = String(request.body?.action || '').toLowerCase();
     const reason = request.body?.reason;
     if (!deviceIds.length || deviceIds.length > 100 || deviceIds.some((id) => typeof id !== 'string')) return reply.code(400).send({ error: { code: 'INVALID_DEVICE_SELECTION', message: 'Select between 1 and 100 devices' } });
-    if (!['revoke', 'archive'].includes(action)) return reply.code(400).send({ error: { code: 'INVALID_BULK_ACTION', message: 'Choose revoke or archive' } });
+    if (!['revoke', 'archive', 'delete'].includes(action)) return reply.code(400).send({ error: { code: 'INVALID_BULK_ACTION', message: 'Choose revoke, archive, or delete' } });
+    if (action === 'delete' && request.body?.confirmation !== 'DELETE') return reply.code(400).send({ error: { code: 'DELETE_CONFIRMATION_REQUIRED', message: 'Type DELETE to confirm permanent removal' } });
     if (reason !== undefined && (typeof reason !== 'string' || reason.trim().length > 500)) return reply.code(400).send({ error: { code: 'INVALID_REASON', message: 'Reason must be at most 500 characters' } });
     const organizationId = role === Roles.SUPER_ADMIN ? request.body?.organizationId || null : request.user.organizationId;
+    if (action === 'delete' && !organizationId) return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
     const actor = request.user.email || request.user.id;
     const results = [];
     for (const deviceId of deviceIds) {
       try {
         const result = action === 'revoke'
           ? await deviceService.revokeDevice(deviceId, organizationId, actor, reason, request.user.id)
-          : await deviceService.archiveDevice(deviceId, organizationId, actor, reason, request.user.id);
+          : action === 'archive'
+            ? await deviceService.archiveDevice(deviceId, organizationId, actor, reason, request.user.id)
+            : await deviceService.deleteRevokedDevice(deviceId, { organizationId, actor, actorUserId: request.user.id });
         results.push({ deviceId, success: true, lifecycleStatus: result.lifecycleStatus });
       } catch (error) {
         results.push({ deviceId, success: false, code: error.code || 'DEVICE_ACTION_FAILED', message: error.message });

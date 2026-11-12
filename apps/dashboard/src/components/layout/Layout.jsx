@@ -70,8 +70,6 @@ export default function Layout() {
     if (!isSuperAdmin) return undefined;
 
     let active = true;
-    setOrganizationsLoading(true);
-    setOrganizationsError('');
 
     api.organizations()
       .then((result) => {

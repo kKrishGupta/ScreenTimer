@@ -31,6 +31,7 @@ export default function ScreenMonitoringPage() {
   const [formDraft, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const imageUrlCacheRef = useRef(new Map());
 
   const captureParams = useMemo(() => ({
     employeeId: employeeId || undefined,
@@ -43,7 +44,33 @@ export default function ScreenMonitoringPage() {
   }), [employeeId, deviceId, captureSearch, date, page]);
   const loadSettings = useCallback((opts) => api.screenSettings({}, opts), []);
   const loadEmployees = useCallback((opts) => api.screenEmployees({}, opts), []);
-  const loadCaptures = useCallback((opts) => api.screenCaptures(captureParams, opts), [captureParams]);
+  const loadCaptures = useCallback((opts) => {
+    const normalize = (result) => {
+      const cache = imageUrlCacheRef.current;
+      const activeIds = new Set();
+      const now = Date.now();
+      const normalized = (result?.captures || []).map((capture) => {
+        activeIds.add(capture.id);
+        if (!capture.imageUrl) return capture;
+        const cached = cache.get(capture.id);
+        if (cached && cached.expiresAt - now > 60_000) {
+          return cached.imageUrl === capture.imageUrl ? capture : { ...capture, imageUrl: cached.imageUrl };
+        }
+        const match = /[?&]expires=(\d+)/.exec(capture.imageUrl);
+        cache.set(capture.id, {
+          imageUrl: capture.imageUrl,
+          expiresAt: match ? Number(match[1]) : now + 5 * 60_000,
+        });
+        return capture;
+      });
+      for (const id of cache.keys()) {
+        if (!activeIds.has(id)) cache.delete(id);
+      }
+      return { ...result, captures: normalized };
+    };
+    const result = api.screenCaptures(captureParams, opts);
+    return typeof result?.then === 'function' ? result.then(normalize) : normalize(result);
+  }, [captureParams]);
   const settings = useApi(loadSettings, { intervalMs: 30000 });
   const employees = useApi(loadEmployees, { intervalMs: 10000 });
   const captures = useApi(loadCaptures, { intervalMs: 15000 });
@@ -54,29 +81,7 @@ export default function ScreenMonitoringPage() {
     const query = search.trim().toLowerCase();
     return (employees.data?.employees || []).filter((row) => !query || row.employeeName.toLowerCase().includes(query) || row.deviceName.toLowerCase().includes(query));
   }, [employees.data, search]);
-  const imageUrlCacheRef = useRef(new Map());
-  const captureList = useMemo(() => {
-    const raw = captures.data?.captures || [];
-    const now = Date.now();
-    const cache = imageUrlCacheRef.current;
-    const activeIds = new Set();
-    const normalized = raw.map((capture) => {
-      activeIds.add(capture.id);
-      if (!capture.imageUrl) return capture;
-      const cached = cache.get(capture.id);
-      if (cached && cached.expiresAt - now > 60_000) {
-        return cached.imageUrl === capture.imageUrl ? capture : { ...capture, imageUrl: cached.imageUrl };
-      }
-      const match = /[?&]expires=(\d+)/.exec(capture.imageUrl);
-      const expiresAt = match ? Number(match[1]) : now + 5 * 60_000;
-      cache.set(capture.id, { imageUrl: capture.imageUrl, expiresAt });
-      return capture;
-    });
-    for (const id of cache.keys()) {
-      if (!activeIds.has(id)) cache.delete(id);
-    }
-    return normalized;
-  }, [captures.data]);
+  const captureList = useMemo(() => captures.data?.captures || [], [captures.data]);
   const selectedIndex = selected ? captureList.findIndex((capture) => capture.id === selected.id) : -1;
 
   async function saveSettings(event) {

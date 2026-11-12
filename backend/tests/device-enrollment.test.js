@@ -50,6 +50,17 @@ function fakePrisma() {
         if (d) Object.assign(d, data);
         return d;
       },
+      updateMany: async ({ where, data }) => {
+        const matches = devices.filter((item) => (
+          (!where.id || item.id === where.id) &&
+          (!where.organizationId || item.organizationId === where.organizationId) &&
+          (!where.userId || item.userId === where.userId) &&
+          (where.isRevoked === undefined || item.isRevoked === where.isRevoked) &&
+          (where.deletedAt === undefined || (where.deletedAt === null ? item.deletedAt == null : item.deletedAt === where.deletedAt))
+        ));
+        matches.forEach((item) => Object.assign(item, data));
+        return { count: matches.length };
+      },
     },
     organization: {
       findUnique: async () => ({ id: '00000000-0000-0000-0000-000000000000', slug: 'local-dev' }),
@@ -366,6 +377,58 @@ describe('Secure Device Enrollment & Management (Milestone 3)', () => {
     const tokenRevocation = await app.inject({ method: 'POST', url: `/api/v1/devices/enrollment-tokens/${pending.tokenId}/revoke`, headers: admin.headers });
     assert.equal(tokenRevocation.statusCode, 200, tokenRevocation.body);
     await assert.rejects(app.deviceService.enrollDevice({ token: pending.token, deviceId: '40000000-0000-4000-8000-000000000002' }), /revoked/i);
+    await app.close();
+  });
+
+  it('securely tombstones only revoked tenant-owned devices and keeps repeated deletion safe', async () => {
+    const prisma = fakePrisma();
+    const app = await buildApp({ config: loadConfig({ DATABASE_URL: 'postgresql://x:y@localhost:5433/dp' }), prisma, logger: false });
+    const ownId = '50000000-0000-4000-8000-000000000001';
+    const activeId = '50000000-0000-4000-8000-000000000002';
+    const adminId = '50000000-0000-4000-8000-000000000003';
+    const employeeId = 'employee-delete-a';
+
+    const ownToken = await app.deviceService.createEnrollmentToken({ organizationId: 'org-delete-a', userId: employeeId, deviceKind: 'BROWSER_EXTENSION' });
+    const ownEnrollment = await app.deviceService.enrollDevice({ token: ownToken.token, deviceId: ownId, name: 'Employee Chrome', browser: 'chrome' });
+    const activeToken = await app.deviceService.createEnrollmentToken({ organizationId: 'org-delete-a', userId: employeeId, deviceKind: 'BROWSER_EXTENSION' });
+    await app.deviceService.enrollDevice({ token: activeToken.token, deviceId: activeId, name: 'Active Chrome', browser: 'chrome' });
+    const adminToken = await app.deviceService.createEnrollmentToken({ organizationId: 'org-delete-a', userId: 'another-employee', deviceKind: 'BROWSER_EXTENSION' });
+    await app.deviceService.enrollDevice({ token: adminToken.token, deviceId: adminId, name: 'Admin target', browser: 'chrome' });
+    await app.deviceService.revokeDevice(ownId, 'org-delete-a', 'admin@example.test');
+    await app.deviceService.revokeDevice(adminId, 'org-delete-a', 'admin@example.test');
+
+    const employee = await app.authService.createTestSession({ userId: employeeId, email: 'employee@example.test', role: 'EMPLOYEE', organizationId: 'org-delete-a' });
+    const otherEmployee = await app.authService.createTestSession({ userId: 'employee-delete-b', role: 'EMPLOYEE', organizationId: 'org-delete-a' });
+    const otherAdmin = await app.authService.createTestSession({ role: 'ADMIN', organizationId: 'org-delete-b' });
+    const admin = await app.authService.createTestSession({ role: 'ADMIN', organizationId: 'org-delete-a' });
+
+    const missingConfirmation = await app.inject({ method: 'DELETE', url: `/api/v1/devices/${ownId}`, headers: employee.headers, payload: {} });
+    assert.equal(missingConfirmation.statusCode, 400);
+    const crossEmployee = await app.inject({ method: 'DELETE', url: `/api/v1/devices/${ownId}`, headers: otherEmployee.headers, payload: { confirmation: 'DELETE' } });
+    assert.equal(crossEmployee.statusCode, 403);
+    const crossOrganization = await app.inject({ method: 'DELETE', url: `/api/v1/devices/${ownId}`, headers: otherAdmin.headers, payload: { confirmation: 'DELETE' } });
+    assert.equal(crossOrganization.statusCode, 403);
+    const activeDelete = await app.inject({ method: 'DELETE', url: `/api/v1/devices/${activeId}`, headers: employee.headers, payload: { confirmation: 'DELETE' } });
+    assert.equal(activeDelete.statusCode, 409);
+
+    const ownDelete = await app.inject({ method: 'DELETE', url: `/api/v1/devices/${ownId}`, headers: employee.headers, payload: { confirmation: 'DELETE' } });
+    assert.equal(ownDelete.statusCode, 200, ownDelete.body);
+    const repeated = await app.inject({ method: 'DELETE', url: `/api/v1/devices/${ownId}`, headers: employee.headers, payload: { confirmation: 'DELETE' } });
+    assert.equal(repeated.statusCode, 200);
+    assert.equal(repeated.json().idempotent, true);
+    assert.equal((await app.deviceService.validateDeviceCredentials(ownId, ownEnrollment.deviceSecret)).code, 'DEVICE_DELETED');
+    assert.equal((await app.deviceService.listDevices('org-delete-a', employeeId)).some((device) => device.id === ownId), false);
+    assert.ok(prisma.__state.devices.find((device) => device.id === ownId)?.deletedAt, 'the device row remains as a tombstone for historical foreign keys');
+    assert.ok(prisma.__state.auditLogs.some((entry) => entry.action === 'DEVICE_DELETED' && entry.details.deviceId === ownId));
+    const reuseToken = await app.deviceService.createEnrollmentToken({ organizationId: 'org-delete-a', userId: employeeId, deviceKind: 'BROWSER_EXTENSION' });
+    await assert.rejects(app.deviceService.enrollDevice({ token: reuseToken.token, deviceId: ownId, browser: 'chrome' }), /cannot be enrolled again/i);
+
+    const bulk = await app.inject({ method: 'POST', url: '/api/v1/devices/bulk-actions', headers: admin.headers, payload: { action: 'delete', deviceIds: [adminId, activeId], confirmation: 'DELETE' } });
+    assert.equal(bulk.statusCode, 200, bulk.body);
+    assert.equal(bulk.json().success, false);
+    assert.equal(bulk.json().results.find((result) => result.deviceId === adminId).success, true);
+    assert.equal(bulk.json().results.find((result) => result.deviceId === activeId).code, 'DEVICE_NOT_REVOKED');
+    assert.equal(prisma.__state.devices.length, 3, 'tombstones preserve all device-linked history anchors');
     await app.close();
   });
 });

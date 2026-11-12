@@ -122,3 +122,35 @@ test('multi-device employee activity preserves each device while deduplicating o
     { domain: 'github.com', totalSeconds: 600, percentage: 100 },
   ]);
 });
+
+test('truly simultaneous apps on two devices remain one person-time interval with exclusive attribution', () => {
+  const sessions = [
+    session('device-one-editor', 'APP_SESSION', '2026-11-10T02:00:00Z', '2026-11-10T02:10:00Z', {
+      deviceId: 'device-1',
+      application: { executableName: 'editor.exe', displayName: 'Editor' },
+    }),
+    session('device-two-terminal', 'APP_SESSION', '2026-11-10T02:00:00Z', '2026-11-10T02:10:00Z', {
+      deviceId: 'device-2',
+      application: { executableName: 'terminal.exe', displayName: 'Terminal' },
+    }),
+  ];
+
+  assert.deepEqual(aggregateIntervals(sessions, start, end), {
+    activeSeconds: 600,
+    idleSeconds: 0,
+    monitoredSeconds: 600,
+  });
+
+  const applications = exclusiveUsage(sessions, {
+    type: 'APP_SESSION', start, end,
+    identity: (item) => item.application.executableName.toLowerCase(),
+    describe: (item, executable) => ({ name: item.application.displayName, executable }),
+  });
+
+  // The current person-level contract attributes each instant to one app. For
+  // an exact cross-device tie, identity ordering is the deterministic tie-break.
+  assert.equal(applications.totalSeconds, 600);
+  assert.deepEqual(applications.items.map(({ name, totalSeconds, percentage }) => ({ name, totalSeconds, percentage })), [
+    { name: 'Editor', totalSeconds: 600, percentage: 100 },
+  ]);
+});
