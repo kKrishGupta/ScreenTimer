@@ -5,6 +5,9 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <AssemblyName>DigitalPulse.ControlCenter</AssemblyName>
+    <AssemblyName>DigitalPulse</AssemblyName>
+    <Version>0.1.0</Version>
+    <Company>DigitalPulse</Company>
+    <Product>DigitalPulse Control Center</Product>
   </PropertyGroup>
 </Project>

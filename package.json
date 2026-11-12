@@ -34,11 +34,11 @@
     "test:js": "npm test --workspaces --if-present",
     "lint:dashboard": "npm run lint -w @digitalpulse/dashboard",
     "package:exe": "powershell -ExecutionPolicy Bypass -File scripts/build-exe-package.ps1",
-    "package:employees": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-employee-downloads.ps1 -Deployment Production",
+    "package:employees": "npm run build:installer && npm run package:extensions",
     "package:extensions": "node scripts/package-browser-extension-downloads.mjs",
     "build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-installer.ps1",
     "verify:windows-installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-windows-installer.ps1",
-    "verify:employee-downloads": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-employee-downloads.ps1",
+    "verify:employee-downloads": "npm run verify:windows-installer && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-employee-downloads.ps1 -ExtensionsOnly",
     "verify:employee-download-http": "node scripts/verify-employee-download-http.mjs"
   },
   "devDependencies": {

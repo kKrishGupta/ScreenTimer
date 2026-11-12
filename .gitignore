@@ -1,11 +1,18 @@
 # Dependencies
 node_modules/
+.tools/
 
 # Build output
 dist/
 build/
 coverage/
 desktop-agent/target/
+apps/control-center/bin/
+apps/control-center/obj/
+apps/windows-installer/bin/
+apps/windows-installer/obj/
+apps/dashboard/public/downloads/*.backup.exe
+apps/dashboard/public/downloads/digitalpulse-*-extension/
 
 # Environment / secrets
 .env

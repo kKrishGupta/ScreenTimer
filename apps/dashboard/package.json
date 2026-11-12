@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "node ../../scripts/package-browser-extension-downloads.mjs",
+    "prebuild": "node ../../scripts/verify-windows-installer.mjs && node ../../scripts/package-browser-extension-downloads.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",

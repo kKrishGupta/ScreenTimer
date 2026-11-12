@@ -268,10 +268,10 @@ describe('dashboard shell and navigation', () => {
       return defaultRouterFetch(url, options);
     });
     renderAt('/employee-setup');
-    expect(await screen.findByRole('heading', { name: 'Install Windows Agent' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Install DigitalPulse for Windows' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Install Chrome Extension' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Install Edge Extension' })).toBeInTheDocument();
-    expect(screen.getByText('Windows Agent', { selector: 'h3' })).toBeInTheDocument();
+    expect(screen.getByText('DigitalPulse for Windows', { selector: 'h3' })).toBeInTheDocument();
     expect(screen.getByText('Chrome Extension', { selector: 'h3' })).toBeInTheDocument();
     expect(screen.getByText('Edge Extension', { selector: 'h3' })).toBeInTheDocument();
     expect(screen.getByText('LOCAL DEVELOPMENT / INTERNAL TEST BUILD')).toBeInTheDocument();
@@ -301,7 +301,7 @@ describe('dashboard shell and navigation', () => {
       return defaultRouterFetch(url, options);
     });
     renderAt('/employee-setup');
-    expect(await screen.findByRole('link', { name: 'Install Windows Agent' })).toHaveAttribute('href', '/downloads/digitalpulse-windows-agent.zip');
+    expect(await screen.findByRole('link', { name: 'Install DigitalPulse for Windows' })).toHaveAttribute('href', '/downloads/DigitalPulse-Setup.exe');
     expect(await screen.findByRole('link', { name: 'Try Install Chrome Extension download' })).toHaveAttribute('href', '/downloads/digitalpulse-chrome-extension.zip');
     expect(await screen.findByRole('link', { name: 'Install Edge Extension' })).toHaveAttribute('href', '/downloads/digitalpulse-edge-extension.zip');
     expect(screen.getByText(/Automatic verification failed/)).toBeInTheDocument();
@@ -309,7 +309,7 @@ describe('dashboard shell and navigation', () => {
     const calls = globalThis.fetch.mock.calls.map(([url]) => String(url));
     expect(calls).toContain('/downloads/digitalpulse-chrome-extension.zip');
     expect(calls).toContain('/downloads/digitalpulse-edge-extension.zip');
-    expect(calls).toContain('/downloads/digitalpulse-windows-agent.zip.sha256');
+    expect(calls).toContain('/downloads/DigitalPulse-Setup.exe.sha256');
   });
 
   it('creates and copies a scoped token once while keeping monitoring paused', async () => {

@@ -9,7 +9,7 @@ describe('production API routing', () => {
     expect(vercelConfig.buildCommand).toBe('npm run build');
     expect(vercelConfig.outputDirectory).toBe('dist');
     const dashboardPackage = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'));
-    expect(dashboardPackage.scripts.prebuild).toBe('node ../../scripts/package-browser-extension-downloads.mjs');
+    expect(dashboardPackage.scripts.prebuild).toBe('node ../../scripts/verify-windows-installer.mjs && node ../../scripts/package-browser-extension-downloads.mjs');
     expect(dashboardPackage.scripts.build).toBe('vite build');
   });
   it('protects the reset document from referrer leakage and caching', () => {

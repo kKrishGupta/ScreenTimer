@@ -6,12 +6,12 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
 import { ErrorState, LoadingState } from '../components/ui/States.jsx';
 
-const WINDOWS_PACKAGE_URL = '/downloads/digitalpulse-windows-agent.zip';
+const WINDOWS_PACKAGE_URL = '/downloads/DigitalPulse-Setup.exe';
 const CHROME_PACKAGE_URL = '/downloads/digitalpulse-chrome-extension.zip';
 const EDGE_PACKAGE_URL = '/downloads/digitalpulse-edge-extension.zip';
 
 const PACKAGE_FILE_NAMES = {
-  windows: 'digitalpulse-windows-agent.zip',
+  windows: 'DigitalPulse-Setup.exe',
   chrome: 'digitalpulse-chrome-extension.zip',
   edge: 'digitalpulse-edge-extension.zip',
 };
@@ -131,14 +131,14 @@ function DeviceStatus({ title, device, installStarted, now }) {
   );
 }
 
-function InstallationCard({ title, packageUrl, packageState, fileName, onStarted, instructionsId, platform }) {
+function InstallationCard({ title, packageUrl, packageState, fileName, onStarted, instructionsId, platform, description }) {
   const checking = packageState === 'checking';
   const verified = packageState === 'available';
   const unavailable = packageState === 'unavailable';
 
   return (
     <Card title={title}>
-      <p className="text-sm text-slate-400">Download the independent {platform} package, extract it, then follow its README. Installation and enrollment do not enable monitoring.</p>
+      <p className="text-sm text-slate-400">{description || `Download the independent ${platform} package, extract it, then follow its README. Installation and enrollment do not enable monitoring.`}</p>
       <div className="mt-4 flex flex-wrap gap-2">
         <a
           className={`inline-flex items-center rounded-lg px-3 py-2 text-sm font-medium text-white ${unavailable ? 'bg-amber-700 hover:bg-amber-600' : 'bg-sky-600 hover:bg-sky-500'}`}
@@ -151,7 +151,7 @@ function InstallationCard({ title, packageUrl, packageState, fileName, onStarted
         <a className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/5" href={`#${instructionsId}`}>Read installation instructions</a>
       </div>
       {packageState === 'unverified' && <p className="mt-3 text-xs text-amber-200">The download exists, but this browser could not complete every verification check. Download it and compare the published SHA-256 checksum.</p>}
-      {unavailable && <p className="mt-3 text-xs text-amber-200">Automatic verification failed. You can still try the direct download. If it opens a web page instead of downloading a ZIP, ask your administrator to republish the employee packages.</p>}
+      {unavailable && <p className="mt-3 text-xs text-amber-200">Automatic verification failed. You can still try the direct download. If it opens a web page instead of downloading the expected file, ask your administrator to republish the employee packages.</p>}
       {verified && <p className="mt-3 text-xs text-emerald-300">Package and published checksum are available.</p>}
       {!checking && <a href={`${packageUrl}.sha256`} download={`${fileName}.sha256`} className="mt-3 block text-xs text-sky-400 underline">Download {platform} SHA-256 checksum</a>}
       <button type="button" onClick={onStarted} className="mt-3 block text-xs text-slate-400 underline decoration-slate-600 underline-offset-2">I have started installation</button>
@@ -300,7 +300,7 @@ export default function EmployeeSetupPage() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <InstallationCard title="Install Windows Agent" platform="Windows" fileName={PACKAGE_FILE_NAMES.windows} packageUrl={WINDOWS_PACKAGE_URL} packageState={packageAvailability.windows} onStarted={() => markInstallStarted('windows')} instructionsId="windows-installation-instructions" />
+        <InstallationCard title="Install DigitalPulse for Windows" platform="Windows" fileName={PACKAGE_FILE_NAMES.windows} packageUrl={WINDOWS_PACKAGE_URL} packageState={packageAvailability.windows} onStarted={() => markInstallStarted('windows')} instructionsId="windows-installation-instructions" description="Download the DigitalPulse setup wizard. It installs the Control Center and its managed background agent; installation alone does not enable monitoring." />
         <InstallationCard title="Install Chrome Extension" platform="Chrome" fileName={PACKAGE_FILE_NAMES.chrome} packageUrl={CHROME_PACKAGE_URL} packageState={packageAvailability.chrome} onStarted={() => markInstallStarted('chrome')} instructionsId="chrome-installation-instructions" />
         <InstallationCard title="Install Edge Extension" platform="Edge" fileName={PACKAGE_FILE_NAMES.edge} packageUrl={EDGE_PACKAGE_URL} packageState={packageAvailability.edge} onStarted={() => markInstallStarted('edge')} instructionsId="edge-installation-instructions" />
       </div>
@@ -327,14 +327,14 @@ export default function EmployeeSetupPage() {
       <Card title="Read installation instructions">
         <div className="space-y-5 text-sm text-slate-300">
           <section id="windows-installation-instructions" className="scroll-mt-4">
-            <h3 className="font-semibold text-white">Windows Agent</h3>
+            <h3 className="font-semibold text-white">DigitalPulse for Windows</h3>
             <ol className="mt-2 list-decimal space-y-1 pl-5">
-              <li>Download the approved Windows package when it is available and unzip it.</li>
-              <li>Open PowerShell in the extracted <code>digitalpulse-windows-agent</code> folder. Follow <code>README.txt</code> to enroll using your Windows token.</li>
-              {remoteBackend && <li>In that PowerShell window, run <code>$env:DP_ALLOW_REMOTE_BACKEND='true'</code>. Then enroll with <code>--server {backendUrl}</code>. Keep this setting in the terminal session when starting the agent.</li>}
-              {!remoteBackend && <li>Enroll with <code>--server {backendUrl}</code>.</li>}
-              <li>Run <code>.\dp-user-agent.exe --status</code> for local status. Run the agent when ready to connect; it stays paused until the server authorizes collection.</li>
-              <li>The activity buffer is stored in <code>%LOCALAPPDATA%\DigitalPulse</code>. Stop with Ctrl+C and retain this folder when upgrading.</li>
+              <li>Download and double-click <code>DigitalPulse-Setup.exe</code>, then complete the installation wizard.</li>
+              <li>Open DigitalPulse from the Start Menu or Desktop shortcut.</li>
+              <li>On first launch, sign in with your employee email and password, then enter the Employee Secret Key supplied by your administrator. Later launches use the existing secure sign-in flow without requiring that key again.</li>
+              <li>Use Control Center to start or stop the managed agent. Monitoring remains paused unless your consent, administrator authorization, account, and work schedule all permit it.</li>
+              {remoteBackend && <li>The installed application connects to the approved production service at <code>{backendUrl}</code>; no PowerShell setup is required.</li>}
+              <li>Upgrades and uninstall preserve device identity, credentials, and queued activity in <code>%LOCALAPPDATA%\DigitalPulse</code>.</li>
             </ol>
           </section>
           <section id="chrome-installation-instructions" className="scroll-mt-4">

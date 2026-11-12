@@ -1,0 +1,37 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="DigitalPulse"
+           Manufacturer="DigitalPulse"
+           Version="0.1.0"
+           UpgradeCode="0D88A602-2A72-4E44-9A9C-138C5553E227"
+           Scope="perUser"
+           InstallerVersion="500"
+           Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of DigitalPulse is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="medium" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="LocalProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="DigitalPulse" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="DigitalPulse" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Files Include="$(PayloadDir)\**" Directory="INSTALLFOLDER">
+      <Exclude Files="$(PayloadDir)\DigitalPulse.exe" />
+    </Files>
+
+    <Component Id="MainExecutable" Directory="INSTALLFOLDER" Guid="2DF7208D-F624-4B71-8B0F-331E79C401C3">
+      <File Id="DigitalPulseExe" Source="$(PayloadDir)\DigitalPulse.exe" KeyPath="yes">
+        <Shortcut Id="StartMenuShortcut" Directory="ApplicationProgramsFolder" Name="DigitalPulse" Description="DigitalPulse Control Center" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
+        <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="DigitalPulse" Description="DigitalPulse Control Center" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
+      </File>
+      <RemoveFolder Id="RemoveStartMenuFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+    </Component>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+  </Package>
+</Wix>

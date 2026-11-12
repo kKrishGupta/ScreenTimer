@@ -96,10 +96,18 @@ namespace DigitalPulse.ControlCenter
             {
                 int.TryParse(args[1], out startTab);
             }
-            Application.Run(new ControlCenterForm(startTab));
+            if (args != null && Array.IndexOf(args, "--smoke-test") >= 0)
+            {
+                using (var smokeForm = new ControlCenterForm(startTab, false))
+                {
+                    smokeForm.CreateControl();
+                }
+                return;
+            }
+            Application.Run(new ControlCenterForm(startTab, true));
         }
 
-        public ControlCenterForm(int initialTab = 0)
+        public ControlCenterForm(int initialTab = 0, bool promptForSignIn = true)
         {
             InitializeWindow();
             InitializeHeader();
@@ -110,6 +118,10 @@ namespace DigitalPulse.ControlCenter
 
             SwitchTab(Math.Max(0, Math.Min(6, initialTab)));
             LogEvent("DigitalPulse Enterprise Control Center launched. Telemetry active.");
+            if (promptForSignIn)
+            {
+                Shown += (s, e) => BeginInvoke(new Action(DpLogin));
+            }
         }
 
         private void InitializeWindow()
@@ -1690,7 +1702,7 @@ namespace DigitalPulse.ControlCenter
                 {
                     LogEvent("dp-user-agent.exe was launched but exited immediately.");
                     RefreshSubsystems();
-                    MessageBox.Show("DigitalPulse Desktop Agent was started but exited immediately.\n\nVerify endpoint enrollment and configuration by running 'dp-user-agent.exe --status' in a terminal.", "Agent Exited", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show("DigitalPulse Desktop Agent was started but exited immediately.\n\nReopen DigitalPulse, sign in again, and contact your administrator if the problem continues.", "Agent Exited", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 

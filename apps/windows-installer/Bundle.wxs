@@ -1,0 +1,18 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle Name="DigitalPulse"
+          Manufacturer="DigitalPulse"
+          Version="0.1.0"
+          UpgradeCode="8972F204-470C-4813-985C-2A393AF85F98"
+          Compressed="yes">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense"
+                                               LicenseUrl=""
+                                               ShowVersion="yes"
+                                               SuppressOptionsUI="yes" />
+    </BootstrapperApplication>
+    <Chain>
+      <MsiPackage SourceFile="$(MsiPath)" Visible="no" />
+    </Chain>
+  </Bundle>
+</Wix>
