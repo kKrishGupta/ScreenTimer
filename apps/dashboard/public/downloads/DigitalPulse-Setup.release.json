@@ -2,10 +2,10 @@
     "schemaVersion":  1,
     "productVersion":  "0.2.0",
     "fileName":  "DigitalPulse-Setup.exe",
-    "sha256":  "f96ace1e02281b58fe64dc91fd0eab8e76cf5b22abb900b8e647b55ab1571b75",
-    "bytes":  4663362,
-    "controlCenterSha256":  "eeace1bda2e74a07c8ff2411b5fde5c444c42b8871787669b536eb6d84d0e65f",
-    "agentSha256":  "08d800b512dfd18110b84e40f4202c44447231542dfb0cc701cf253e9541be56",
+    "sha256":  "0daee63331038725cf9df63572fbfa3ff5a8ea36d5f1cb29478de1533f120f91",
+    "bytes":  4711050,
+    "controlCenterSha256":  "6149989a6601259eb94379672ba4340e848c19043bcffe52980d0443756dfc3a",
+    "agentSha256":  "4c8b157b88f1cfc163d470c6cd054298f3400eaab3894e8b8137554f7f35ce81",
     "webView2BootstrapperSha256":  "cf2f2445fef0c5c14e372045f84998771eeb8bb01d59be4afd00692fa160082e",
     "webView2Detection":  {
                               "mechanism":  "Microsoft EdgeUpdate WebView2 Evergreen pv registration",
@@ -125,11 +125,11 @@
                         "desktop-agent/crates/dp-user-agent/src/local_control.rs":  "e99d02e1461464dea5568c6ba12ea840db1b58ace6ce2700a42253f160e3a6f0",
                         "desktop-agent/crates/dp-user-agent/src/main.rs":  "09129074c0dc15b26ea7a252c296a1ba51faa6f15ef24c19329edbfbec2dc89b",
                         "desktop-agent/crates/dp-user-agent/src/monitoring_control.rs":  "16eb5826688a8db9f832834eae84552a84ae325a164920aa196b5b0d69238afd",
-                        "desktop-agent/crates/dp-user-agent/src/screenshot.rs":  "00279df14f69d89a8f73516103cee49b816240779c1301927822283a5b166b34",
+                        "desktop-agent/crates/dp-user-agent/src/screenshot.rs":  "8bf10aac2247d2689c3d0f2746b0143ad9063c7092c4d013d1d8cfa0df9d22b2",
                         "desktop-agent/crates/dp-user-agent/src/sync.rs":  "ead2ede657c382866107070ed82f84cf747ce52bf1620f4303ff9db2a048f8d8",
                         "package.json":  "b7c2abf56fb043eec05ae7b4c87283cc2c2de774dd411160965e6351786a0925",
                         "package-lock.json":  "5c413534799df7d772986abbebe0e86597c98e9083ee0db2288d35c7763549b3",
-                        "scripts/build-windows-installer.ps1":  "5c05e5deb02064d0772e390ba6fb478e1fb6ee4edb2b50358db80fdae73ada8c",
+                        "scripts/build-windows-installer.ps1":  "18e8a404f55e0a2670ca66a17d294820edce270ca7440d56989ca67fd7f09fba",
                         "scripts/verify-webview2-detection.ps1":  "ea375063a2d55896d74f8bb19dbf437ab2e7190e5be3faa8dcb06c3c6373c5d7"
                     }
 }

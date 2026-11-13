@@ -46,7 +46,16 @@ function Invoke-Checked([string]$label, [scriptblock]$command) {
 
 try {
     $agentManifest = Join-Path $repoRoot 'desktop-agent\Cargo.toml'
-    Invoke-Checked 'Rust agent build' { cargo build --manifest-path $agentManifest --release -p dp-user-agent --locked }
+    $agentRoot = Join-Path $repoRoot 'desktop-agent'
+    # rustup selects the checked-in GNU toolchain from the working directory.
+    # Building from the repository root can silently select the machine-default
+    # MSVC toolchain and make the installer agent differ from the download ZIP.
+    Push-Location -LiteralPath $agentRoot
+    try {
+        Invoke-Checked 'Rust agent build' { cargo build --release -p dp-user-agent --locked }
+    } finally {
+        Pop-Location
+    }
     $agentSource = Join-Path $repoRoot 'desktop-agent\target\release\dp-user-agent.exe'
     if (-not (Test-Path -LiteralPath $agentSource)) { throw 'Rust build did not produce dp-user-agent.exe.' }
 
