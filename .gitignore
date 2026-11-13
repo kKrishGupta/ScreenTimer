@@ -41,3 +41,5 @@ backend/src/generated/
 .DS_Store
 Thumbs.db
 
+
+/apps/control-center-tauri/src-tauri/target/

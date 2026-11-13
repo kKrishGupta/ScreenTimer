@@ -13,10 +13,10 @@ function formatTimestamp(isoStr) {
 
 export default function BlockedActivityPage() {
   const fetchViolations = useCallback((opts) => api.policyViolations(opts), []);
-  const { data: violationsData, error, loading, reload } = useApi(fetchViolations, { intervalMs: 5000 });
+  const { data: violationsData, error, loading, reload } = useApi(fetchViolations, { intervalMs: 30_000, staleTimeMs: 15_000 });
 
   const fetchGrace = useCallback((opts) => api.graceGrants(opts), []);
-  const { data: graceData } = useApi(fetchGrace, { intervalMs: 5000 });
+  const { data: graceData } = useApi(fetchGrace, { intervalMs: 30_000, staleTimeMs: 15_000 });
 
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('ALL');

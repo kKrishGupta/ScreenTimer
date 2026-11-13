@@ -12,6 +12,7 @@
     "backend",
     "apps",
     "apps/dashboard",
+    "apps/control-center-tauri",
     "apps/browser-extension"
   ],
   "scripts": {
@@ -21,6 +22,8 @@
     "dev:dashboard": "npm run dev -w @digitalpulse/dashboard",
     "start:backend": "npm run start -w @digitalpulse/backend",
     "build:dashboard": "npm run build -w @digitalpulse/dashboard",
+    "build:desktop": "npm exec -w @digitalpulse/control-center-tauri tauri build -- --no-bundle",
+    "test:desktop": "npm test -w @digitalpulse/control-center-tauri && cargo test --manifest-path apps/control-center-tauri/src-tauri/Cargo.toml",
     "db:generate": "npm run db:generate -w @digitalpulse/backend",
     "db:migrate": "npm run db:migrate -w @digitalpulse/backend",
     "db:deploy": "npm run db:deploy -w @digitalpulse/backend",

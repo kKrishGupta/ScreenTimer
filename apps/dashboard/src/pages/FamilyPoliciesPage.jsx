@@ -11,9 +11,9 @@ export default function FamilyPoliciesPage() {
   const fetchViolations = useCallback((opts) => api.policyViolations(opts), []);
   const fetchGraceGrants = useCallback((opts) => api.graceGrants(opts), []);
 
-  const { data: policiesData, loading: policiesLoading, reload: reloadPolicies } = useApi(fetchPolicies, { intervalMs: 5000 });
-  const { data: violationsData, loading: violationsLoading, reload: reloadViolations } = useApi(fetchViolations, { intervalMs: 5000 });
-  const { data: graceData, reload: reloadGrace } = useApi(fetchGraceGrants, { intervalMs: 3000 });
+  const { data: policiesData, loading: policiesLoading, reload: reloadPolicies } = useApi(fetchPolicies, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: violationsData, loading: violationsLoading, reload: reloadViolations } = useApi(fetchViolations, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: graceData, reload: reloadGrace } = useApi(fetchGraceGrants, { intervalMs: 30_000, staleTimeMs: 15_000 });
 
   const [newPolicyName, setNewPolicyName] = useState('');
   const [newCategory, setNewCategory] = useState('social_media');

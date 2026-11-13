@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Only the bundled main window may invoke registered native commands.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

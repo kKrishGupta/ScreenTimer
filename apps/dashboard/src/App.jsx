@@ -1,32 +1,34 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import Layout from './components/layout/Layout.jsx';
-import RoleHomePage from './pages/RoleHomePage.jsx';
-import EmployeesPage from './pages/EmployeesPage.jsx';
-import DevicesPage from './pages/DevicesPage.jsx';
-import TimelinePage from './pages/TimelinePage.jsx';
-import DigitalWellbeingPage from './pages/DigitalWellbeingPage.jsx';
-import EmployeeWellbeingPage from './pages/EmployeeWellbeingPage.jsx';
-import ApplicationsPage from './pages/ApplicationsPage.jsx';
-import WebsitesPage from './pages/WebsitesPage.jsx';
-import ScreenMonitoringPage from './pages/ScreenMonitoringPage.jsx';
-import SchedulePage from './pages/SchedulePage.jsx';
-import ReportsPage from './pages/ReportsPage.jsx';
-import FamilyPoliciesPage from './pages/FamilyPoliciesPage.jsx';
-import AlertsPage from './pages/AlertsPage.jsx';
-import SettingsPage from './pages/SettingsPage.jsx';
-import NotFoundPage from './pages/NotFoundPage.jsx';
-import BlockedPage from './pages/BlockedPage.jsx';
-import DeclarativeRulesPage from './pages/DeclarativeRulesPage.jsx';
-import EmployeePortalPage from './pages/EmployeePortalPage.jsx';
-import EmployeeSetupPage from './pages/EmployeeSetupPage.jsx';
-import LiveMonitoringPage from './pages/LiveMonitoringPage.jsx';
-import BlockedActivityPage from './pages/BlockedActivityPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
 import AcceptInvitationPage from './pages/AcceptInvitationPage.jsx';
 import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
+
+const RoleHomePage = lazy(() => import('./pages/RoleHomePage.jsx'));
+const EmployeesPage = lazy(() => import('./pages/EmployeesPage.jsx'));
+const DevicesPage = lazy(() => import('./pages/DevicesPage.jsx'));
+const TimelinePage = lazy(() => import('./pages/TimelinePage.jsx'));
+const DigitalWellbeingPage = lazy(() => import('./pages/DigitalWellbeingPage.jsx'));
+const EmployeeWellbeingPage = lazy(() => import('./pages/EmployeeWellbeingPage.jsx'));
+const ApplicationsPage = lazy(() => import('./pages/ApplicationsPage.jsx'));
+const WebsitesPage = lazy(() => import('./pages/WebsitesPage.jsx'));
+const ScreenMonitoringPage = lazy(() => import('./pages/ScreenMonitoringPage.jsx'));
+const SchedulePage = lazy(() => import('./pages/SchedulePage.jsx'));
+const ReportsPage = lazy(() => import('./pages/ReportsPage.jsx'));
+const FamilyPoliciesPage = lazy(() => import('./pages/FamilyPoliciesPage.jsx'));
+const AlertsPage = lazy(() => import('./pages/AlertsPage.jsx'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage.jsx'));
+const BlockedPage = lazy(() => import('./pages/BlockedPage.jsx'));
+const DeclarativeRulesPage = lazy(() => import('./pages/DeclarativeRulesPage.jsx'));
+const EmployeePortalPage = lazy(() => import('./pages/EmployeePortalPage.jsx'));
+const EmployeeSetupPage = lazy(() => import('./pages/EmployeeSetupPage.jsx'));
+const LiveMonitoringPage = lazy(() => import('./pages/LiveMonitoringPage.jsx'));
+const BlockedActivityPage = lazy(() => import('./pages/BlockedActivityPage.jsx'));
 
 function AuthLoading() {
   return <main className="grid min-h-screen place-items-center bg-surface-950 text-sm text-slate-400">Loading your secure workspace…</main>;
@@ -88,7 +90,7 @@ function OrganizationRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <Routes>
+      <Suspense fallback={<AuthLoading />}><Routes>
         <Route path="login" element={<PublicOnly><LoginPage mode="employee" /></PublicOnly>} />
         <Route path="organization/login" element={<PublicOnly><LoginPage mode="admin" /></PublicOnly>} />
         <Route path="super-admin/login" element={<PublicOnly><LoginPage mode="super-admin" /></PublicOnly>} />
@@ -142,7 +144,7 @@ export default function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-      </Routes>
+      </Routes></Suspense>
     </AuthProvider>
   );
 }

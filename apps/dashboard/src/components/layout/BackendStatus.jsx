@@ -20,9 +20,13 @@ export function backendStatusKey({ data, error, loading }) {
   return data?.status ?? 'unknown';
 }
 
-/** Live backend connectivity indicator, polled every 15 s from GET /api/v1/health. */
+/** Shared backend connectivity indicator, paused while hidden or offline. */
 export default function BackendStatus() {
-  const { data, error, loading } = useApi(api.health, { intervalMs: 15000 });
+  const { data, error, loading } = useApi(api.health, {
+    intervalMs: 90_000,
+    staleTimeMs: 60_000,
+    queryKey: 'backend-health',
+  });
   const key = backendStatusKey({ data, error, loading });
   const style = STYLES[key] ?? STYLES.unknown;
   return (

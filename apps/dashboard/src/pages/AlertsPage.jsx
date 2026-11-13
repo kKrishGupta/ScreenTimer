@@ -7,7 +7,7 @@ import { AlertIcon, BellIcon } from '../components/ui/icons.jsx';
 
 export default function AlertsPage() {
   const fetchAlerts = useCallback((opts) => api.alerts(opts), []);
-  const { data, error, loading, reload } = useApi(fetchAlerts, { intervalMs: 5000 });
+  const { data, error, loading, reload } = useApi(fetchAlerts, { intervalMs: 30_000, staleTimeMs: 15_000 });
 
   const [filterSeverity, setFilterSeverity] = useState('all');
   const [dismissedIds, setDismissedIds] = useState(new Set());

@@ -36,6 +36,14 @@ test('validates PORT and LOG_LEVEL', () => {
   assert.throws(() => loadConfig({ ...base, LOG_LEVEL: 'verbose' }), /LOG_LEVEL/);
 });
 
+test('uses a conservative bounded database pool for free-tier deployments', () => {
+  assert.equal(loadConfig(base).databasePoolMax, 5);
+  assert.equal(loadConfig({ ...base, DATABASE_POOL_MAX: '2' }).databasePoolMax, 2);
+  for (const value of ['0', '11', '1.5', 'invalid']) {
+    assert.throws(() => loadConfig({ ...base, DATABASE_POOL_MAX: value }), /DATABASE_POOL_MAX/);
+  }
+});
+
 test('bounds configurable password reset expiry to a short lifetime', () => {
   assert.equal(loadConfig(base).passwordResetTtlMinutes, 30);
   assert.equal(loadConfig({ ...base, PASSWORD_RESET_TTL_MINUTES: '10' }).passwordResetTtlMinutes, 10);

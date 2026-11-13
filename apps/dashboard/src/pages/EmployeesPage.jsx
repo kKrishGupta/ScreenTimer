@@ -53,10 +53,11 @@ export default function EmployeesPage() {
 
   const fetchDevices = useCallback((opts) => api.devices(opts), []);
 
-  const { data, error, loading, reload } = useApi(fetchEmployees, { intervalMs: 15000 });
-  const { data: devicesData } = useApi(fetchDevices, { intervalMs: 15000 });
+  const employeeQueryKey = ['employees-directory', search.trim(), deptFilter, statusFilter];
+  const { data, error, loading, reload } = useApi(fetchEmployees, { intervalMs: 180_000, staleTimeMs: 120_000, queryKey: employeeQueryKey });
+  const { data: devicesData } = useApi(fetchDevices, { intervalMs: 180_000, staleTimeMs: 120_000, queryKey: 'devices' });
   const fetchInvitations = useCallback((opts) => api.invitations(opts), []);
-  const { data: invitationsData, reload: reloadInvitations } = useApi(fetchInvitations, { intervalMs: 30000 });
+  const { data: invitationsData, reload: reloadInvitations } = useApi(fetchInvitations, { intervalMs: 180_000, staleTimeMs: 120_000, queryKey: 'invitations' });
   const invitations = invitationsData?.invitations ?? [];
 
   useEffect(() => {

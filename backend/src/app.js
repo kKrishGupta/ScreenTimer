@@ -63,6 +63,20 @@ export async function buildApp({ config, prisma, logger }) {
 
   app.decorate('config', config);
   app.decorate('prisma', prisma);
+  const requestMetrics = { count: 0, errors: 0, totalResponseMs: 0 };
+  app.decorate('requestMetrics', requestMetrics);
+  app.addHook('onResponse', async (request, reply) => {
+    requestMetrics.count += 1;
+    requestMetrics.errors += reply.statusCode >= 500 ? 1 : 0;
+    requestMetrics.totalResponseMs += Number(reply.elapsedTime || 0);
+    if (requestMetrics.count >= 100) {
+      app.log.info({ requests: requestMetrics.count, serverErrors: requestMetrics.errors,
+        averageResponseMs: Math.round(requestMetrics.totalResponseMs / requestMetrics.count) }, 'Aggregate API request metrics');
+      requestMetrics.count = 0;
+      requestMetrics.errors = 0;
+      requestMetrics.totalResponseMs = 0;
+    }
+  });
 
   const authService = new AuthService(prisma, app.log, config);
   const deviceService = new DeviceService(prisma, app.log);

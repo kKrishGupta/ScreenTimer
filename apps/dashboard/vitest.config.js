@@ -12,5 +12,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.js'],
     css: false,
+    // Route-level lazy imports can exceed Testing Library's short async query
+    // window when many jsdom workers compile pages at once on CI runners.
+    // Serial files keep the production-like lazy boundaries deterministic.
+    fileParallelism: false,
   },
 });

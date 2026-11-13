@@ -5,6 +5,15 @@ import { createScreenshotStore, createViewToken, screenshotObjectKey, verifyView
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SCREEN_CAPTURE_DEVICE_KINDS = ['DESKTOP_AGENT', 'BROWSER_EXTENSION'];
+const DEFAULT_CAPTURE_PAGE_SIZE = 12;
+const MAX_CAPTURE_PAGE_SIZE = 48;
+const captureListSelect = {
+  id: true, organizationId: true, captureKey: true, employeeId: true, deviceId: true,
+  applicationName: true, mimeType: true, sizeBytes: true, width: true, height: true,
+  captureStatus: true, failureCode: true, capturedAt: true, expiresAt: true,
+  employee: { select: { displayName: true } },
+  device: { select: { name: true, kind: true, browser: true } },
+};
 
 function isScreenCaptureDevice(device) {
   if (!device || device.isRevoked || device.archivedAt) return false;
@@ -408,9 +417,9 @@ export default async function screenRoutes(fastify) {
     const organizationId = adminOrganization(request, reply);
     if (!organizationId) return;
     const parsedPage = Number.parseInt(request.query?.page || '1', 10);
-    const parsedPageSize = Number.parseInt(request.query?.pageSize || '24', 10);
+    const parsedPageSize = Number.parseInt(request.query?.pageSize || String(DEFAULT_CAPTURE_PAGE_SIZE), 10);
     const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
-    const pageSize = Number.isSafeInteger(parsedPageSize) ? Math.min(100, Math.max(1, parsedPageSize)) : 24;
+    const pageSize = Number.isSafeInteger(parsedPageSize) ? Math.min(MAX_CAPTURE_PAGE_SIZE, Math.max(1, parsedPageSize)) : DEFAULT_CAPTURE_PAGE_SIZE;
     const where = { organizationId, expiresAt: { gt: new Date() } };
     if (request.query?.employeeId) where.employeeId = request.query.employeeId;
     if (request.query?.deviceId) where.deviceId = request.query.deviceId;
@@ -424,7 +433,7 @@ export default async function screenRoutes(fastify) {
       where.capturedAt = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
     }
     const [rows, total] = await Promise.all([
-      prisma.screenCaptureMetadata.findMany({ where, include: { employee: { select: { displayName: true } }, device: { select: { name: true, kind: true, browser: true } } }, orderBy: { capturedAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+      prisma.screenCaptureMetadata.findMany({ where, select: captureListSelect, orderBy: { capturedAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
       prisma.screenCaptureMetadata.count({ where }),
     ]);
     return { captures: rows.map((row) => mapCapture(row, request)), page, pageSize, total, totalPages: Math.ceil(total / pageSize) };
@@ -433,14 +442,14 @@ export default async function screenRoutes(fastify) {
   fastify.get('/screen-monitoring/employees/:employeeId/captures', async (request, reply) => {
     const organizationId = adminOrganization(request, reply);
     if (!organizationId) return;
-    const rows = await prisma.screenCaptureMetadata.findMany({ where: { organizationId, employeeId: request.params.employeeId, expiresAt: { gt: new Date() } }, include: { employee: true, device: true }, orderBy: { capturedAt: 'desc' }, take: 100 });
+    const rows = await prisma.screenCaptureMetadata.findMany({ where: { organizationId, employeeId: request.params.employeeId, expiresAt: { gt: new Date() } }, select: captureListSelect, orderBy: { capturedAt: 'desc' }, take: DEFAULT_CAPTURE_PAGE_SIZE });
     return { captures: rows.map((row) => mapCapture(row, request)) };
   });
 
   fastify.get('/screen-monitoring/captures/:captureId', async (request, reply) => {
     const organizationId = adminOrganization(request, reply);
     if (!organizationId) return;
-    const row = await prisma.screenCaptureMetadata.findFirst({ where: { id: request.params.captureId, organizationId, expiresAt: { gt: new Date() } }, include: { employee: true, device: true } });
+    const row = await prisma.screenCaptureMetadata.findFirst({ where: { id: request.params.captureId, organizationId, expiresAt: { gt: new Date() } }, select: captureListSelect });
     if (!row) return reply.code(404).send({ error: { code: 'CAPTURE_NOT_FOUND', message: 'Screenshot not found' } });
     await audit(prisma, organizationId, 'SCREENSHOT_METADATA_VIEWED', request.user.email, { captureId: row.id });
     return { capture: mapCapture(row, request) };
@@ -452,11 +461,12 @@ export default async function screenRoutes(fastify) {
     if (!verifyViewToken(request.query?.token, request.params.captureId, request.user.id)) return reply.code(403).send({ error: { code: 'VIEW_URL_EXPIRED', message: 'This screenshot link is invalid or expired' } });
     const organizationId = role === Roles.SUPER_ADMIN ? request.query?.organizationId : request.user.organizationId;
     if (!organizationId) return reply.code(400).send({ error: { code: 'ORGANIZATION_SCOPE_REQUIRED', message: 'Select an organization' } });
-    const row = await prisma.screenCaptureMetadata.findFirst({ where: { id: request.params.captureId, organizationId, captureStatus: 'stored', expiresAt: { gt: new Date() } } });
+    const row = await prisma.screenCaptureMetadata.findFirst({ where: { id: request.params.captureId, organizationId, captureStatus: 'stored', expiresAt: { gt: new Date() } }, select: { id: true, storageKey: true, mimeType: true, sizeBytes: true } });
     if (!row?.storageKey) return reply.code(404).send({ error: { code: 'CAPTURE_NOT_FOUND', message: 'Screenshot not found' } });
     const bytes = await getStore().get(row.storageKey);
     await audit(prisma, organizationId, 'SCREENSHOT_VIEWED', request.user.email, { captureId: row.id });
     reply.header('Cache-Control', 'private, no-store, max-age=0');
+    reply.header('Content-Length', String(bytes.length));
     reply.header('Content-Disposition', `inline; filename="digitalpulse-${row.id}.${row.mimeType === 'image/png' ? 'png' : 'jpg'}"`);
     return reply.type(row.mimeType).send(bytes);
   });

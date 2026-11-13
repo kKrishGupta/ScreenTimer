@@ -1,10 +1,43 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Bundle Name="DigitalPulse"
           Manufacturer="DigitalPulse"
-          Version="0.1.0"
+          Version="0.2.0"
           UpgradeCode="8972F204-470C-4813-985C-2A393AF85F98"
           Compressed="yes">
+    <!-- Microsoft documents the EdgeUpdate WebView2 client registration as the
+         authoritative Evergreen Runtime presence/version signal. Search both
+         installation scopes and both registry views so the bundle also handles
+         registrations created by 32-bit and 64-bit updaters. -->
+    <util:RegistrySearch Id="WebView2Hklm32Search"
+                         Variable="WebView2Hklm32Version"
+                         Root="HKLM"
+                         Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                         Value="pv"
+                         Result="value"
+                         Bitness="always32" />
+    <util:RegistrySearch Id="WebView2Hklm64Search"
+                         Variable="WebView2Hklm64Version"
+                         Root="HKLM"
+                         Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                         Value="pv"
+                         Result="value"
+                         Bitness="always64" />
+    <util:RegistrySearch Id="WebView2Hkcu32Search"
+                         Variable="WebView2Hkcu32Version"
+                         Root="HKCU"
+                         Key="Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                         Value="pv"
+                         Result="value"
+                         Bitness="always32" />
+    <util:RegistrySearch Id="WebView2Hkcu64Search"
+                         Variable="WebView2Hkcu64Version"
+                         Root="HKCU"
+                         Key="Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+                         Value="pv"
+                         Result="value"
+                         Bitness="always64" />
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense"
                                                LicenseUrl=""
@@ -12,6 +45,17 @@
                                                SuppressOptionsUI="yes" />
     </BootstrapperApplication>
     <Chain>
+      <!-- A registered version greater than 0.0.0.0 satisfies Microsoft's
+           documented runtime check. Otherwise the official Evergreen bootstrapper
+           installs per-user when elevation is unavailable. It remains permanent
+           because DigitalPulse does not own the shared WebView2 runtime. -->
+      <ExePackage Id="WebView2Runtime"
+                  SourceFile="$(WebView2Path)"
+                  PerMachine="no"
+                  Permanent="yes"
+                  Vital="yes"
+                  DetectCondition="(WebView2Hklm32Version &gt; v0.0.0.0) OR (WebView2Hklm64Version &gt; v0.0.0.0) OR (WebView2Hkcu32Version &gt; v0.0.0.0) OR (WebView2Hkcu64Version &gt; v0.0.0.0)"
+                  InstallArguments="/silent /install" />
       <MsiPackage SourceFile="$(MsiPath)" Visible="no" />
     </Chain>
   </Bundle>

@@ -29,6 +29,7 @@ test('authenticated screenshot upload persists, deduplicates, enforces revocatio
   const owner = { id: device.userId, organizationId: device.organizationId, employmentStatus: 'active', monitoringAuthorized: true, monitoringConsentAt: new Date('2020-01-01'), screenMonitoringAcknowledgedAt: new Date('2020-01-01'), workingDays: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], shiftStart: '00:00', shiftEnd: '23:59', organization: { timezone: 'UTC' } };
   const setting = { enabled: true, captureIntervalSeconds: 300, retentionDays: 30, workingDays: owner.workingDays, shiftStart: '00:00', shiftEnd: '23:59', excludedApplications: ['private.exe'] };
   const rows = [];
+  let galleryQuery;
   const prisma = {
     device: { findUnique: async ({ where }) => where.id === device.id ? device : null,
       updateMany: async () => { throw new Error('Injected status-cache failure'); } },
@@ -38,7 +39,7 @@ test('authenticated screenshot upload persists, deduplicates, enforces revocatio
       findUnique: async ({ where }) => rows.find(row => row.captureKey === where.deviceId_captureKey.captureKey) || null,
       create: async ({ data }) => { rows.push(data); return data; },
       findFirst: async ({ where }) => rows.find(row => row.id === where.id && row.organizationId === where.organizationId) || null,
-      findMany: async () => rows, count: async () => rows.length,
+      findMany: async (query) => { galleryQuery = query; return rows; }, count: async () => rows.length,
     },
     auditLog: { create: async ({ data }) => data },
   };
@@ -68,9 +69,16 @@ test('authenticated screenshot upload persists, deduplicates, enforces revocatio
   const admin = await app.authService.createTestSession({ userId: 'admin-test', organizationId: device.organizationId, role: 'ADMIN', email: 'admin@example.test' });
   const gallery = await app.inject({ method: 'GET', url: '/api/v1/screen-monitoring/captures', headers: admin.headers });
   assert.equal(gallery.statusCode, 200, gallery.body);
+  assert.equal(gallery.json().pageSize, 12);
+  assert.equal(galleryQuery.take, 12);
   const imageUrl = gallery.json().captures[0].imageUrl;
   assert.equal((await app.inject({ method: 'GET', url: imageUrl })).statusCode, 401);
   const image = await app.inject({ method: 'GET', url: imageUrl, headers: admin.headers });
   assert.equal(image.statusCode, 200, image.body);
+  assert.equal(image.headers['content-type'], 'image/jpeg');
+  assert.match(image.headers['cache-control'], /private/);
+  assert.match(image.headers['cache-control'], /no-store/);
   assert.deepEqual(image.rawPayload, jpeg);
+  const otherAdmin = await app.authService.createTestSession({ userId: 'other-admin', organizationId: 'other-org', role: 'ADMIN', email: 'other@example.test' });
+  assert.equal((await app.inject({ method: 'GET', url: imageUrl, headers: otherAdmin.headers })).statusCode, 403);
 });

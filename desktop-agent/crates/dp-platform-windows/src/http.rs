@@ -4,6 +4,9 @@
 pub struct HttpResponse {
     pub status: u16,
     pub body: Vec<u8>,
+    /// First response cookie without attributes. Trusted native callers use it
+    /// transiently for employee device verification and must never log it.
+    pub session_cookie: Option<String>,
 }
 
 fn valid_headers(headers: &[(String, String)]) -> bool {
@@ -37,12 +40,14 @@ pub fn request(
     secure: bool,
 ) -> Result<HttpResponse, String> {
     use std::io;
+    use windows_sys::Win32::Foundation::{GetLastError, ERROR_INSUFFICIENT_BUFFER};
     use windows_sys::Win32::Networking::WinHttp::{
         WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
         WinHttpQueryDataAvailable, WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse,
         WinHttpSendRequest, WinHttpSetOption, WinHttpSetTimeouts,
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_DISABLE_REDIRECTS, WINHTTP_FLAG_SECURE,
-        WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
+        WINHTTP_OPTION_DISABLE_FEATURE, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_SET_COOKIE,
+        WINHTTP_QUERY_STATUS_CODE,
     };
 
     if !valid_headers(headers) {
@@ -206,9 +211,51 @@ pub fn request(
         )?;
         response_body.truncate(start + read as usize);
     }
+    let mut cookie_bytes = 0u32;
+    let first_query = unsafe {
+        WinHttpQueryHeaders(
+            request.0,
+            WINHTTP_QUERY_SET_COOKIE,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            &mut cookie_bytes,
+            std::ptr::null_mut(),
+        )
+    };
+    let session_cookie = if first_query == 0
+        && unsafe { GetLastError() } == ERROR_INSUFFICIENT_BUFFER
+        && (2..=32 * 1024).contains(&cookie_bytes)
+    {
+        let mut value = vec![0u16; cookie_bytes as usize / 2];
+        if unsafe {
+            WinHttpQueryHeaders(
+                request.0,
+                WINHTTP_QUERY_SET_COOKIE,
+                std::ptr::null(),
+                value.as_mut_ptr().cast(),
+                &mut cookie_bytes,
+                std::ptr::null_mut(),
+            )
+        } != 0
+        {
+            let raw = String::from_utf16_lossy(
+                value.split(|unit| *unit == 0).next().unwrap_or_default(),
+            );
+            raw.split(';')
+                .next()
+                .map(str::trim)
+                .filter(|cookie| cookie.contains('=') && !cookie.chars().any(char::is_control))
+                .map(str::to_owned)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     Ok(HttpResponse {
         status: status as u16,
         body: response_body,
+        session_cookie,
     })
 }
 

@@ -10,7 +10,7 @@ const release = JSON.parse((await readFile(path.join(downloads, 'DigitalPulse-Se
 const sha256 = (buffer) => createHash('sha256').update(buffer).digest('hex');
 const binary = await readFile(artifact);
 if (binary[0] !== 0x4d || binary[1] !== 0x5a) throw new Error('DigitalPulse-Setup.exe is not a Windows PE executable.');
-if (release.schemaVersion !== 1 || release.productVersion !== '0.1.0' || release.fileName !== 'DigitalPulse-Setup.exe') throw new Error('Unsupported Windows installer release metadata.');
+if (release.schemaVersion !== 1 || release.productVersion !== '0.2.0' || release.fileName !== 'DigitalPulse-Setup.exe') throw new Error('Unsupported Windows installer release metadata.');
 if (sha256(binary) !== release.sha256 || (await stat(artifact)).size !== release.bytes) throw new Error('Windows installer artifact is stale or corrupted.');
 const checksum = (await readFile(`${artifact}.sha256`, 'utf8')).trim().split(/\s+/)[0];
 if (checksum !== release.sha256) throw new Error('Windows installer checksum sidecar does not match.');

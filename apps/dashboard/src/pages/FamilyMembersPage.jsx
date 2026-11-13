@@ -9,7 +9,7 @@ export default function FamilyMembersPage() {
   const fetchMembers = useCallback((opts) => api.familyMembers(opts), []);
   const fetchDevices = useCallback((opts) => api.devices(opts), []);
 
-  const { data: membersData, error: membersErr, loading: membersLoading, reload: reloadMembers } = useApi(fetchMembers, { intervalMs: 5000 });
+  const { data: membersData, error: membersErr, loading: membersLoading, reload: reloadMembers } = useApi(fetchMembers, { intervalMs: 180_000, staleTimeMs: 120_000 });
   const { data: devicesData } = useApi(fetchDevices);
 
   const [newName, setNewName] = useState('');

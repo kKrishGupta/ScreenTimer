@@ -10,7 +10,7 @@ $sidecar = "$installer.sha256"
 foreach ($path in @($installer, $releasePath, $sidecar)) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing Windows release file: $path" } }
 $release = Get-Content -LiteralPath $releasePath -Raw | ConvertFrom-Json
 $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($release.fileName -ne 'DigitalPulse-Setup.exe' -or $release.productVersion -ne '0.1.0' -or $release.sha256 -ne $hash) { throw 'Windows installer release metadata does not match the artifact.' }
+if ($release.fileName -ne 'DigitalPulse-Setup.exe' -or $release.productVersion -ne '0.2.0' -or $release.sha256 -ne $hash) { throw 'Windows installer release metadata does not match the artifact.' }
 if ((Get-Content -LiteralPath $sidecar -Raw).Split(' ')[0].Trim() -ne $hash) { throw 'Windows installer checksum sidecar does not match.' }
 foreach ($property in $release.sourceFiles.PSObject.Properties) {
     $path = Join-Path $repoRoot $property.Name.Replace('/', '\')

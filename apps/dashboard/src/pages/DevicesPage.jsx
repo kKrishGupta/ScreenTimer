@@ -46,8 +46,8 @@ export default function DevicesPage() {
     ? api.deviceDirectory({ includeArchived: true }, opts)
     : api.devices(opts), [isOrgAdmin]);
   const fetchMonitoring = useCallback((opts) => api.myMonitoringStatus(opts), []);
-  const { data, error, loading, reload } = useApi(fetchDevices, { intervalMs: 10000 });
-  const { data: monitoringData, error: monitoringError, reload: reloadMonitoring } = useApi(fetchMonitoring, { intervalMs: 15000 });
+  const { data, error, loading, reload } = useApi(fetchDevices, { intervalMs: 180_000, staleTimeMs: 120_000, queryKey: 'devices' });
+  const { data: monitoringData, error: monitoringError, reload: reloadMonitoring } = useApi(fetchMonitoring, { intervalMs: 60_000, staleTimeMs: 30_000, queryKey: 'monitoring-status' });
   const [schedule, setSchedule] = useState(DEFAULT_SCHEDULE);
   const [timezone, setTimezone] = useState('');
   const scheduleDirty = useRef(false);

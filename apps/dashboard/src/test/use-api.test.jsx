@@ -1,8 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useApi } from '../hooks/useApi.js';
+import { clearApiQueryCache, useApi } from '../hooks/useApi.js';
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => { clearApiQueryCache(); vi.useRealTimers(); });
 
 function deferred() {
   let resolve;
@@ -19,14 +19,14 @@ describe('useApi request ownership', () => {
     const fetcher = vi.fn()
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
-    const { result } = renderHook(() => useApi(fetcher, { intervalMs: 100 }));
+    const { result } = renderHook(() => useApi(fetcher, { intervalMs: 100, jitterRatio: 0, staleTimeMs: 0 }));
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     await act(() => vi.advanceTimersByTimeAsync(500));
     expect(fetcher).toHaveBeenCalledTimes(1);
     await act(async () => first.resolve({ value: 1 }));
     expect(result.current.data).toEqual({ value: 1 });
-    await act(() => vi.advanceTimersByTimeAsync(100));
+    await act(() => vi.advanceTimersByTimeAsync(500));
     expect(fetcher).toHaveBeenCalledTimes(2);
     await act(async () => second.resolve({ value: 2 }));
   });
@@ -72,5 +72,42 @@ describe('useApi request ownership', () => {
     await act(async () => result.current.reload());
     expect(result.current.data).toEqual({ value: 'retained' });
     expect(result.current.error?.message).toBe('temporary failure');
+  });
+
+  it('deduplicates simultaneous consumers with the same query key', async () => {
+    const pending = deferred();
+    const fetcher = vi.fn(() => pending.promise);
+    const first = renderHook(() => useApi(fetcher, { queryKey: 'shared-resource' }));
+    const second = renderHook(() => useApi(fetcher, { queryKey: 'shared-resource' }));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve({ value: 'shared' }));
+    expect(first.result.current.data).toEqual({ value: 'shared' });
+    expect(second.result.current.data).toEqual({ value: 'shared' });
+  });
+
+  it('does not poll while the page is hidden', async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const fetcher = vi.fn().mockResolvedValue({ value: 1 });
+    renderHook(() => useApi(fetcher, { intervalMs: 100, jitterRatio: 0, staleTimeMs: 0 }));
+    await act(async () => {});
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    visibility.mockRestore();
+  });
+
+  it('pauses offline and refreshes immediately after connectivity returns', async () => {
+    let connected = false;
+    const onlineState = vi.spyOn(navigator, 'onLine', 'get').mockImplementation(() => connected);
+    const fetcher = vi.fn().mockResolvedValue({ value: 'recovered' });
+    const { result } = renderHook(() => useApi(fetcher, { queryKey: 'offline-recovery' }));
+    expect(fetcher).not.toHaveBeenCalled();
+
+    connected = true;
+    act(() => window.dispatchEvent(new Event('online')));
+    await waitFor(() => expect(result.current.data).toEqual({ value: 'recovered' }));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    onlineState.mockRestore();
   });
 });

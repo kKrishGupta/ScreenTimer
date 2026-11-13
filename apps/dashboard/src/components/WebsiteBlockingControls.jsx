@@ -24,7 +24,7 @@ export function parseBlockedDomains(value) {
 
 export default function WebsiteBlockingControls() {
   const fetchPolicies = useCallback(opts => api.policies(opts), []);
-  const { data, error, loading, reload } = useApi(fetchPolicies, { intervalMs: 10000 });
+  const { data, error, loading, reload } = useApi(fetchPolicies, { intervalMs: 60_000, staleTimeMs: 30_000 });
   const [domains, setDomains] = useState('');
   const [message, setMessage] = useState('');
   const [saveError, setSaveError] = useState('');

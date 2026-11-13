@@ -6,7 +6,8 @@ import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/States.jsx';
 import { formatDuration } from '../lib/format.js';
 
-const REFRESH_INTERVAL_MS = 30_000;
+const ACTIVITY_REFRESH_MS = 60_000;
+const DIRECTORY_REFRESH_MS = 3 * 60_000;
 const today = () => new Date().toISOString().slice(0, 10);
 
 function MetricCard({ label, value, detail, loading, error, to }) {
@@ -162,7 +163,7 @@ function DeviceHealth({ data, loading, error }) {
 }
 
 function HealthCard() {
-  const { data, error, loading, reload } = useApi(api.health, { intervalMs: 60_000 });
+  const { data, error, loading, reload } = useApi(api.health, { intervalMs: 90_000, staleTimeMs: 60_000, queryKey: 'backend-health' });
   if (loading && !data) return <LoadingState label="Checking backend and database health…" />;
   if (error || data?.error) return <ErrorState error={error || new Error(data?.error?.message || 'Health status is unavailable')} onRetry={reload} />;
   if (!data) return <ErrorState error={new Error('No response from backend service.')} onRetry={reload} />;
@@ -191,14 +192,14 @@ export default function OverviewPage() {
   const loadWebsites = useCallback((opts) => api.websites({ date }, opts), [date]);
   const loadTimeline = useCallback((opts) => api.timeline({ limit: 8, from: `${date}T00:00:00.000Z`, to: new Date().toISOString() }, opts), [date]);
 
-  const employees = useApi(loadEmployees, { intervalMs: REFRESH_INTERVAL_MS });
-  const live = useApi(loadLive, { intervalMs: REFRESH_INTERVAL_MS });
-  const invitations = useApi(loadInvitations, { intervalMs: REFRESH_INTERVAL_MS });
-  const devices = useApi(loadDevices, { intervalMs: REFRESH_INTERVAL_MS });
-  const summary = useApi(loadSummary, { intervalMs: REFRESH_INTERVAL_MS });
-  const apps = useApi(loadApps, { intervalMs: REFRESH_INTERVAL_MS });
-  const websites = useApi(loadWebsites, { intervalMs: REFRESH_INTERVAL_MS });
-  const timeline = useApi(loadTimeline, { intervalMs: REFRESH_INTERVAL_MS });
+  const employees = useApi(loadEmployees, { intervalMs: DIRECTORY_REFRESH_MS, staleTimeMs: 2 * 60_000, queryKey: 'employees-directory' });
+  const live = useApi(loadLive, { intervalMs: ACTIVITY_REFRESH_MS, staleTimeMs: 30_000, queryKey: 'employees-live' });
+  const invitations = useApi(loadInvitations, { intervalMs: DIRECTORY_REFRESH_MS, staleTimeMs: 2 * 60_000, queryKey: 'invitations' });
+  const devices = useApi(loadDevices, { intervalMs: DIRECTORY_REFRESH_MS, staleTimeMs: 2 * 60_000, queryKey: 'devices' });
+  const summary = useApi(loadSummary, { intervalMs: ACTIVITY_REFRESH_MS, staleTimeMs: 30_000, queryKey: ['activity-summary', date] });
+  const apps = useApi(loadApps, { intervalMs: ACTIVITY_REFRESH_MS, staleTimeMs: 30_000, queryKey: ['activity-apps', date] });
+  const websites = useApi(loadWebsites, { intervalMs: ACTIVITY_REFRESH_MS, staleTimeMs: 30_000, queryKey: ['activity-websites', date] });
+  const timeline = useApi(loadTimeline, { intervalMs: ACTIVITY_REFRESH_MS, staleTimeMs: 30_000, queryKey: ['activity-timeline', date, 8] });
 
   const employeeRows = employees.data?.employees || [];
   const liveSummary = live.data?.summary;

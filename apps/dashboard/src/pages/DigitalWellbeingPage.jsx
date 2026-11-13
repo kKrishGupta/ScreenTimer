@@ -152,7 +152,7 @@ function PersonalWellbeing() {
     const user = response.user || response;
     return api.employee(user.id, opts);
   }, []);
-  const { data, loading, error, reload } = useApi(fetchPersonalUsage, { intervalMs: 30000 });
+  const { data, loading, error, reload } = useApi(fetchPersonalUsage, { intervalMs: 60_000, staleTimeMs: 30_000 });
   if (loading && !data) return <LoadingState label="Loading your wellbeing summary..." />;
   if (error) return <ErrorState error={error} onRetry={reload} />;
   const analytics = data?.employee?.analytics;
@@ -202,13 +202,13 @@ function UsageReports() {
   const fetchPlanner = useCallback((opts) => api.plannerAnalytics(opts), []);
   const fetchWellbeing = useCallback((opts) => api.wellbeingStatus(opts), []);
 
-  const { data: summaryData, loading: sumLoading, error: sumErr, reload: reloadSum } = useApi(fetchSummary, { intervalMs: 5000 });
-  const { data: appsData, reload: reloadApps } = useApi(fetchApps, { intervalMs: 5000 });
-  const { data: websitesData, reload: reloadWeb } = useApi(fetchWebsites, { intervalMs: 5000 });
-  const { data: weeklyData, reload: reloadWeek } = useApi(fetchWeekly, { intervalMs: 10000 });
-  const { data: plannerData, reload: reloadPlanner } = useApi(fetchPlanner, { intervalMs: 5000 });
-  const { data: wellbeingData, reload: reloadWellbeing } = useApi(fetchWellbeing, { intervalMs: 5000 });
-  const { data: employeesData } = useApi(fetchEmployees);
+  const { data: summaryData, loading: sumLoading, error: sumErr, reload: reloadSum } = useApi(fetchSummary, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: appsData, reload: reloadApps } = useApi(fetchApps, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: websitesData, reload: reloadWeb } = useApi(fetchWebsites, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: weeklyData, reload: reloadWeek } = useApi(fetchWeekly, { intervalMs: 300_000, staleTimeMs: 120_000 });
+  const { data: plannerData, reload: reloadPlanner } = useApi(fetchPlanner, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: wellbeingData, reload: reloadWellbeing } = useApi(fetchWellbeing, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: employeesData } = useApi(fetchEmployees, { staleTimeMs: 120_000, queryKey: 'wellbeing-employees' });
   const reportEmployees = employeesData?.employees ?? [];
 
   const exportCsv = async () => {

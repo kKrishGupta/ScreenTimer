@@ -7,7 +7,7 @@ import { formatDuration } from '../lib/format.js';
 
 export default function ApplicationsPage() {
   const fetchApps = useCallback((opts) => api.apps({}, opts), []);
-  const { data, error, loading, reload } = useApi(fetchApps, { intervalMs: 5000 });
+  const { data, error, loading, reload } = useApi(fetchApps, { intervalMs: 60_000, staleTimeMs: 30_000 });
 
   const apps = data?.apps ?? [];
   const maxDuration = apps.length > 0 ? Math.max(...apps.map((a) => a.durationSeconds)) : 1;

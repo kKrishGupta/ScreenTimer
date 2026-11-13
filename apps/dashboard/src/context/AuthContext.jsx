@@ -1,6 +1,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { api, setAuthToken, setSuperAdminOrganizationScope } from '../lib/api.js';
+import { clearApiQueryCache } from '../hooks/useApi.js';
 
 const AuthContext = createContext(null);
 
@@ -66,6 +67,7 @@ export function AuthProvider({ children }) {
       }
       const nextId = organizationId;
       setSuperAdminOrganizationScope(user?.role === 'SUPER_ADMIN' ? nextId : '');
+      if (nextId !== selectedOrganizationId) clearApiQueryCache({ refetch: true });
       setSelectedOrganizationId(nextId);
     },
     isAuthenticated: Boolean(user),
@@ -96,6 +98,7 @@ export function AuthProvider({ children }) {
         }
 
         setLogoutDestination(null);
+        clearApiQueryCache();
         setSuperAdminOrganizationScope('');
         setSelectedOrganizationId('');
         setUser(authenticatedUser);
@@ -119,6 +122,7 @@ export function AuthProvider({ children }) {
       try {
         await api.logout();
       } finally {
+        clearApiQueryCache();
         setAuthToken(null);
         setSuperAdminOrganizationScope('');
         setSelectedOrganizationId('');

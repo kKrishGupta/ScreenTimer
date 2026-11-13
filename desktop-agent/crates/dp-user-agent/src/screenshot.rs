@@ -44,9 +44,25 @@ if($bounds.Width -lt 1 -or $bounds.Height -lt 1){throw 'No interactive display'}
 $bitmap=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
 $graphics=[System.Drawing.Graphics]::FromImage($bitmap)
 $stream=New-Object System.IO.MemoryStream
+$sample=$null
+$sampleGraphics=$null
 $plain=$null
 try{
   $graphics.CopyFromScreen($bounds.Left,$bounds.Top,0,0,$bitmap.Size,[System.Drawing.CopyPixelOperation]::SourceCopy)
+  # A successful graphics call can still return an all-black frame on a locked,
+  # disconnected, or unavailable interactive desktop. Reject only uniformly
+  # near-black samples; never persist or log pixel content.
+  $sample=New-Object System.Drawing.Bitmap 32,18
+  $sampleGraphics=[System.Drawing.Graphics]::FromImage($sample)
+  $sampleGraphics.DrawImage($bitmap,0,0,32,18)
+  $nonBlack=0
+  for($x=0;$x -lt 32;$x++){
+    for($y=0;$y -lt 18;$y++){
+      $pixel=$sample.GetPixel($x,$y)
+      if($pixel.R -gt 4 -or $pixel.G -gt 4 -or $pixel.B -gt 4){$nonBlack++}
+    }
+  }
+  if($nonBlack -eq 0){throw 'Capture returned a uniformly black frame'}
   $bitmap.Save($stream,[System.Drawing.Imaging.ImageFormat]::Jpeg)
   $plain=$stream.ToArray()
   if($plain.Length -lt 32 -or $plain.Length -gt 5242880){throw 'Invalid screenshot size'}
@@ -55,6 +71,7 @@ try{
   Write-Output ("OK:{0}x{1}" -f $bounds.Width,$bounds.Height)
 }finally{
   if($plain){[Array]::Clear($plain,0,$plain.Length)}
+  if($sampleGraphics){$sampleGraphics.Dispose()};if($sample){$sample.Dispose()}
   $stream.Dispose();$graphics.Dispose();$bitmap.Dispose()
 }
 "#;
@@ -911,6 +928,12 @@ mod tests {
         assert_eq!(sanitize_diagnostics(empty_stderr), "no stderr output");
     }
 
+    #[test]
+    fn capture_helper_rejects_uniform_black_frames_without_logging_pixels() {
+        assert!(CAPTURE_SCRIPT.contains("if($nonBlack -eq 0){throw 'Capture returned a uniformly black frame'}"));
+        assert!(!CAPTURE_SCRIPT.contains("Write-Output $pixel"));
+    }
+
     #[cfg(windows)]
     #[test]
     fn capture_helper_executes_without_amsi_block_and_writes_valid_dpapi_jpeg() {
@@ -954,7 +977,9 @@ mod tests {
             assert_eq!(&plaintext[0..2], &[0xff, 0xd8], "Decrypted payload must have JPEG SOI magic");
         } else {
             assert!(
-                stderr.contains("No interactive display") || stderr.contains("handle is invalid"),
+                stderr.contains("No interactive display")
+                    || stderr.contains("handle is invalid")
+                    || stderr.contains("uniformly black frame"),
                 "Expected display error if headless, but got: {stderr}"
             );
         }

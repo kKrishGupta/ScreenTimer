@@ -167,6 +167,16 @@ beforeEach(() => {
 });
 
 describe('dashboard shell and navigation', () => {
+  it('loads only resources needed by the visible route', async () => {
+    mockFetch(defaultRouterFetch);
+    renderAt('/employees');
+    expect(await screen.findByText(/Employee Directory & Monitoring Governance/i)).toBeInTheDocument();
+    const urls = globalThis.fetch.mock.calls.map(([url]) => String(url));
+    expect(urls.some((url) => url.includes('/screen-monitoring/'))).toBe(false);
+    expect(urls.some((url) => url.includes('/analytics/daily'))).toBe(false);
+    expect(urls.some((url) => url.includes('/analytics/weekly'))).toBe(false);
+  });
+
   it('renders the employee activity monitoring sections in the sidebar', async () => {
     mockFetch(defaultRouterFetch);
     renderAt('/');

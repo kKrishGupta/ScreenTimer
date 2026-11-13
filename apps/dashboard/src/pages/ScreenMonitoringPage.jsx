@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { useApi } from '../hooks/useApi.js';
 import { Button, Card, PageHeader } from '../components/ui/Card.jsx';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/States.jsx';
+import LazyScreenshotImage from '../components/screenshots/LazyScreenshotImage.jsx';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const POLICY_REASONS = {
@@ -32,6 +33,7 @@ export default function ScreenMonitoringPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const imageUrlCacheRef = useRef(new Map());
+  const expiredRefreshesRef = useRef(new Set());
 
   const captureParams = useMemo(() => ({
     employeeId: employeeId || undefined,
@@ -40,7 +42,7 @@ export default function ScreenMonitoringPage() {
     from: date ? `${date}T00:00:00.000Z` : undefined,
     to: date ? `${date}T23:59:59.999Z` : undefined,
     page,
-    pageSize: 24,
+    pageSize: 12,
   }), [employeeId, deviceId, captureSearch, date, page]);
   const loadSettings = useCallback((opts) => api.screenSettings({}, opts), []);
   const loadEmployees = useCallback((opts) => api.screenEmployees({}, opts), []);
@@ -71,9 +73,20 @@ export default function ScreenMonitoringPage() {
     const result = api.screenCaptures(captureParams, opts);
     return typeof result?.then === 'function' ? result.then(normalize) : normalize(result);
   }, [captureParams]);
-  const settings = useApi(loadSettings, { intervalMs: 30000 });
-  const employees = useApi(loadEmployees, { intervalMs: 10000 });
-  const captures = useApi(loadCaptures, { intervalMs: 15000 });
+  const settings = useApi(loadSettings, { queryKey: 'screen-settings', staleTimeMs: 5 * 60_000 });
+  const employees = useApi(loadEmployees, { queryKey: 'screen-employees', staleTimeMs: 3 * 60_000 });
+  const captures = useApi(loadCaptures, {
+    queryKey: ['screen-captures', captureParams],
+    staleTimeMs: 30_000,
+    intervalMs: 60_000,
+  });
+  const reloadCaptures = captures.reload;
+
+  const refreshExpiredImage = useCallback(async (captureId) => {
+    if (expiredRefreshesRef.current.has(captureId)) return;
+    expiredRefreshesRef.current.add(captureId);
+    await reloadCaptures();
+  }, [reloadCaptures]);
 
   const form = formDraft || (settings.data?.settings ? { ...settings.data.settings, excludedApplications: settings.data.settings.excludedApplications?.join(', ') || '' } : null);
 
@@ -176,7 +189,7 @@ export default function ScreenMonitoringPage() {
           <Button onClick={captures.reload}>Refresh gallery</Button>
         </div>
         {captures.loading && !captures.data ? <LoadingState label="Loading captures..." /> : captures.error && !captures.data ? <ErrorState error={captures.error} onRetry={captures.reload} /> : captureList.length === 0 ? <EmptyState title="No screenshots in this range">Captures appear here only after every authorization and schedule gate passes.</EmptyState> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{captureList.map((capture) => <button type="button" key={capture.id} onClick={() => setSelected(capture)} className="overflow-hidden rounded-xl border border-white/10 bg-surface-950 text-left hover:border-sky-400/40">
-          <div className="aspect-video bg-black"><img loading="lazy" src={capture.imageUrl} alt={`Work screen captured for ${capture.employeeName}`} className="h-full w-full object-contain" /></div>
+          <div className="aspect-video bg-slate-950"><LazyScreenshotImage capture={capture} onExpired={refreshExpiredImage} /></div>
           <div className="p-3"><p className="font-medium text-white">{capture.employeeName}</p><p className="text-xs text-slate-400">{capture.deviceName} · {capture.collectorKind === 'BROWSER_EXTENSION' ? `${capture.browser === 'edge' ? 'Edge' : 'Chrome'} Browser Extension` : 'Windows Desktop Agent'}</p><p className="mt-2 text-xs text-sky-300">{new Date(capture.capturedAt).toLocaleString()}</p></div>
         </button>)}</div>}
         {(captures.data?.totalPages || 0) > 1 && <div className="mt-4 flex items-center justify-center gap-3"><Button disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button><span className="text-sm text-slate-400">Page {page} of {captures.data.totalPages}</span><Button disabled={page >= captures.data.totalPages} onClick={() => setPage(page + 1)}>Next</Button></div>}
@@ -184,7 +197,7 @@ export default function ScreenMonitoringPage() {
 
       {selected && <div className="fixed inset-0 z-50 grid place-items-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="Screenshot viewer"><div className="w-full max-w-6xl rounded-xl border border-white/10 bg-surface-900 p-4">
         <div className="mb-3 flex items-start justify-between"><div><p className="font-semibold text-white">{selected.employeeName} · {selected.deviceName}</p><p className="text-sm text-slate-400">Captured {new Date(selected.capturedAt).toLocaleString()} · {selected.width} × {selected.height}</p></div><button onClick={() => setSelected(null)} className="text-2xl text-slate-300" aria-label="Close viewer">×</button></div>
-        <div className="flex max-h-[72vh] justify-center bg-black"><img src={selected.imageUrl} alt={`Work screen captured for ${selected.employeeName}`} className="max-h-[72vh] max-w-full object-contain" /></div>
+        <div className="flex h-[72vh] max-h-[72vh] justify-center bg-slate-950"><LazyScreenshotImage capture={selected} eager onExpired={refreshExpiredImage} /></div>
         <div className="mt-4 flex justify-between"><Button disabled={selectedIndex >= captureList.length - 1} onClick={() => setSelected(captureList[selectedIndex + 1])}>Previous</Button><Button disabled={busy} className="text-rose-300" onClick={() => deleteCapture(selected)}>Delete permanently</Button><Button disabled={selectedIndex <= 0} onClick={() => setSelected(captureList[selectedIndex - 1])}>Next</Button></div>
       </div></div>}
     </div>

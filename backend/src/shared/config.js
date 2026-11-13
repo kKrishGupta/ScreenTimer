@@ -82,6 +82,10 @@ export function loadConfig(env = process.env) {
   if (!LOG_LEVELS.has(logLevel)) {
     throw new ConfigError(`LOG_LEVEL must be one of ${[...LOG_LEVELS].join(', ')}`);
   }
+  const databasePoolMax = Number(env.DATABASE_POOL_MAX ?? '5');
+  if (!Number.isInteger(databasePoolMax) || databasePoolMax < 1 || databasePoolMax > 10) {
+    throw new ConfigError('DATABASE_POOL_MAX must be an integer between 1 and 10');
+  }
 
   const corsOrigins = (env.CORS_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173')
     .split(',')
@@ -140,6 +144,7 @@ export function loadConfig(env = process.env) {
     host,
     port,
     databaseUrl,
+    databasePoolMax,
     logLevel,
     corsOrigins,
     publicAppUrl,

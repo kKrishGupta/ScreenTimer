@@ -20,7 +20,7 @@ function timeAgo(dateString) {
 
 export default function LiveMonitoringPage() {
   const fetchLive = useCallback((opts) => api.liveEmployees({}, opts), []);
-  const { data, error, loading, reload } = useApi(fetchLive, { intervalMs: 5000 });
+  const { data, error, loading, reload } = useApi(fetchLive, { intervalMs: 15_000, staleTimeMs: 10_000, queryKey: 'employees-live' });
 
   const [search, setSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');

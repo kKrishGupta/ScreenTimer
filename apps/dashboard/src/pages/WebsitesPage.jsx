@@ -7,7 +7,7 @@ import { formatDuration } from '../lib/format.js';
 
 export default function WebsitesPage() {
   const fetchWebsites = useCallback((opts) => api.websites({}, opts), []);
-  const { data, error, loading, reload } = useApi(fetchWebsites, { intervalMs: 5000 });
+  const { data, error, loading, reload } = useApi(fetchWebsites, { intervalMs: 60_000, staleTimeMs: 30_000 });
 
   const websites = data?.websites ?? [];
   const maxDuration = websites.length > 0 ? Math.max(...websites.map((w) => w.durationSeconds)) : 1;

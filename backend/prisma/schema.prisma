@@ -417,6 +417,8 @@ model ScreenCaptureMetadata {
 
   @@unique([deviceId, captureKey])
   @@index([organizationId, capturedAt])
+  @@index([organizationId, deviceId, capturedAt])
+  @@index([organizationId, employeeId, capturedAt])
   @@index([employeeId, capturedAt])
   @@index([expiresAt])
   @@map("screen_captures")

@@ -56,7 +56,7 @@ function TypeBadge({ type }) {
 
 export default function TimelinePage() {
   const fetchTimeline = useCallback((opts) => api.timeline({ limit: 100 }, opts), []);
-  const { data, error, loading, reload } = useApi(fetchTimeline, { intervalMs: 15000 });
+  const { data, error, loading, reload } = useApi(fetchTimeline, { intervalMs: 60_000, staleTimeMs: 30_000 });
 
   const events = data?.events ?? [];
 

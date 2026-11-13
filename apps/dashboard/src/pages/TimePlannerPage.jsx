@@ -11,10 +11,10 @@ export default function TimePlannerPage() {
   const fetchSessions = useCallback((opts) => api.focusSessions(opts), []);
   const fetchAnalytics = useCallback((opts) => api.plannerAnalytics(opts), []);
 
-  const { data: tasksData, error: tasksErr, loading: tasksLoading, reload: reloadTasks } = useApi(fetchTasks, { intervalMs: 5000 });
-  const { data: goalsData } = useApi(fetchGoals, { intervalMs: 5000 });
-  const { data: sessionsData, reload: reloadSessions } = useApi(fetchSessions, { intervalMs: 3000 });
-  const { data: analytics, error: analyticsErr, loading: analyticsLoading, reload: reloadAnalytics } = useApi(fetchAnalytics, { intervalMs: 5000 });
+  const { data: tasksData, error: tasksErr, loading: tasksLoading, reload: reloadTasks } = useApi(fetchTasks, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: goalsData } = useApi(fetchGoals, { intervalMs: 60_000, staleTimeMs: 30_000 });
+  const { data: sessionsData, reload: reloadSessions } = useApi(fetchSessions, { intervalMs: 15_000, staleTimeMs: 5_000 });
+  const { data: analytics, error: analyticsErr, loading: analyticsLoading, reload: reloadAnalytics } = useApi(fetchAnalytics, { intervalMs: 60_000, staleTimeMs: 30_000 });
 
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskCategory, setNewTaskCategory] = useState('engineering');

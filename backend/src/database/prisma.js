@@ -8,7 +8,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
  *
  * @param {{ databaseUrl: string }} config
  */
-export function createPrismaClient({ databaseUrl }) {
+export function createPrismaClient({ databaseUrl, databasePoolMax = 5 }) {
   const isRemoteSsl = databaseUrl.includes('sslmode=require')
     || databaseUrl.includes('sslmode=verify-ca')
     || databaseUrl.includes('sslmode=verify-full')
@@ -18,7 +18,7 @@ export function createPrismaClient({ databaseUrl }) {
     ssl: isRemoteSsl ? { rejectUnauthorized: true } : undefined,
     connectionTimeoutMillis: 30000,
     idleTimeoutMillis: 60000,
-    max: 10,
+    max: databasePoolMax,
   });
 
   const adapter = new PrismaPg(pool);

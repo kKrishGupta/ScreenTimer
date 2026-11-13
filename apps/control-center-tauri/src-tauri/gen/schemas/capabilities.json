@@ -1,0 +1,1 @@
+{"main-window":{"identifier":"main-window","description":"Only the bundled main window may invoke registered native commands.","local":true,"windows":["main"],"permissions":["core:default"]}}

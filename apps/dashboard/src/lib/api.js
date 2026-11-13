@@ -119,7 +119,15 @@ function readResponseText(res, signal) {
 /**
  * Executes an HTTP fetch request with timeout and error wrapping.
  */
-async function request(path, { method = 'GET', body, signal, acceptStatuses = [], timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+function retryAfterSeconds(header) {
+  if (!header) return 0;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds);
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, (at - Date.now()) / 1000) : 0;
+}
+
+async function requestOnce(path, { method = 'GET', body, signal, acceptStatuses = [], timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
   const effectiveTimeout = Math.min(120_000, Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS));
   const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), effectiveTimeout);
@@ -169,7 +177,7 @@ async function request(path, { method = 'GET', body, signal, acceptStatuses = []
         status: res.status,
         code: resBody?.error?.code ?? (isProxyGatewayError ? 'BACKEND_OFFLINE' : 'HTTP_ERROR'),
         body: resBody,
-        retryAfterSeconds: res.status === 429 ? Math.max(0, Number(res.headers.get('Retry-After')) || 0) : 0,
+        retryAfterSeconds: retryAfterSeconds(res.headers.get('Retry-After')),
       },
     );
   } catch (err) {
@@ -184,6 +192,43 @@ async function request(path, { method = 'GET', body, signal, acceptStatuses = []
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+function waitForRetry(ms, signal) {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+async function request(path, options = {}) {
+  const method = options.method || 'GET';
+  const maxRetries = Math.min(2, Math.max(0, Number(options.maxRetries ?? (method === 'GET' ? 2 : 0)) || 0));
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await requestOnce(path, options);
+    } catch (error) {
+      const retryable = error instanceof ApiError && [429, 502, 503, 504].includes(error.status);
+      if (!retryable || attempt >= maxRetries || options.signal?.aborted || error.status === 401 || error.status === 403) throw error;
+      const exponentialMs = Math.min(8_000, 500 * (2 ** attempt));
+      const serverMs = Math.min(30_000, (error.retryAfterSeconds || 0) * 1000);
+      const jitterMs = Math.floor(Math.random() * 250);
+      try {
+        await waitForRetry(Math.max(serverMs, exponentialMs + jitterMs), options.signal);
+      } catch {
+        throw new ApiError('Request canceled.', { code: 'CANCELED' });
+      }
+    }
   }
 }
 

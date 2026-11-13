@@ -8,7 +8,7 @@ import { ShieldIcon, GlobeIcon, DeviceIcon } from '../components/ui/icons.jsx';
 
 export default function DeclarativeRulesPage() {
   const fetchRules = useCallback((opts) => api.declarativeRules(opts), []);
-  const { data, loading, error, reload } = useApi(fetchRules, { intervalMs: 5000 });
+  const { data, loading, error, reload } = useApi(fetchRules, { staleTimeMs: 120_000, queryKey: 'declarative-rules' });
 
   const [viewMode, setViewMode] = useState('visual'); // 'visual' | 'json'
   const [testUrl, setTestUrl] = useState('');

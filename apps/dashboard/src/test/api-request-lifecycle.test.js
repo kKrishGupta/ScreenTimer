@@ -63,7 +63,7 @@ describe('API request lifecycle', () => {
     vi.stubGlobal('fetch', fetch);
 
     await expect(getJson('/bad')).rejects.toMatchObject({ status: 400, code: 'INVALID_INPUT' });
-    await expect(api.health()).rejects.toMatchObject({ status: 503, code: 'BACKEND_OFFLINE' });
+    await expect(api.health({ maxRetries: 0 })).rejects.toMatchObject({ status: 503, code: 'BACKEND_OFFLINE' });
     await expect(getJson('/network')).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR' });
   });
 
@@ -93,6 +93,28 @@ describe('API request lifecycle', () => {
     const pending = api.resendInvitation('invite-1');
     await vi.advanceTimersByTimeAsync(9_000);
     await expect(pending).resolves.toMatchObject({ success: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries only bounded transient GET failures and then succeeds', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ error: { code: 'UPSTREAM', message: 'Bad gateway' } }, 502))
+      .mockResolvedValueOnce(response({ error: { code: 'BUSY', message: 'Busy' } }, 503))
+      .mockResolvedValueOnce(response({ ok: true }));
+    vi.stubGlobal('fetch', fetch);
+    const pending = getJson('/transient');
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry authorization failures', async () => {
+    const fetch = vi.fn().mockResolvedValue(response({ error: { code: 'FORBIDDEN', message: 'Forbidden' } }, 403));
+    vi.stubGlobal('fetch', fetch);
+    await expect(getJson('/private')).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

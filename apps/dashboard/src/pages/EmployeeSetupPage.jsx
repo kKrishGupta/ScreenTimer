@@ -165,9 +165,9 @@ export default function EmployeeSetupPage() {
     const result = await api.devices(opts);
     return (result?.devices || []).filter((device) => device.userId === user?.id || (user?.role === 'EMPLOYEE' && !device.userId));
   }, [user?.id, user?.role]);
-  const { data: devices = [], error, loading, reload } = useApi(fetchDevices, { intervalMs: 5000 });
+  const { data: devices = [], error, loading, reload } = useApi(fetchDevices, { intervalMs: 180_000, staleTimeMs: 120_000 });
   const fetchMonitoring = useCallback((opts) => api.myMonitoringStatus(opts), []);
-  const { data: monitoringData, error: monitoringError, loading: monitoringLoading, reload: reloadMonitoring } = useApi(fetchMonitoring, { intervalMs: 5000 });
+  const { data: monitoringData, error: monitoringError, loading: monitoringLoading, reload: reloadMonitoring } = useApi(fetchMonitoring, { intervalMs: 30_000, staleTimeMs: 15_000 });
   const [packageAvailability, setPackageAvailability] = useState({ windows: 'checking', chrome: 'checking', edge: 'checking' });
   const [packageCheck, setPackageCheck] = useState(0);
   const [installStarted, setInstallStarted] = useState(() => readInstallState(user?.id));

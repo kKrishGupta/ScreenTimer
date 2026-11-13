@@ -10,6 +10,7 @@ vi.mock('../lib/api.js', () => ({ api: {
   updateScreenDevice: mocks.updateDevice, updateScreenSettings: mocks.updateSettings, deleteScreenCapture: mocks.deleteCapture,
 } }));
 vi.mock('../hooks/useApi.js', () => ({ useApi: fetch => ({ data: fetch(), loading: false, reload: mocks.reload }) }));
+vi.mock('../components/screenshots/LazyScreenshotImage.jsx', () => ({ default: ({ capture }) => <img src={capture.imageUrl} alt={`Work screen captured for ${capture.employeeName}`} /> }));
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.settings = { settings: { enabled: true, captureIntervalSeconds: 300, retentionDays: 30, workingDays: ['Mon'], shiftStart: '09:00', shiftEnd: '18:00', excludedApplications: [] } };
@@ -50,7 +51,7 @@ it('uses returned image URLs, opens the viewer, filters and deletes the selected
   fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }));
   await waitFor(() => expect(mocks.deleteCapture).toHaveBeenCalledWith('cap-1'));
   fireEvent.change(screen.getByPlaceholderText('Search employee'), { target: { value: 'Test' } });
-  await waitFor(() => expect(mocks.query).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'Test', page: 1 })));
+  await waitFor(() => expect(mocks.query).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'Test', page: 1, pageSize: 12 })));
   vi.restoreAllMocks();
 });
 
